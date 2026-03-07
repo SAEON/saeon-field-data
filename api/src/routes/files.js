@@ -1,0 +1,245 @@
+const express = require('express');
+const router  = express.Router();
+const multer  = require('multer');
+const crypto  = require('crypto');
+const fs      = require('fs');
+const path    = require('path');
+const db      = require('../db/queries');
+
+// Multer — store in memory so we can hash before writing to disk
+const upload = multer({ storage: multer.memoryStorage() });
+
+// Detect logger format from file extension + buffer peek for CSV disambiguation
+function detectFileFormat(filename, buffer) {
+  const ext = path.extname(filename).toLowerCase();
+  if (ext === '.xle') return 'solonist_xle';
+  if (ext === '.dat') return 'campbell_toa5';
+  if (ext === '.csv') {
+    // STOM exports have ISO 8601 "Timestamp" column or "# Citation link:" header.
+    // HOBO exports use "Date Time, GMT..." as the datetime column name.
+    const head = buffer.toString('utf8', 0, 512);
+    if (head.includes('# Citation link:') || /(?:^|\n)Timestamp,/i.test(head)) {
+      return 'saeon_stom';
+    }
+    return 'hobo_csv';
+  }
+  return 'generic_csv';
+}
+
+// Build storage path: FILE_STORAGE_PATH/{year}/{month}/{hash}_{originalname}
+function buildStoragePath(fileHash, originalName, uploadedAt) {
+  const year  = uploadedAt.getFullYear().toString();
+  const month = String(uploadedAt.getMonth() + 1).padStart(2, '0');
+  const dir   = path.join(process.env.FILE_STORAGE_PATH, year, month);
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, `${fileHash}_${originalName}`);
+}
+
+// Async background parser — called after response is sent
+async function parseInBackground(fileRecord, visitId) {
+  const format = fileRecord.file_format;
+
+  // Parsers are loaded dynamically. If a parser does not exist yet, skip silently.
+  let parser;
+  try {
+    parser = require(`../parsers/${formatToModule(format)}`);
+  } catch (e) {
+    return; // parser not built yet
+  }
+
+  try {
+    const visit   = await db.getVisitById(visitId);
+    const phenMap = await db.getAllPhenomena();
+
+    // Streaming parsers receive filePath and return { streamName, stream: AsyncGenerator }.
+    // Buffer-based parsers (e.g. solonist XML) receive a Buffer and return { streamName, measurements[], metadata }.
+    // Both are normalised below into a single async-iterable interface.
+    let result;
+    if (parser.streaming) {
+      result = await parser(fileRecord.storage_path);
+    } else {
+      const buffer = fs.readFileSync(fileRecord.storage_path);
+      const parsed = await parser(buffer);
+      result = {
+        streamName: parsed.streamName || format,
+        stream:     (async function* () { yield parsed.measurements; })(),
+        _metadata:  parsed.metadata,
+      };
+    }
+
+    const streamId = await db.getOrCreateStream(visit.station_id, result.streamName);
+
+    // Insert in 20K-row chunks, up to 4 chunks concurrently.
+    const CHUNK_SIZE  = 20000;
+    const CONCURRENCY = 4;
+
+    let chunk   = [];
+    let pending = []; // full chunks waiting to be inserted
+    let dateRangeStart = null;
+    let dateRangeEnd   = null;
+    let recordCount    = 0;
+
+    async function flush(force = false) {
+      while (pending.length >= CONCURRENCY || (force && pending.length > 0)) {
+        const batch = pending.splice(0, CONCURRENCY);
+        await Promise.all(batch.map(c => db.bulkInsertMeasurements(fileRecord.id, c)));
+      }
+    }
+
+    for await (const rowMeasurements of result.stream) {
+      for (const m of rowMeasurements) {
+        const phenomenon = phenMap[m.phenomenon_name];
+        if (!phenomenon) continue;
+
+        if (!m.is_interference) {
+          recordCount++;
+          if (!dateRangeStart || m.measured_at < dateRangeStart) dateRangeStart = m.measured_at;
+          if (!dateRangeEnd   || m.measured_at > dateRangeEnd)   dateRangeEnd   = m.measured_at;
+        }
+
+        chunk.push({
+          streamId,
+          phenomenonId:   phenomenon.id,
+          measuredAt:     m.measured_at,
+          valueNumeric:   m.value_numeric  ?? null,
+          valueText:      m.value_text     ?? null,
+          isInterference: m.is_interference ?? false,
+        });
+        if (chunk.length === CHUNK_SIZE) {
+          pending.push(chunk);
+          chunk = [];
+          await flush();
+        }
+      }
+    }
+    if (chunk.length > 0) pending.push(chunk);
+    await flush(true);
+
+    // Use parser-provided metadata when available (buffer-based parsers); otherwise use tracked values.
+    const meta = result._metadata || {};
+    await db.updateFileParsed(fileRecord.id, {
+      dateRangeStart: meta.date_range_start ?? dateRangeStart,
+      dateRangeEnd:   meta.date_range_end   ?? dateRangeEnd,
+      recordCount:    meta.record_count     ?? recordCount,
+    });
+  } catch (err) {
+    console.error(`Parse failed for file ${fileRecord.id}:`, err.message);
+    await db.updateFileParseError(fileRecord.id, err.message);
+  }
+}
+
+function formatToModule(format) {
+  const map = {
+    hobo_csv:      'hobo',
+    solonist_xle:  'solonist',
+    campbell_toa5: 'campbell_toa5',
+    saeon_stom:    'saeon_stom',
+  };
+  return map[format] || null;
+}
+
+
+// =============================================================
+// POST /api/visits/:id/files
+// =============================================================
+router.post('/:id/files', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded. Use multipart field name: file' });
+    }
+
+    const visitId = parseInt(req.params.id, 10);
+
+    // Verify visit exists
+    const visit = await db.getVisitById(visitId);
+    if (!visit) {
+      return res.status(404).json({ error: 'Visit not found' });
+    }
+
+    // SHA-256 hash of file contents
+    const fileHash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+
+    // Deduplication — if hash exists, return existing record
+    const existing = await db.getFileByHash(fileHash);
+    if (existing) {
+      return res.status(200).json({ ...existing, duplicate: true });
+    }
+
+    // Store file to disk
+    const uploadedAt  = new Date();
+    const storagePath = buildStoragePath(fileHash, req.file.originalname, uploadedAt);
+    fs.writeFileSync(storagePath, req.file.buffer);
+
+    // Insert DB record
+    const fileRecord = await db.createUploadedFile({
+      visitId,
+      originalName:  req.file.originalname,
+      fileHash,
+      fileSizeBytes: req.file.size,
+      storagePath,
+      fileFormat:    detectFileFormat(req.file.originalname, req.file.buffer),
+    });
+
+    // Respond immediately — parse happens in background
+    res.status(201).json(fileRecord);
+
+    // Kick off background parse (does not block response)
+    setImmediate(() => parseInBackground(fileRecord, visitId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =============================================================
+// POST /api/files/:id/reparse
+// Re-triggers background parsing for a file stuck in pending/error.
+// =============================================================
+router.post('/:id/reparse', async (req, res, next) => {
+  try {
+    const fileRecord = await db.getFileById(parseInt(req.params.id, 10));
+    if (!fileRecord) return res.status(404).json({ error: 'File not found' });
+
+    if (fileRecord.parse_status === 'parsed') {
+      return res.status(409).json({ error: 'File already parsed. Delete raw_measurements first if you need to reparse.' });
+    }
+
+    if (!fs.existsSync(fileRecord.storage_path)) {
+      return res.status(404).json({ error: 'File not found on disk — cannot reparse' });
+    }
+
+    // Reset status so background parse will run cleanly
+    await db.resetFileToPending(fileRecord.id);
+
+    res.json({ message: 'Reparse triggered', file_id: fileRecord.id });
+
+    setImmediate(() => parseInBackground(fileRecord, fileRecord.visit_id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =============================================================
+// GET /api/files/:id/download
+// =============================================================
+router.get('/:id/download', async (req, res, next) => {
+  try {
+    const fileRecord = await db.getFileById(parseInt(req.params.id, 10));
+
+    if (!fileRecord) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    if (!fs.existsSync(fileRecord.storage_path)) {
+      return res.status(404).json({ error: 'File not found on disk' });
+    }
+
+    res.setHeader('Content-Disposition', `attachment; filename="${fileRecord.original_name}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    fs.createReadStream(fileRecord.storage_path).pipe(res);
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;
+module.exports.parseInBackground = parseInBackground;
