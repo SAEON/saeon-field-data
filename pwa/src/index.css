@@ -1,0 +1,47 @@
+@import "tailwindcss";
+@import "./styles/tokens.css";
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: var(--font-base);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: var(--font-base);
+  font-weight: 400;
+  color: var(--color-text-dark);
+  background-color: var(--color-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Light mode only — field use requires high outdoor contrast */
+  color-scheme: light;
+}
+
+#root {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Resets ───────────────────────────────────────────────────────────────── */
+button, input, select, textarea {
+  font-family: inherit;
+  font-size: var(--font-base);
+}
+
+button {
+  cursor: pointer;
+}
+
+/* ── Focus ring — keyboard nav only ──────────────────────────────────────── */
+:focus-visible {
+  outline: 3px solid var(--color-blue);
+  outline-offset: 2px;
+}
