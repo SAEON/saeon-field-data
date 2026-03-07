@@ -35,6 +35,26 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// PATCH /api/visits/:id/status
+router.patch('/:id/status', async (req, res, next) => {
+  try {
+    const id     = parseInt(req.params.id, 10);
+    const { status } = req.body;
+
+    const VALID = ['pending', 'submitted', 'approved'];
+    if (!status || !VALID.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${VALID.join(', ')}` });
+    }
+
+    const visit = await db.updateVisitStatus(id, status);
+    if (!visit) return res.status(404).json({ error: 'Visit not found' });
+
+    res.json(visit);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/visits/:id
 router.get('/:id', async (req, res, next) => {
   try {

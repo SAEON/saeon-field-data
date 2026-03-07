@@ -253,16 +253,18 @@ async function bulkInsertMeasurements(fileId, measurements) {
 }
 
 // stub — used in Phase 2
-async function getMeasurementsByStream(streamId, from, to) {
+async function getMeasurementsByStream(streamId, from, to, limit = 10000) {
   const result = await pool.query(
-    `SELECT rm.id, rm.measured_at, rm.value_numeric, rm.value_text, rm.is_interference,
+    `SELECT rm.measured_at, rm.value_numeric, rm.value_text, rm.is_interference,
             p.name AS phenomenon_name, p.unit
      FROM   raw_measurements rm
      JOIN   phenomena p ON p.id = rm.phenomenon_id
      WHERE  rm.stream_id = $1
        AND  rm.measured_at BETWEEN $2 AND $3
-     ORDER  BY rm.measured_at`,
-    [streamId, from, to]
+       AND  rm.is_interference = false
+     ORDER  BY rm.measured_at
+     LIMIT  $4`,
+    [streamId, from, to, limit]
   );
   return result.rows;
 }

@@ -24,12 +24,14 @@ app.get('/health/db', async (req, res, next) => {
   }
 });
 
-// Routes — added as each is built
-app.use('/api/stations', require('./routes/stations'));
-app.use('/api/visits',   require('./routes/visits'));
-app.use('/api/visits',   require('./routes/files'));    // POST /api/visits/:id/files
-app.use('/api/visits',   require('./routes/readings')); // POST /api/visits/:id/readings
-app.use('/api/files',    require('./routes/files'));   // GET  /api/files/:id/download
+// Routes
+app.use('/api/stations',  require('./routes/stations'));
+app.use('/api/visits',    require('./routes/visits'));
+app.use('/api/visits',    require('./routes/files'));     // POST /api/visits/:id/files
+app.use('/api/visits',    require('./routes/readings'));  // POST /api/visits/:id/readings
+app.use('/api/files',     require('./routes/files'));     // GET /api/files/:id/download, POST /api/files/:id/reparse
+app.use('/api/streams',   require('./routes/streams'));   // GET /api/streams/:id/measurements
+app.use('/api/dashboard', require('./routes/dashboard')); // GET /api/dashboard/*
 
 // Error handler — must be last
 app.use(require('./middleware/error'));

@@ -33,4 +33,19 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
+// GET /api/stations/:id/coverage
+// Data date coverage per stream for a station.
+router.get('/:id/coverage', async (req, res, next) => {
+  try {
+    const id       = parseInt(req.params.id, 10);
+    const station  = await db.getStationById(id);
+    if (!station) return res.status(404).json({ error: 'Station not found' });
+
+    const coverage = await db.getStationDataCoverage(id);
+    res.json({ station_id: id, coverage });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
