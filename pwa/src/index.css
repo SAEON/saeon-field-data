@@ -45,3 +45,292 @@ button {
   outline: 3px solid var(--color-blue);
   outline-offset: 2px;
 }
+
+/* =============================================================================
+   COMPONENT CLASSES
+   Named CSS classes for patterns that need pseudo-selectors, data-attribute
+   states, or are too complex/verbose for Tailwind utilities alone.
+   Inline style is reserved for runtime-computed values only (e.g. widths).
+============================================================================= */
+
+/* ── Family colour context ────────────────────────────────────────────────── */
+/* Set --fc-* vars on a parent element via data-family="rainfall|groundwater|met".
+   Children (.family-icon, .family-badge, .filter-chip) inherit and consume them. */
+[data-family="rainfall"] {
+  --fc-bg:     var(--color-blue-light);
+  --fc-text:   var(--color-blue-dark);
+  --fc-border: var(--color-blue);
+}
+[data-family="groundwater"] {
+  --fc-bg:     var(--color-teal-light);
+  --fc-text:   var(--color-teal);
+  --fc-border: var(--color-teal);
+}
+[data-family="met"] {
+  --fc-bg:     var(--color-success-light);
+  --fc-text:   var(--color-success);
+  --fc-border: var(--color-success);
+}
+
+/* ── Station card ─────────────────────────────────────────────────────────── */
+.station-card {
+  background: white;
+  border: 1.5px solid var(--color-surface-dark);
+  border-radius: 14px;
+  padding: 12px 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(13, 27, 46, 0.04);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.station-card[data-selected="true"] {
+  background: var(--color-blue-light);
+  border: 2px solid var(--color-blue);
+  box-shadow: 0 0 0 3px rgba(59, 125, 216, 0.12);
+}
+
+/* ── Family icon ──────────────────────────────────────────────────────────── */
+.family-icon {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: var(--fc-bg, var(--color-surface));
+  border: 1.5px solid color-mix(in srgb, var(--fc-border, var(--color-border)) 30%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+/* ── Family badge ─────────────────────────────────────────────────────────── */
+.family-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 5px;
+  background: var(--fc-bg, var(--color-surface));
+  color: var(--fc-text, var(--color-text-med));
+  border: 1px solid color-mix(in srgb, var(--fc-border, var(--color-border)) 40%, transparent);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ── Filter chip ──────────────────────────────────────────────────────────── */
+.filter-chip {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 20px;
+  border: 1.5px solid var(--color-border);
+  background: white;
+  color: var(--color-text-light);
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s;
+}
+.filter-chip[data-family="all"][data-active="true"] {
+  background: var(--color-blue);
+  border-color: var(--color-blue);
+  color: white;
+}
+.filter-chip[data-active="true"]:not([data-family="all"]) {
+  background: var(--fc-bg);
+  border-color: var(--fc-border);
+  color: var(--fc-text);
+}
+
+/* ── Search input ─────────────────────────────────────────────────────────── */
+.search-input {
+  width: 100%;
+  height: 48px;
+  border-radius: 12px;
+  border: 1.5px solid var(--color-border);
+  background: white;
+  padding: 0 40px 0 42px;
+  font-size: 15px;
+  color: var(--color-text-dark);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.search-input:focus {
+  border: 2px solid var(--color-blue);
+  box-shadow: 0 0 0 3px rgba(59, 125, 216, 0.1);
+}
+
+/* ── Stat tile (summary strip inside navy header) ─────────────────────────── */
+.stat-tile {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ── Nav icon button (bell, logo frame on Screen 1) ───────────────────────── */
+.nav-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.nav-icon--logo {
+  background: rgba(59, 125, 216, 0.18);
+  border-color: rgba(59, 125, 216, 0.35);
+  font-size: 18px;
+}
+
+/* ── Technician avatar ────────────────────────────────────────────────────── */
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--color-blue), #1A5CAD);
+  border: 1px solid rgba(59, 125, 216, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: white;
+  flex-shrink: 0;
+}
+
+/* ── Form card ────────────────────────────────────────────────────────────── */
+.form-card {
+  background: white;
+  border-radius: 14px;
+  border: 1.5px solid var(--color-surface-dark);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.form-card--alert {
+  border-color: color-mix(in srgb, var(--color-error) 40%, transparent);
+}
+
+/* ── Field input (date, time) ─────────────────────────────────────────────── */
+.field-input {
+  width: 100%;
+  height: 44px;
+  border-radius: 10px;
+  border: 1.5px solid var(--color-border);
+  background: white;
+  padding: 0 12px;
+  font-size: 14px;
+  color: var(--color-text-dark);
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.15s, background 0.15s;
+}
+.field-input--active {
+  border: 2px solid var(--color-blue);
+  background: var(--color-blue-light);
+}
+
+/* ── Note chip (prompt option — multi-select) ─────────────────────────────── */
+.note-chip {
+  padding: 6px 11px;
+  border-radius: 20px;
+  border: 1.5px solid var(--color-surface-dark);
+  background: #F8FAFC;
+  color: var(--color-text-med);
+  font-size: 11px;
+  font-weight: 400;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+.note-chip[data-selected="true"] {
+  border-color: var(--color-blue);
+  background: var(--color-blue-light);
+  color: var(--color-blue-dark);
+  font-weight: 600;
+}
+.note-chip[data-danger="true"][data-selected="true"] {
+  border-color: var(--color-error);
+  background: var(--color-error-light);
+  color: var(--color-error);
+  font-weight: 600;
+}
+
+/* ── Notes textarea ───────────────────────────────────────────────────────── */
+.notes-textarea {
+  width: 100%;
+  border-radius: 10px;
+  border: 1.5px solid var(--color-surface-dark);
+  background: #F8FAFC;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--color-text-dark);
+  outline: none;
+  box-sizing: border-box;
+  font-family: inherit;
+  resize: none;
+  line-height: 1.5;
+  transition: border-color 0.15s, background 0.15s;
+}
+.notes-textarea:focus {
+  border: 2px solid var(--color-blue);
+  background: #FAFCFF;
+}
+
+/* ── Back confirmation bottom sheet ───────────────────────────────────────── */
+.back-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(13, 27, 46, 0.55);
+  display: flex;
+  align-items: flex-end;
+  z-index: 100;
+}
+.back-sheet {
+  background: white;
+  width: 100%;
+  max-width: var(--max-width);
+  margin-inline: auto;
+  border-radius: 24px 24px 0 0;
+  padding: 24px 20px 36px;
+}
+
+/* ── CTA disabled state ───────────────────────────────────────────────────── */
+.cta-btn:disabled {
+  background: var(--color-border);
+  color: var(--color-text-light);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ── Primary CTA button ───────────────────────────────────────────────────── */
+.cta-btn {
+  width: 100%;
+  height: var(--touch-target);
+  background: var(--color-blue);
+  color: white;
+  border: none;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 20px rgba(59, 125, 216, 0.4);
+  transition: opacity 0.15s;
+}
+.cta-btn:active {
+  opacity: 0.85;
+}
