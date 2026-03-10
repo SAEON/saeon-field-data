@@ -4,13 +4,52 @@
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, options);
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(body || `HTTP ${res.status}`);
+  const method = (options.method || 'GET').toUpperCase();
+  const timeoutMs = options.timeoutMs ?? (method === 'POST' ? 30000 : 12000);
+  const controller = new AbortController();
+  let callerAborted = false;
+
+  function forwardAbort() {
+    callerAborted = true;
+    controller.abort();
   }
-  if (res.status === 204) return null;
-  return res.json();
+
+  if (options.signal) {
+    if (options.signal.aborted) {
+      callerAborted = true;
+      controller.abort();
+    } else {
+      options.signal.addEventListener('abort', forwardAbort, { once: true });
+    }
+  }
+
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(`${BASE}${path}`, { ...options, signal: controller.signal });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(body || `HTTP ${res.status}`);
+    }
+    if (res.status === 204) return null;
+    return res.json();
+  } catch (err) {
+    if (callerAborted) throw err;
+
+    if (err?.name === 'AbortError' || err instanceof TypeError) {
+      const wrapped = new Error(!navigator.onLine ? 'Offline' : 'Request timed out');
+      wrapped.offline = !navigator.onLine;
+      wrapped.timeout = navigator.onLine;
+      throw wrapped;
+    }
+
+    throw err;
+  } finally {
+    window.clearTimeout(timeoutId);
+    if (options.signal) {
+      options.signal.removeEventListener('abort', forwardAbort);
+    }
+  }
 }
 
 // ── Stations ───────────────────────────────────────────────────────────────

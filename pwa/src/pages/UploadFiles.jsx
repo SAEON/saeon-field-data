@@ -43,13 +43,36 @@ export default function UploadFiles({ visitId, files, setFiles, dataFamily }) {
   const [dragging,      setDragging]      = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null); // localId awaiting delete confirm
   const [deleting,      setDeleting]      = useState(false);
-  const fileInputRef = useRef(null);
-  const pollTimers   = useRef({});   // localId → timeout handle
+  const fileInputRef   = useRef(null);
+  const pollTimers     = useRef({});   // localId → timeout handle
+  const onlineTimer    = useRef(null);
 
   // Clear all poll timers on unmount
   useEffect(() => {
-    return () => Object.values(pollTimers.current).forEach(clearTimeout);
+    return () => {
+      Object.values(pollTimers.current).forEach(clearTimeout);
+      clearTimeout(onlineTimer.current);
+    };
   }, []);
+
+  // Auto-retry queued files (current session only — need raw file) on reconnect
+  useEffect(() => {
+    function handleOnline() {
+      clearTimeout(onlineTimer.current);
+      onlineTimer.current = setTimeout(() => {
+        setFiles(prev => {
+          prev.filter(f => f.parseState === 'queued' && f.raw).forEach(f => {
+            const ac = new AbortController();
+            patchFile(f.localId, { parseState: 'uploading', abortController: ac });
+            doUpload(f.localId, f.raw, ac);
+          });
+          return prev;
+        });
+      }, 2500);
+    }
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Start polling for any files already in 'pending' state (handles page-refresh resume)
   useEffect(() => {
@@ -59,8 +82,6 @@ export default function UploadFiles({ visitId, files, setFiles, dataFamily }) {
       }
     });
   }, [files]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const online = navigator.onLine;
 
   function patchFile(localId, patch) {
     setFiles(prev => prev.map(f => f.localId === localId ? { ...f, ...patch } : f));
@@ -189,16 +210,6 @@ export default function UploadFiles({ visitId, files, setFiles, dataFamily }) {
 
   return (
     <div className="flex flex-col flex-1">
-
-      {/* Offline banner */}
-      {!online && (
-        <div
-          className="bg-warning-light text-warning text-[12px] font-medium px-5 py-2.5 flex items-center gap-2 shrink-0"
-          style={{ borderBottom: '1px solid rgba(230,81,0,0.2)' }}
-        >
-          ⚡ Offline — files will upload when you reconnect
-        </div>
-      )}
 
       {/* ── Scrollable body ────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-4 pt-4">

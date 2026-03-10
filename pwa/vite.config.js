@@ -11,16 +11,20 @@ export default defineConfig({
       registerType: 'autoUpdate',
       devOptions: { enabled: true },
       manifest: {
+        id: '/',
         name: 'SAEON Field Data System',
         short_name: 'SAEON FDS',
         description: 'Field technician upload interface for SAEON monitoring stations',
         theme_color: '#0D1B2E',
         background_color: '#F4F6F8',
         display: 'standalone',
+        orientation: 'portrait',
+        scope: '/',
         start_url: '/',
         icons: [
-          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png'               },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png'               },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {

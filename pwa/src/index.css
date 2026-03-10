@@ -189,9 +189,10 @@ button {
   flex-shrink: 0;
 }
 .nav-icon--logo {
-  background: rgba(59, 125, 216, 0.18);
-  border-color: rgba(59, 125, 216, 0.35);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.22);
   font-size: 18px;
+  color: white;
 }
 
 /* ── Technician avatar ────────────────────────────────────────────────────── */
@@ -579,3 +580,173 @@ button {
 /* Overdue filter chip */
 .filter-chip[data-family="overdue"] { color: var(--color-warning); border-color: var(--color-warning); }
 .filter-chip[data-family="overdue"][data-active="true"] { background: var(--color-warning); color: white; border-color: var(--color-warning); }
+
+/* =============================================================================
+   RESPONSIVE — SIDEBAR BRAND (hidden on mobile, visible on desktop)
+============================================================================= */
+
+.sidebar-brand {
+  display: none;
+}
+
+/* =============================================================================
+   RESPONSIVE — 375px MOBILE (iPhone SE baseline)
+   Ensure no horizontal overflow; tighten paddings on narrow screens.
+============================================================================= */
+
+@media (max-width: 390px) {
+  /* Filter chips: smaller padding so more fit before scroll */
+  .filter-chip {
+    padding: 0 9px;
+    font-size: 10.5px;
+  }
+
+  /* Form cards: tighter horizontal padding */
+  .form-card {
+    padding: 12px;
+  }
+
+  /* Station cards: tighter */
+  .station-card {
+    padding: 10px 12px;
+  }
+}
+
+/* =============================================================================
+   RESPONSIVE — TABLET  (640px+)
+   Two-column station grid; wider drop zone.
+============================================================================= */
+
+@media (min-width: 640px) {
+  /* Station list becomes a 2-col grid */
+  .station-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  /* Spacer at end of list spans both columns */
+  .station-list > :last-child {
+    grid-column: 1 / -1;
+  }
+
+  .drop-zone {
+    padding: 40px 32px;
+  }
+
+  /* Form cards: more breathing room */
+  .form-card {
+    padding: 18px;
+  }
+}
+
+/* =============================================================================
+   RESPONSIVE — DESKTOP  (1024px+)
+   Left sidebar nav + wider content pane.
+============================================================================= */
+
+@media (min-width: 1024px) {
+
+  /* ── Sidebar brand ───────────────────────────────── */
+  .sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 20px 16px 16px;
+    border-bottom: 1px solid var(--color-surface-dark);
+    margin-bottom: 8px;
+    flex-shrink: 0;
+  }
+
+  /* ── Bottom nav → left sidebar ───────────────────── */
+  .bottom-tab-bar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: var(--sidebar-width);
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    border-top: none;
+    border-right: 1.5px solid var(--color-surface-dark);
+    padding-bottom: 0;
+    overflow-y: auto;
+    gap: 0;
+    z-index: 50;
+    box-shadow: 2px 0 12px rgba(13, 27, 46, 0.06);
+  }
+
+  .tab-btn {
+    flex-direction: row;
+    justify-content: flex-start;
+    padding: 13px 20px;
+    height: auto;
+    gap: 12px;
+    font-size: 13px;
+    border-radius: 0;
+    border-bottom: none;
+  }
+  .tab-btn[data-active="true"] {
+    background: var(--color-blue-light);
+  }
+
+  .tab-icon {
+    font-size: 18px;
+    width: 22px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  /* ── Main layout: offset content by sidebar width ── */
+  .app-layout {
+    padding-left: var(--sidebar-width);
+  }
+
+  /* ── Bottom sheets: centered dialog on desktop ───── */
+  .back-sheet-overlay {
+    align-items: center;
+    justify-content: center;
+  }
+  .back-sheet {
+    border-radius: 20px;
+    max-width: 460px;
+    margin-inline: auto;
+    margin-bottom: 0;
+  }
+
+  /* ── Drop zone: more spacious on desktop ─────────── */
+  .drop-zone {
+    padding: 48px 40px;
+    cursor: pointer;
+  }
+  .drop-zone:hover {
+    border-color: var(--color-blue);
+    background: var(--color-blue-light);
+  }
+
+  /* ── Search input: larger at desktop ─────────────── */
+  .search-input {
+    height: 44px;
+    font-size: 14px;
+  }
+
+  /* ── CTA button: slightly tighter on desktop ──────── */
+  .cta-btn {
+    height: var(--touch-target);
+    font-size: 14px;
+  }
+
+  /* ── Status dot: slightly larger for mouse use ────── */
+  .status-dot {
+    width: 10px;
+    height: 10px;
+  }
+
+  /* ── History visit list: 2-col grid on desktop ────── */
+  .history-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-content: start;
+  }
+}

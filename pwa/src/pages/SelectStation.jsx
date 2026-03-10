@@ -91,7 +91,6 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="nav-icon">🔔</div>
           <div className="avatar">SJ</div>
         </div>
       </header>
@@ -189,7 +188,7 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
       </div>
 
       {/* ── Station list ──────────────────────────────────────────── */}
-      <div className="flex-1 px-4 flex flex-col gap-2">
+      <div className="station-list flex-1 px-4 flex flex-col gap-2">
         {filtered.map(s => (
           <div
             key={s.id}
@@ -207,9 +206,6 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
                 {s.region && <span>{s.region}</span>}
                 {s.region && <span>·</span>}
                 <span>Last: {lastVisitLabel(s.last_visited_at)}</span>
-              </div>
-              <div className="family-badge mt-1">
-                {FAMILY_ICONS[s.data_family]} {FAMILY_LABELS[s.data_family]}
               </div>
             </div>
 

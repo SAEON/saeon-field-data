@@ -1,8 +1,10 @@
 // ManualReadings — family-specific site readings form.
 // Each field has its own Save button; state is local to each field component.
 // Existing readings are loaded from the server on mount to pre-populate saved state.
+// Offline: readings are queued in IndexedDB and flushed when reconnected.
 import { useState, useEffect, useRef } from 'react';
 import { createReading, getVisit } from '../services/api.js';
+import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
 
 const REQUIRED_TYPES = {
   rainfall:    ['gauge_condition', 'overall_site_condition'],
@@ -16,15 +18,20 @@ function SaveBtn({ state, hasValue, onClick }) {
   return (
     <button
       onClick={onClick}
-      disabled={!hasValue || state === 'saving' || state === 'saved'}
+      disabled={!hasValue || state === 'saving' || state === 'saved' || state === 'queued'}
       className={`px-3 h-8 rounded-lg text-[11px] font-semibold border-none shrink-0 transition-colors ${
         state === 'saved'  ? 'bg-success-light text-success' :
         state === 'error'  ? 'bg-error-light text-error'     :
+        state === 'queued' ? 'bg-surface-dark text-blue'     :
         hasValue           ? 'bg-navy text-white'             :
         'bg-surface-dark text-text-light'
       }`}
     >
-      {state === 'saving' ? '…' : state === 'saved' ? '✓ Saved' : state === 'error' ? 'Retry' : 'Save'}
+      {state === 'saving' ? '…'
+        : state === 'saved'  ? '✓ Saved'
+        : state === 'error'  ? 'Retry'
+        : state === 'queued' ? '📶 Queued'
+        : 'Save'}
     </button>
   );
 }
@@ -42,8 +49,8 @@ function ChipsField({ readingType, label, required, hint, options, existingReadi
     try {
       await onSave({ reading_type: readingType, value_text: value, recorded_at: new Date().toISOString() });
       setSaveState('saved');
-    } catch {
-      setSaveState('error');
+    } catch (err) {
+      setSaveState(err?.offline ? 'queued' : 'error');
     }
   }
 
@@ -89,8 +96,8 @@ function ToggleField({ readingType, label, required, existingReading, onSave }) 
     try {
       await onSave({ reading_type: readingType, value_text: value ? 'Yes' : 'No', recorded_at: new Date().toISOString() });
       setSaveState('saved');
-    } catch {
-      setSaveState('error');
+    } catch (err) {
+      setSaveState(err?.offline ? 'queued' : 'error');
     }
   }
 
@@ -141,8 +148,8 @@ function NumberField({ readingType, label, required, hint, unit, placeholder, st
     try {
       await onSave({ reading_type: readingType, value_numeric: parseFloat(value), unit: unit || null, recorded_at: new Date().toISOString() });
       setSaveState('saved');
-    } catch {
-      setSaveState('error');
+    } catch (err) {
+      setSaveState(err?.offline ? 'queued' : 'error');
     }
   }
 
@@ -191,8 +198,8 @@ function TimeField({ readingType, label, required, hint, existingReading, onSave
     try {
       await onSave({ reading_type: readingType, value_text: value, recorded_at: new Date().toISOString() });
       setSaveState('saved');
-    } catch {
-      setSaveState('error');
+    } catch (err) {
+      setSaveState(err?.offline ? 'queued' : 'error');
     }
   }
 
@@ -232,8 +239,8 @@ function DateTimeField({ readingType, label, hint, existingReading, onSave }) {
     try {
       await onSave({ reading_type: readingType, value_text: value, recorded_at: new Date().toISOString() });
       setSaveState('saved');
-    } catch {
-      setSaveState('error');
+    } catch (err) {
+      setSaveState(err?.offline ? 'queued' : 'error');
     }
   }
 
@@ -271,8 +278,8 @@ function WindVaneField({ existingReading, onSave }) {
     try {
       await onSave({ reading_type: 'wind_vane', value_text: value, recorded_at: new Date().toISOString() });
       setSaveState('saved');
-    } catch {
-      setSaveState('error');
+    } catch (err) {
+      setSaveState(err?.offline ? 'queued' : 'error');
     }
   }
 
@@ -319,8 +326,8 @@ function SiteConditionSection({ existingReading, onSave }) {
     try {
       await onSave({ reading_type: 'overall_site_condition', value_text: value, recorded_at: new Date().toISOString() });
       setSaveState('saved');
-    } catch {
-      setSaveState('error');
+    } catch (err) {
+      setSaveState(err?.offline ? 'queued' : 'error');
     }
   }
 
@@ -452,9 +459,13 @@ const FAMILY_LABEL = { rainfall: 'Rainfall', groundwater: 'Groundwater', met: 'M
 const FAMILY_ICON  = { rainfall: '🌧', groundwater: '💧', met: '🌤' };
 
 export default function ManualReadings({ visitId, dataFamily, onReadingsSaved }) {
-  const [saved,  setSaved]  = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const calledDone = useRef(false);
+  const [saved,    setSaved]    = useState([]);
+  const [loaded,   setLoaded]   = useState(false);
+  const [formKey,  setFormKey]  = useState(0);   // increment to remount fields after queue flush
+  const calledDone  = useRef(false);
+  const onlineTimer = useRef(null);
+
+  const { enqueue, flushQueue, failedCount } = useOfflineQueue(visitId);
 
   // Load existing readings so fields pre-populate as ✓ Saved
   useEffect(() => {
@@ -476,10 +487,44 @@ export default function ManualReadings({ visitId, dataFamily, onReadingsSaved })
     }
   }, [saved, dataFamily, onReadingsSaved]);
 
+  // Flush queued readings when reconnected (2.5s debounce for network stabilisation)
+  useEffect(() => {
+    if (!visitId) return;
+    function handleOnline() {
+      clearTimeout(onlineTimer.current);
+      onlineTimer.current = setTimeout(async () => {
+        const flushed = await flushQueue();
+        if (flushed.length > 0) {
+          setSaved(prev => [...prev, ...flushed]);
+          setFormKey(k => k + 1); // remount fields — they re-read existingReading as saved
+        }
+      }, 2500);
+    }
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      clearTimeout(onlineTimer.current);
+    };
+  }, [visitId, flushQueue]);
+
   async function handleSave(reading) {
+    if (!navigator.onLine) {
+      await enqueue(reading);
+      const err = new Error('offline');
+      err.offline = true;
+      throw err;
+    }
     const result = await createReading(visitId, reading);
     setSaved(prev => [...prev, result]);
     return result;
+  }
+
+  async function handleRetryFailed() {
+    const flushed = await flushQueue();
+    if (flushed.length > 0) {
+      setSaved(prev => [...prev, ...flushed]);
+      setFormKey(k => k + 1);
+    }
   }
 
   if (!loaded) {
@@ -494,22 +539,41 @@ export default function ManualReadings({ visitId, dataFamily, onReadingsSaved })
     <div className="flex flex-col flex-1" data-family={dataFamily}>
       <div className="flex-1 overflow-y-auto px-4 pt-3 pb-6">
 
+        {/* Failed-sync warning */}
+        {failedCount > 0 && (
+          <div
+            className="flex items-center justify-between bg-error-light rounded-xl px-3 py-2.5 mb-3"
+            style={{ border: '1px solid rgba(183,28,28,0.2)' }}
+          >
+            <span className="text-[12px] text-error font-medium">
+              ⚠ {failedCount} reading{failedCount !== 1 ? 's' : ''} failed to sync after 3 attempts.
+            </span>
+            <button
+              onClick={handleRetryFailed}
+              className="text-[11px] font-semibold text-error bg-transparent border-none ml-3 shrink-0"
+            >
+              Retry →
+            </button>
+          </div>
+        )}
+
         {/* Family context strip */}
         <div className="flex items-center gap-1.5 pb-3 text-[12px] font-semibold" style={{ color: 'var(--fc-text)' }}>
           <span>{FAMILY_ICON[dataFamily]}</span>
           {FAMILY_LABEL[dataFamily]} station — record all readings below
         </div>
 
-        {/* Family-specific fields */}
-        {dataFamily === 'rainfall'    && <RainfallForm    saved={saved} onSave={handleSave} />}
-        {dataFamily === 'groundwater' && <GroundwaterForm saved={saved} onSave={handleSave} />}
-        {dataFamily === 'met'         && <MetForm         saved={saved} onSave={handleSave} />}
+        {/* Family-specific fields + shared section — keyed so they remount after queue flush */}
+        <div key={formKey}>
+          {dataFamily === 'rainfall'    && <RainfallForm    saved={saved} onSave={handleSave} />}
+          {dataFamily === 'groundwater' && <GroundwaterForm saved={saved} onSave={handleSave} />}
+          {dataFamily === 'met'         && <MetForm         saved={saved} onSave={handleSave} />}
 
-        {/* Shared: overall site condition */}
-        <SiteConditionSection
-          existingReading={saved.find(r => r.reading_type === 'overall_site_condition')}
-          onSave={handleSave}
-        />
+          <SiteConditionSection
+            existingReading={saved.find(r => r.reading_type === 'overall_site_condition')}
+            onSave={handleSave}
+          />
+        </div>
 
       </div>
     </div>

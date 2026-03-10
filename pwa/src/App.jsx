@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { loadDraft, saveDraft, clearDraft } from './hooks/useDraftVisit.js';
-import { createVisit, submitVisit, updateVisit } from './services/api.js';
+import { createVisit, submitVisit } from './services/api.js';
 import SelectStation  from './pages/SelectStation.jsx';
 import VisitDetails   from './pages/VisitDetails.jsx';
 import UploadFiles    from './pages/UploadFiles.jsx';
@@ -8,19 +8,32 @@ import ManualReadings from './pages/ManualReadings.jsx';
 import QueueTab       from './pages/QueueTab.jsx';
 import HistoryTab     from './pages/HistoryTab.jsx';
 
+function isStandaloneDisplayMode() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+
 // ── Bottom Tab Bar ─────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'stations', icon: '🏔', label: 'Stations' },
-  { id: 'visit',    icon: '📋', label: 'Visit'    },
-  { id: 'queue',    icon: '📶', label: 'Queue'    },
-  { id: 'history',  icon: '📁', label: 'History'  },
+  { id: 'stations', icon: '🧭', label: 'Stations' },
+  { id: 'visit',    icon: '🗒️',  label: 'Visit'    },
+  { id: 'queue',    icon: '🗂️',  label: 'Queue'    },
+  { id: 'history',  icon: '📜', label: 'History'  },
 ];
 
-function BottomNav({ activeTab, setActiveTab, visitBadge, queueBadge }) {
+function BottomNav({ activeTab, setActiveTab, visitBadge, queueBadge, queueErrors }) {
   return (
     <nav className="bottom-tab-bar shrink-0">
+      {/* Visible only on desktop — hidden via CSS on mobile */}
+      <div className="sidebar-brand">
+        <span style={{ fontSize: '22px' }}>🛰</span>
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--color-navy)' }}>SAEON FDS</div>
+          <div style={{ fontSize: '10px', color: 'var(--color-text-light)' }}>Field Data System</div>
+        </div>
+      </div>
       {TABS.map(tab => {
-        const badge = tab.id === 'visit' ? visitBadge : tab.id === 'queue' ? queueBadge : 0;
+        const badge    = tab.id === 'visit' ? visitBadge : tab.id === 'queue' ? queueBadge : 0;
+        const hasError = tab.id === 'queue' && queueErrors > 0;
         return (
           <button
             key={tab.id}
@@ -30,7 +43,12 @@ function BottomNav({ activeTab, setActiveTab, visitBadge, queueBadge }) {
           >
             <span className="tab-icon">
               {tab.icon}
-              {badge > 0 && <span className="tab-badge">{badge}</span>}
+              {badge > 0 && (
+                <span
+                  className="tab-badge"
+                  style={hasError ? { background: 'var(--color-error)' } : undefined}
+                >{badge}</span>
+              )}
             </span>
             <span>{tab.label}</span>
           </button>
@@ -200,6 +218,63 @@ export default function App() {
   const [showSubmit,   setShowSubmit]   = useState(false);
   const [submitting,   setSubmitting]   = useState(false);
   const [readingsDone, setReadingsDone] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [installDismissed, setInstallDismissed] = useState(false);
+  const [isInstalled, setIsInstalled] = useState(isStandaloneDisplayMode());
+
+  // Offline indicator
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    function handleOnline()  { setIsOffline(false); }
+    function handleOffline() { setIsOffline(true);  }
+    window.addEventListener('online',  handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online',  handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleBeforeInstallPrompt(event) {
+      event.preventDefault();
+      setInstallPrompt(event);
+    }
+
+    function handleInstalled() {
+      setIsInstalled(true);
+      setInstallPrompt(null);
+      setInstallDismissed(true);
+    }
+
+    function handleDisplayModeChange() {
+      setIsInstalled(isStandaloneDisplayMode());
+    }
+
+    const media = window.matchMedia('(display-mode: standalone)');
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleInstalled);
+    media.addEventListener('change', handleDisplayModeChange);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleInstalled);
+      media.removeEventListener('change', handleDisplayModeChange);
+    };
+  }, []);
+
+  async function handleInstallApp() {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setIsInstalled(true);
+    }
+    setInstallPrompt(null);
+    setInstallDismissed(true);
+  }
 
   // Save timer for debounced IDB writes
   const saveTimer = useRef(null);
@@ -293,9 +368,11 @@ export default function App() {
   }
 
   // ── Derived ────────────────────────────────────────────────────────────
-  const hasFiles    = visitFiles.some(f => f.dbId);
-  const queueBadge  = visitFiles.filter(f => ['uploading', 'pending'].includes(f.parseState)).length;
-  const visitBadge  = draftVisit ? 1 : 0;  // dot indicator when draft exists
+  const hasFiles      = visitFiles.some(f => f.dbId);
+  const queueActive   = visitFiles.filter(f => ['uploading', 'pending', 'queued'].includes(f.parseState)).length;
+  const queueErrors   = visitFiles.filter(f => f.parseState === 'error').length;
+  const queueBadge    = queueActive + queueErrors;  // drives nav badge count
+  const visitBadge    = draftVisit ? 1 : 0;  // dot indicator when draft exists
 
   // Section completion
   const detailsDone = !!formState?.visitDate;
@@ -313,7 +390,47 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col min-h-dvh">
+    <div className="flex flex-col min-h-dvh app-layout">
+
+      {/* ── Global offline banner ────────────────────────────────────── */}
+      {isOffline && (
+        <div
+          className="bg-warning-light text-warning text-[12px] font-medium px-5 py-2 flex items-center gap-2 shrink-0 z-50"
+          style={{ borderBottom: '1px solid rgba(230,81,0,0.2)' }}
+        >
+          Offline — changes will sync when you reconnect
+        </div>
+      )}
+
+      {!isInstalled && !installDismissed && installPrompt && (
+        <div
+          className="px-4 py-3 shrink-0"
+          style={{ background: '#EAF3FF', borderBottom: '1px solid rgba(59,125,216,0.18)' }}
+        >
+          <div className="max-w-[var(--max-width)] mx-auto flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[12px] font-semibold text-blue-dark">Install SAEON FDS</div>
+              <div className="text-[11px] text-text-light">
+                Add the app to this device for faster launch and a full-screen field workflow.
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setInstallDismissed(true)}
+                className="h-9 px-3 rounded-lg border border-border bg-white text-text-med text-[12px] font-semibold"
+              >
+                Later
+              </button>
+              <button
+                onClick={handleInstallApp}
+                className="h-9 px-3 rounded-lg border-none bg-navy text-white text-[12px] font-semibold"
+              >
+                Install
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Stations tab ────────────────────────────────────────────── */}
       {activeTab === 'stations' && (
@@ -380,7 +497,7 @@ export default function App() {
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
-              <div className="text-[40px]">📋</div>
+              <div className="text-[40px]">🗒️</div>
               <div className="text-[15px] font-semibold text-text-dark">No active visit</div>
               <div className="text-[13px] text-text-light leading-relaxed">
                 Go to Stations, select a station, and tap "Start visit" to begin.
@@ -403,6 +520,7 @@ export default function App() {
               files={visitFiles}
               setFiles={setVisitFiles}
               onGoToFiles={() => { setActiveTab('visit'); setVisitSection('files'); }}
+              station={draftVisit?.station}
             />
           </main>
         </div>
@@ -424,6 +542,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         visitBadge={visitBadge}
         queueBadge={queueBadge}
+        queueErrors={queueErrors}
       />
 
       {/* ── Sheets ──────────────────────────────────────────────────── */}

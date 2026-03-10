@@ -95,8 +95,12 @@ async function getAllVisits({ stationId, status, technicianId } = {}) {
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const result = await pool.query(
     `SELECT fv.id, fv.visited_at, fv.submitted_at, fv.status, fv.notes,
-            s.id AS station_id, s.display_name AS station_display_name,
-            u.id AS technician_id, u.full_name AS technician_name
+            s.id AS station_id, s.display_name AS station_display_name, s.data_family,
+            u.id AS technician_id, u.full_name AS technician_name,
+            (SELECT COUNT(*) FROM uploaded_files  uf WHERE uf.visit_id = fv.id)::int  AS file_count,
+            (SELECT COUNT(*) FROM uploaded_files  uf WHERE uf.visit_id = fv.id AND uf.parse_status = 'error')::int AS file_error_count,
+            (SELECT COUNT(*) FROM manual_readings mr WHERE mr.visit_id = fv.id)::int  AS reading_count,
+            (SELECT mr.value_text FROM manual_readings mr WHERE mr.visit_id = fv.id AND mr.reading_type = 'overall_site_condition' LIMIT 1) AS site_condition
      FROM   field_visits fv
      JOIN   stations s ON s.id = fv.station_id
      JOIN   users    u ON u.id = fv.technician_id
@@ -111,7 +115,7 @@ async function getAllVisits({ stationId, status, technicianId } = {}) {
 async function getVisitById(id) {
   const result = await pool.query(
     `SELECT fv.id, fv.visited_at, fv.submitted_at, fv.status, fv.notes,
-            s.id AS station_id, s.display_name AS station_display_name,
+            s.id AS station_id, s.display_name AS station_display_name, s.data_family,
             u.id AS technician_id, u.full_name AS technician_name
      FROM   field_visits fv
      JOIN   stations s ON s.id = fv.station_id

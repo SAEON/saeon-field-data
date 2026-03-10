@@ -55,9 +55,19 @@
   --font-xl:     22px;
 
   /* ── Component dimensions ────────────────────────── */
-  --radius:       8px;
-  --touch-target: 52px;
-  --app-bar-h:    56px;
-  --progress-h:   4px;
-  --max-width:    480px;
+  --radius:        8px;
+  --touch-target:  52px;
+  --app-bar-h:     56px;
+  --progress-h:    4px;
+  --max-width:     480px;
+  --sidebar-width: 0px;   /* overridden on desktop */
+}
+
+/* ── Responsive token overrides ──────────────────── */
+@media (min-width: 1024px) {
+  :root {
+    --max-width:     700px;
+    --touch-target:  44px;
+    --sidebar-width: 220px;
+  }
 }
