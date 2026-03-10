@@ -4,6 +4,15 @@ import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  base: '/fds/',
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),
@@ -11,7 +20,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       devOptions: { enabled: true },
       manifest: {
-        id: '/',
+        id: '/fds/',
         name: 'SAEON Field Data System',
         short_name: 'SAEON FDS',
         description: 'Field technician upload interface for SAEON monitoring stations',
@@ -19,12 +28,12 @@ export default defineConfig({
         background_color: '#F4F6F8',
         display: 'standalone',
         orientation: 'portrait',
-        scope: '/',
-        start_url: '/',
+        scope: '/fds/',
+        start_url: '/fds/',
         icons: [
-          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png'               },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png'               },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png'               },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png'               },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {
