@@ -46,24 +46,53 @@ async function getStationLastVisit(stationId) {
   return result.rows[0] || null;
 }
 
+async function getAllStationsWithLastVisit() {
+  const result = await pool.query(`
+    SELECT s.id, s.name, s.display_name, s.data_family, s.region,
+           MAX(fv.visited_at) AS last_visited_at
+    FROM   stations s
+    LEFT JOIN field_visits fv ON fv.station_id = s.id
+    WHERE  s.active = true
+    GROUP  BY s.id
+    ORDER  BY s.name
+  `);
+  return result.rows;
+}
+
 
 // =============================================================
 // FIELD VISITS
 // =============================================================
 
-async function createFieldVisit({ stationId, technicianId, visitedAt, notes }) {
+async function createFieldVisit({ stationId, technicianId, visitedAt, notes, status }) {
   const result = await pool.query(
-    `INSERT INTO field_visits (station_id, technician_id, visited_at, notes)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO field_visits (station_id, technician_id, visited_at, notes, status)
+     VALUES ($1, $2, COALESCE($3, NOW()), $4, COALESCE($5, 'draft'))
      RETURNING *`,
-    [stationId, technicianId, visitedAt, notes || null]
+    [stationId, technicianId, visitedAt || null, notes || null, status || null]
   );
   return result.rows[0];
 }
 
-async function getAllVisits({ stationId } = {}) {
+async function updateVisitDetails(id, { visitedAt, notes }) {
+  const result = await pool.query(
+    `UPDATE field_visits
+     SET visited_at = COALESCE($2, visited_at),
+         notes      = $3
+     WHERE id = $1
+     RETURNING *`,
+    [id, visitedAt || null, notes ?? null]
+  );
+  return result.rows[0] || null;
+}
+
+async function getAllVisits({ stationId, status, technicianId } = {}) {
   const params = [];
-  const where  = stationId ? (params.push(stationId), `WHERE fv.station_id = $1`) : '';
+  const clauses = [];
+  if (stationId)    { params.push(stationId);    clauses.push(`fv.station_id = $${params.length}`); }
+  if (status)       { params.push(status);       clauses.push(`fv.status = $${params.length}`); }
+  if (technicianId) { params.push(technicianId); clauses.push(`fv.technician_id = $${params.length}`); }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const result = await pool.query(
     `SELECT fv.id, fv.visited_at, fv.submitted_at, fv.status, fv.notes,
             s.id AS station_id, s.display_name AS station_display_name,
@@ -117,8 +146,13 @@ async function getVisitReadings(visitId) {
 }
 
 async function updateVisitStatus(id, status) {
+  const submitted_at = status === 'submitted' ? new Date() : null;
   const result = await pool.query(
-    `UPDATE field_visits SET status = $2 WHERE id = $1 RETURNING *`,
+    `UPDATE field_visits
+     SET status = $2,
+         submitted_at = CASE WHEN $2 = 'submitted' THEN NOW() ELSE submitted_at END
+     WHERE id = $1
+     RETURNING *`,
     [id, status]
   );
   return result.rows[0] || null;
@@ -133,6 +167,14 @@ async function getFileByHash(fileHash) {
   const result = await pool.query(
     `SELECT * FROM uploaded_files WHERE file_hash = $1`,
     [fileHash]
+  );
+  return result.rows[0] || null;
+}
+
+async function getFileByHashAndVisit(fileHash, visitId) {
+  const result = await pool.query(
+    `SELECT * FROM uploaded_files WHERE file_hash = $1 AND visit_id = $2`,
+    [fileHash, visitId]
   );
   return result.rows[0] || null;
 }
@@ -199,6 +241,18 @@ async function getUnparsedFiles() {
     `SELECT * FROM uploaded_files WHERE parse_status = 'pending' ORDER BY uploaded_at`
   );
   return result.rows;
+}
+
+async function deleteMeasurementsByFile(fileId) {
+  await pool.query(`DELETE FROM raw_measurements WHERE file_id = $1`, [fileId]);
+}
+
+async function deleteUploadedFile(id) {
+  const result = await pool.query(
+    `DELETE FROM uploaded_files WHERE id = $1 RETURNING *`,
+    [id]
+  );
+  return result.rows[0] || null;
 }
 
 
@@ -429,11 +483,13 @@ async function getStationDataCoverage(stationId) {
 module.exports = {
   // Stations
   getAllStations,
+  getAllStationsWithLastVisit,
   getStationById,
   getStationStreams,
   getStationLastVisit,
   // Visits
   createFieldVisit,
+  updateVisitDetails,
   getAllVisits,
   getVisitById,
   getVisitFiles,
@@ -441,12 +497,15 @@ module.exports = {
   updateVisitStatus,
   // Files
   getFileByHash,
+  getFileByHashAndVisit,
   createUploadedFile,
   updateFileParsed,
   updateFileParseError,
   resetFileToPending,
   getFileById,
   getUnparsedFiles,
+  deleteMeasurementsByFile,
+  deleteUploadedFile,
   // Readings
   createManualReading,
   getReadingsByVisit,

@@ -5,7 +5,7 @@ const db      = require('../db/queries');
 // GET /api/stations
 router.get('/', async (req, res, next) => {
   try {
-    const stations = await db.getAllStations();
+    const stations = await db.getAllStationsWithLastVisit();
     res.json(stations);
   } catch (err) {
     next(err);

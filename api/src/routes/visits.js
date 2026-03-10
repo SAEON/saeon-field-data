@@ -2,20 +2,21 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db/queries');
 
-// POST /api/visits
+// POST /api/visits — creates a draft visit; visited_at defaults to NOW() if omitted
 router.post('/', async (req, res, next) => {
   try {
-    const { station_id, technician_id, visited_at, notes } = req.body;
+    const { station_id, technician_id, visited_at, notes, status } = req.body;
 
-    if (!station_id || !technician_id || !visited_at) {
-      return res.status(400).json({ error: 'station_id, technician_id, and visited_at are required' });
+    if (!station_id || !technician_id) {
+      return res.status(400).json({ error: 'station_id and technician_id are required' });
     }
 
     const visit = await db.createFieldVisit({
       stationId:    station_id,
       technicianId: technician_id,
-      visitedAt:    visited_at,
+      visitedAt:    visited_at || null,   // defaults to NOW() in DB
       notes,
+      status:       status || 'draft',
     });
 
     res.status(201).json(visit);
@@ -24,12 +25,29 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-// GET /api/visits?station_id=
+// GET /api/visits?station_id=&status=
 router.get('/', async (req, res, next) => {
   try {
-    const stationId = req.query.station_id ? parseInt(req.query.station_id, 10) : undefined;
-    const visits    = await db.getAllVisits({ stationId });
+    const stationId    = req.query.station_id    ? parseInt(req.query.station_id, 10)    : undefined;
+    const technicianId = req.query.technician_id ? parseInt(req.query.technician_id, 10) : undefined;
+    const status       = req.query.status || undefined;
+    const visits       = await db.getAllVisits({ stationId, status, technicianId });
     res.json(visits);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/visits/:id — update visited_at and/or notes on a draft visit
+router.patch('/:id', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { visited_at, notes } = req.body;
+
+    const visit = await db.updateVisitDetails(id, { visitedAt: visited_at, notes });
+    if (!visit) return res.status(404).json({ error: 'Visit not found' });
+
+    res.json(visit);
   } catch (err) {
     next(err);
   }
@@ -41,7 +59,7 @@ router.patch('/:id/status', async (req, res, next) => {
     const id     = parseInt(req.params.id, 10);
     const { status } = req.body;
 
-    const VALID = ['pending', 'submitted', 'approved'];
+    const VALID = ['draft', 'pending', 'submitted', 'approved', 'flagged'];
     if (!status || !VALID.includes(status)) {
       return res.status(400).json({ error: `status must be one of: ${VALID.join(', ')}` });
     }

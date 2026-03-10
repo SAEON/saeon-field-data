@@ -33,7 +33,7 @@ body {
 /* ── Resets ───────────────────────────────────────────────────────────────── */
 button, input, select, textarea {
   font-family: inherit;
-  font-size: var(--font-base);
+  font-size: inherit;
 }
 
 button {
@@ -334,3 +334,248 @@ button {
 .cta-btn:active {
   opacity: 0.85;
 }
+
+/* =============================================================================
+   SCREEN 3 — UPLOAD FILES
+============================================================================= */
+
+/* ── File format colour context ───────────────────────────────────────────── */
+[data-format="xle"], [data-format="xml"] {
+  --fmt-bg:    var(--color-teal-light);
+  --fmt-color: var(--color-teal);
+}
+[data-format="dat"] {
+  --fmt-bg:    var(--color-success-light);
+  --fmt-color: var(--color-success);
+}
+[data-format="csv"] {
+  --fmt-bg:    var(--color-blue-light);
+  --fmt-color: var(--color-blue-dark);
+}
+[data-format="stom"] {
+  --fmt-bg:    #EDE9FE;
+  --fmt-color: #5B21B6;
+}
+[data-format="unknown"] {
+  --fmt-bg:    var(--color-surface);
+  --fmt-color: var(--color-text-light);
+}
+
+/* ── Drop zone ────────────────────────────────────────────────────────────── */
+.drop-zone {
+  border: 2px dashed var(--color-border);
+  border-radius: 16px;
+  background: white;
+  padding: 28px 20px;
+  text-align: center;
+  cursor: pointer;
+  margin-bottom: 16px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.drop-zone[data-dragging="true"] {
+  border-color: var(--color-blue);
+  background: var(--color-blue-light);
+}
+
+/* ── File card ────────────────────────────────────────────────────────────── */
+.file-card {
+  background: white;
+  border-radius: 14px;
+  border: 1.5px solid var(--color-surface-dark);
+  padding: 12px 14px;
+  transition: border-color 0.2s;
+}
+.file-card[data-state="parsed"] { border-color: #BBF7D0; }
+.file-card[data-state="error"]  { border-color: #FECACA; }
+
+/* ── Format icon (inside file card — consumes --fmt-* from data-format) ───── */
+.format-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--fmt-bg, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--fmt-color, var(--color-border)) 20%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+
+/* ── Format label badge ───────────────────────────────────────────────────── */
+.format-label {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--fmt-bg, var(--color-surface));
+  color: var(--fmt-color, var(--color-text-light));
+}
+
+/* ── Format badge inside drop zone ───────────────────────────────────────── */
+.format-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--fmt-bg, var(--color-surface));
+  color: var(--fmt-color, var(--color-text-light));
+  border: 1px solid color-mix(in srgb, var(--fmt-color, var(--color-border)) 30%, transparent);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ── File action buttons (remove / retry) ─────────────────────────────────── */
+.file-action-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-surface-dark);
+  color: var(--color-text-light);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.file-action-btn--retry {
+  background: var(--color-blue-light);
+  border-color: #BFDBFE;
+  color: var(--color-blue-dark);
+}
+
+/* ── Indeterminate upload progress bar ────────────────────────────────────── */
+.file-progress-bar {
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--color-blue);
+  animation: file-upload-sweep 1.4s ease-in-out infinite;
+}
+@keyframes file-upload-sweep {
+  0%   { width: 0%;   margin-left: 0%; }
+  50%  { width: 55%;  margin-left: 25%; }
+  100% { width: 0%;   margin-left: 100%; }
+}
+
+/* =============================================================================
+   HOME — RESUME ACTIVE VISIT CARD
+============================================================================= */
+
+.resume-card {
+  width: 100%;
+  background: var(--color-blue-light);
+  border: 1.5px solid var(--color-blue);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+.resume-card:active {
+  background: #DBEAFE;
+}
+
+.resume-btn {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: var(--color-blue);
+  color: white;
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* =============================================================================
+   WORKSPACE — BOTTOM TAB BAR
+============================================================================= */
+
+.bottom-tab-bar {
+  display: flex;
+  background: white;
+  border-top: 1.5px solid var(--color-surface-dark);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.tab-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0 10px;
+  gap: 3px;
+  background: none;
+  border: none;
+  color: var(--color-text-light);
+  font-size: 10px;
+  font-weight: 600;
+  transition: color 0.15s;
+}
+.tab-btn[data-active="true"] {
+  color: var(--color-blue);
+}
+
+.tab-icon {
+  font-size: 20px;
+  position: relative;
+  line-height: 1;
+}
+
+/* Badge on Files tab — shows count of in-progress uploads */
+.tab-badge {
+  position: absolute;
+  top: -4px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  background: var(--color-warning);
+  color: white;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+}
+
+/* Visit sub-section segmented control */
+.visit-section-btn {
+  flex: 1;
+  height: 34px;
+  border-radius: 10px;
+  border: 1.5px solid var(--color-surface-dark);
+  background: white;
+  color: var(--color-text-light);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.visit-section-btn[data-active="true"] {
+  background: var(--color-navy);
+  color: white;
+  border-color: var(--color-navy);
+}
+
+/* Station status dot */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot-ok      { background: var(--color-success); }
+.dot-warning { background: var(--color-warning); }
+.dot-overdue { background: var(--color-error); }
+.dot-never   { background: var(--color-border); }
+
+/* Overdue filter chip */
+.filter-chip[data-family="overdue"] { color: var(--color-warning); border-color: var(--color-warning); }
+.filter-chip[data-family="overdue"][data-active="true"] { background: var(--color-warning); color: white; border-color: var(--color-warning); }

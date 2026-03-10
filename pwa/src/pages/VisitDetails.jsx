@@ -1,5 +1,8 @@
+// VisitDetails — auto-saving editor for an existing draft visit.
+// The visit record already exists on the server (created by App.jsx on "Start visit").
+// This component PATCHes /api/visits/:id whenever fields change (debounced 800ms).
 import { useState, useEffect, useRef } from 'react';
-import { createVisit } from '../services/api.js';
+import { updateVisit } from '../services/api.js';
 
 const PROMPTS = [
   {
@@ -33,29 +36,52 @@ function nowDateTime() {
   };
 }
 
-export default function VisitDetails({ station, setVisitId, advance, reset, setBackInterceptor }) {
+export default function VisitDetails({ visitId, station, formState, setFormState }) {
   const { date: todayDate, time: nowTime } = nowDateTime();
 
-  const [visitDate,  setVisitDate]  = useState(todayDate);
-  const [visitTime,  setVisitTime]  = useState(nowTime);
-  const [selections, setSelections] = useState({ access: [], weather: [], equipment: [] });
-  const [extraNotes, setExtraNotes] = useState('');
-  const [showBack,   setShowBack]   = useState(false);
-  const [saving,     setSaving]     = useState(false);
-  const [error,      setError]      = useState(null);
+  // Initialise from restored formState (draft resume) or defaults
+  const [visitDate,  setVisitDate]  = useState(formState?.visitDate  || todayDate);
+  const [visitTime,  setVisitTime]  = useState(formState?.visitTime  || nowTime);
+  const [selections, setSelections] = useState(formState?.selections || { access: [], weather: [], equipment: [] });
+  const [extraNotes, setExtraNotes] = useState(formState?.extraNotes || '');
+  const [saveState,  setSaveState]  = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
 
   const dateInputRef = useRef(null);
+  const saveTimer    = useRef(null);
 
-  // Intercept the AppBar back arrow — show sheet instead of navigating away.
-  // NOTE: plain function ref, NOT () => () => fn — that would store a thunk.
+  const isToday = visitDate === todayDate;
+
+  // Build structured note string for the server
+  function buildNote() {
+    const parts = PROMPTS
+      .map(p => {
+        const chosen = selections[p.id];
+        if (!chosen.length) return null;
+        return `${p.icon} ${p.label}: ${chosen.join(', ')}`;
+      })
+      .filter(Boolean);
+    if (extraNotes.trim()) parts.push(`📝 ${extraNotes.trim()}`);
+    return parts.join(' · ');
+  }
+
+  // Debounced PATCH whenever any field changes
   useEffect(() => {
-    setBackInterceptor(() => setShowBack(true));
-    return () => setBackInterceptor(null);
-  }, [setBackInterceptor]);
-
-  const isToday        = visitDate === todayDate;
-  const allPromptsDone = Object.values(selections).every(arr => arr.length > 0);
-  const canContinue    = allPromptsDone && !saving;
+    clearTimeout(saveTimer.current);
+    setSaveState('saving');
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const visited_at = new Date(`${visitDate}T${visitTime}`).toISOString();
+        await updateVisit(visitId, { visited_at, notes: buildNote() });
+        setSaveState('saved');
+        // Bubble form state up to App.jsx so IDB draft stays in sync
+        setFormState({ visitDate, visitTime, selections, extraNotes });
+      } catch {
+        setSaveState('error');
+      }
+    }, 800);
+    return () => clearTimeout(saveTimer.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visitDate, visitTime, selections, extraNotes]);
 
   function toggle(id, opt) {
     setSelections(prev => {
@@ -67,53 +93,35 @@ export default function VisitDetails({ station, setVisitId, advance, reset, setB
     });
   }
 
-  function buildNote() {
-    const parts = PROMPTS
-      .map(p => {
-        const chosen = selections[p.id];
-        if (chosen.length === 0) return null;
-        return `${p.icon} ${p.label}: ${chosen.join(', ')}`;
-      })
-      .filter(Boolean);
-    if (extraNotes.trim()) parts.push(`📝 ${extraNotes.trim()}`);
-    return parts.join(' · ');
-  }
+  const allPromptsDone = Object.values(selections).every(arr => arr.length > 0);
 
   const promptSummary = PROMPTS
     .map(p => {
       const chosen = selections[p.id];
-      if (chosen.length === 0) return null;
+      if (!chosen.length) return null;
       return `${p.icon} ${chosen.join(', ')}`;
     })
     .filter(Boolean)
     .join('  ·  ');
 
-  async function handleContinue() {
-    if (!canContinue) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const visited_at = new Date(`${visitDate}T${visitTime}`).toISOString();
-      const visit = await createVisit({
-        station_id:    station.id,
-        technician_id: 1,           // Phase 2: from auth
-        visited_at,
-        notes: buildNote(),
-      });
-      setVisitId(visit.id);
-      advance(3);
-    } catch (e) {
-      setError(e.message || 'Failed to create visit. Try again.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <div className="flex flex-col flex-1">
 
+      {/* Auto-save status */}
+      <div className="px-4 pt-2 shrink-0 text-right">
+        <span className={`text-[10px] font-semibold ${
+          saveState === 'saved'  ? 'text-success' :
+          saveState === 'error'  ? 'text-error'   :
+          saveState === 'saving' ? 'text-text-light' : 'text-transparent'
+        }`}>
+          {saveState === 'saved'  ? '✓ Saved'    :
+           saveState === 'error'  ? '⚠ Save failed' :
+           saveState === 'saving' ? 'Saving…'    : '·'}
+        </span>
+      </div>
+
       {/* ── Scrollable body ────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto px-4 pt-4">
+      <div className="flex-1 overflow-y-auto px-4 pt-2">
 
         {/* ── Date & Time card ───────────────────────────────────── */}
         <div className="form-card">
@@ -176,8 +184,6 @@ export default function VisitDetails({ station, setVisitId, advance, reset, setB
 
           {PROMPTS.map((section, si) => (
             <div key={section.id} className={si < PROMPTS.length - 1 ? 'mb-3.5' : ''}>
-
-              {/* Section label — no inline selected value, just a count badge */}
               <div className="text-[11px] font-semibold mb-1.5 flex items-center gap-1.5">
                 <span>{section.icon}</span>
                 <span className={selections[section.id].length > 0 ? 'text-text-dark' : 'text-text-light'}>
@@ -190,7 +196,6 @@ export default function VisitDetails({ station, setVisitId, advance, reset, setB
                 )}
               </div>
 
-              {/* Option chips — multi-select */}
               <div className="flex flex-wrap gap-1.5">
                 {section.options.map(opt => (
                   <button
@@ -226,7 +231,7 @@ export default function VisitDetails({ station, setVisitId, advance, reset, setB
             />
           </div>
 
-          {/* Note preview — shown once all prompts are answered */}
+          {/* Note preview */}
           {allPromptsDone && (
             <div className="mt-3 bg-surface border border-surface-dark rounded-xl px-3 py-2.5">
               <div className="text-[10px] text-text-light font-semibold uppercase tracking-wide mb-1">
@@ -242,53 +247,7 @@ export default function VisitDetails({ station, setVisitId, advance, reset, setB
           )}
         </div>
 
-      </div>{/* end scrollable */}
-
-      {/* ── Sticky CTA ────────────────────────────────────────── */}
-      <div
-        className="px-4 pb-7 pt-3 shrink-0"
-        style={{ background: 'linear-gradient(to top, var(--color-surface) 70%, transparent)' }}
-      >
-        {error && (
-          <div className="text-[11px] text-error text-center mb-2">{error}</div>
-        )}
-        {!canContinue && !saving && (
-          <div className="text-[11px] text-warning text-center mb-2 font-medium">
-            ⚠ Select at least one option per category in Site notes
-          </div>
-        )}
-        <button onClick={handleContinue} disabled={!canContinue} className="cta-btn">
-          {saving ? 'Saving…' : <span>Upload files <span className="text-lg">→</span></span>}
-        </button>
       </div>
-
-      {/* ── Back confirmation sheet ────────────────────────────── */}
-      {showBack && (
-        <div className="back-sheet-overlay">
-          <div className="back-sheet">
-            <div className="text-[15px] font-bold text-text-dark mb-1.5">
-              Go back to station list?
-            </div>
-            <div className="text-[13px] text-text-light mb-5 leading-relaxed">
-              Your visit details won't be saved and your station selection will be cleared.
-            </div>
-            <div className="flex gap-2.5">
-              <button
-                onClick={() => setShowBack(false)}
-                className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold"
-              >
-                Keep editing
-              </button>
-              <button
-                onClick={reset}
-                className="flex-1 h-12 border-none rounded-xl bg-navy text-white text-sm font-semibold"
-              >
-                Yes, go back
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

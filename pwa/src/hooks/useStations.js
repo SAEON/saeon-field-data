@@ -1,20 +1,8 @@
 import { useState, useEffect } from 'react';
-import { openDB } from 'idb';
+import { getDB } from './idb.js';
 import { getStations } from '../services/api.js';
 
-const DB_NAME  = 'saeon-fds';
-const DB_VER   = 1;
-const STORE    = 'stations';
-
-async function getDB() {
-  return openDB(DB_NAME, DB_VER, {
-    upgrade(db) {
-      if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE, { keyPath: 'id' });
-      }
-    },
-  });
-}
+const STORE = 'stations';
 
 export function useStations() {
   const [stations, setStations] = useState([]);

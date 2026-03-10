@@ -159,16 +159,22 @@ router.post('/:id/files', upload.single('file'), async (req, res, next) => {
     // SHA-256 hash of file contents
     const fileHash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
 
-    // Deduplication — if hash exists, return existing record
-    const existing = await db.getFileByHash(fileHash);
-    if (existing) {
-      return res.status(200).json({ ...existing, duplicate: true });
+    // Deduplication — same file uploaded twice to the SAME visit: return existing record
+    const existingInVisit = await db.getFileByHashAndVisit(fileHash, visitId);
+    if (existingInVisit) {
+      return res.status(200).json({ ...existingInVisit, duplicate: true });
     }
 
-    // Store file to disk
+    // Check if the file already exists on disk from a previous visit (same content, different visit)
     const uploadedAt  = new Date();
-    const storagePath = buildStoragePath(fileHash, req.file.originalname, uploadedAt);
-    fs.writeFileSync(storagePath, req.file.buffer);
+    const anyExisting = await db.getFileByHash(fileHash);
+    const storagePath = anyExisting?.storage_path && fs.existsSync(anyExisting.storage_path)
+      ? anyExisting.storage_path  // reuse existing file on disk — no re-write needed
+      : buildStoragePath(fileHash, req.file.originalname, uploadedAt);
+
+    if (!anyExisting?.storage_path || !fs.existsSync(anyExisting.storage_path)) {
+      fs.writeFileSync(storagePath, req.file.buffer);
+    }
 
     // Insert DB record
     const fileRecord = await db.createUploadedFile({
@@ -213,6 +219,28 @@ router.post('/:id/reparse', async (req, res, next) => {
     res.json({ message: 'Reparse triggered', file_id: fileRecord.id });
 
     setImmediate(() => parseInBackground(fileRecord, fileRecord.visit_id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =============================================================
+// DELETE /api/files/:id
+// Removes DB record, raw_measurements, and the file from disk.
+// =============================================================
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const fileRecord = await db.getFileById(parseInt(req.params.id, 10));
+    if (!fileRecord) return res.status(404).json({ error: 'File not found' });
+
+    // CASCADE on file_id FK removes raw_measurements automatically
+    await db.deleteUploadedFile(fileRecord.id);
+
+    if (fs.existsSync(fileRecord.storage_path)) {
+      fs.unlinkSync(fileRecord.storage_path);
+    }
+
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

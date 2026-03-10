@@ -1,0 +1,517 @@
+// ManualReadings — family-specific site readings form.
+// Each field has its own Save button; state is local to each field component.
+// Existing readings are loaded from the server on mount to pre-populate saved state.
+import { useState, useEffect, useRef } from 'react';
+import { createReading, getVisit } from '../services/api.js';
+
+const REQUIRED_TYPES = {
+  rainfall:    ['gauge_condition', 'overall_site_condition'],
+  groundwater: ['dipper_depth', 'dipper_time', 'overall_site_condition'],
+  met:         ['pyranometer_clean', 'anemometer_spinning', 'rain_gauge_clear', 'overall_site_condition'],
+};
+
+// ── Save button ───────────────────────────────────────────────────────────────
+
+function SaveBtn({ state, hasValue, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={!hasValue || state === 'saving' || state === 'saved'}
+      className={`px-3 h-8 rounded-lg text-[11px] font-semibold border-none shrink-0 transition-colors ${
+        state === 'saved'  ? 'bg-success-light text-success' :
+        state === 'error'  ? 'bg-error-light text-error'     :
+        hasValue           ? 'bg-navy text-white'             :
+        'bg-surface-dark text-text-light'
+      }`}
+    >
+      {state === 'saving' ? '…' : state === 'saved' ? '✓ Saved' : state === 'error' ? 'Retry' : 'Save'}
+    </button>
+  );
+}
+
+// ── Chip select field (single-select pills) ────────────────────────────────────
+
+function ChipsField({ readingType, label, required, hint, options, existingReading, onSave }) {
+  const init = existingReading?.value_text ?? null;
+  const [value,     setValue]    = useState(init);
+  const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
+  const saved = saveState === 'saved';
+
+  async function handleSave() {
+    setSaveState('saving');
+    try {
+      await onSave({ reading_type: readingType, value_text: value, recorded_at: new Date().toISOString() });
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  }
+
+  return (
+    <div className="form-card">
+      <div className="flex items-baseline justify-between mb-2">
+        <div className="text-[12px] font-semibold text-text-dark">
+          {label} {required && <span className="text-warning text-[11px]">*</span>}
+        </div>
+        {hint && <span className="text-[10px] text-text-light">{hint}</span>}
+      </div>
+      <div className="flex flex-wrap gap-1.5 mb-2.5">
+        {options.map(opt => (
+          <button
+            key={opt.value}
+            data-selected={value === opt.value ? 'true' : undefined}
+            data-danger={opt.danger ? 'true' : undefined}
+            onClick={() => !saved && setValue(value === opt.value ? null : opt.value)}
+            disabled={saved}
+            className="note-chip"
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex justify-end">
+        <SaveBtn state={saveState} hasValue={!!value} onClick={handleSave} />
+      </div>
+    </div>
+  );
+}
+
+// ── Yes / No toggle field ─────────────────────────────────────────────────────
+
+function ToggleField({ readingType, label, required, existingReading, onSave }) {
+  const init = existingReading ? existingReading.value_text === 'Yes' : null;
+  const [value,     setValue]    = useState(init);
+  const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
+  const saved = saveState === 'saved';
+
+  async function handleSave() {
+    setSaveState('saving');
+    try {
+      await onSave({ reading_type: readingType, value_text: value ? 'Yes' : 'No', recorded_at: new Date().toISOString() });
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  }
+
+  return (
+    <div
+      className="form-card flex items-center justify-between"
+      style={{ borderColor: value !== null ? '#BBF7D0' : undefined }}
+    >
+      <div className="text-[12px] font-medium text-text-dark">
+        {label} {required && <span className="text-warning text-[10px]">*</span>}
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="flex gap-1.5">
+          {[true, false].map(isYes => {
+            const active = value === isYes;
+            const lbl    = isYes ? 'Yes' : 'No';
+            return (
+              <button
+                key={lbl}
+                onClick={() => !saved && setValue(active ? null : isYes)}
+                disabled={saved}
+                className="w-10 h-7 rounded-md text-[11px] font-semibold"
+                style={{
+                  border:     `1.5px solid ${active ? (isYes ? '#2E7D32' : '#B71C1C') : 'var(--color-border)'}`,
+                  background: active ? (isYes ? '#E8F5E9' : '#FFEBEE') : 'var(--color-surface)',
+                  color:      active ? (isYes ? '#2E7D32' : '#B71C1C') : 'var(--color-text-light)',
+                }}
+              >{lbl}</button>
+            );
+          })}
+        </div>
+        <SaveBtn state={saveState} hasValue={value !== null} onClick={handleSave} />
+      </div>
+    </div>
+  );
+}
+
+// ── Number input field ────────────────────────────────────────────────────────
+
+function NumberField({ readingType, label, required, hint, unit, placeholder, step = '0.01', existingReading, onSave }) {
+  const init = existingReading?.value_numeric != null ? String(existingReading.value_numeric) : '';
+  const [value,     setValue]    = useState(init);
+  const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
+  const saved = saveState === 'saved';
+
+  async function handleSave() {
+    setSaveState('saving');
+    try {
+      await onSave({ reading_type: readingType, value_numeric: parseFloat(value), unit: unit || null, recorded_at: new Date().toISOString() });
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  }
+
+  return (
+    <div className="form-card">
+      <div className="flex items-baseline justify-between mb-1.5">
+        <div className="text-[12px] font-semibold text-text-dark">
+          {label} {required && <span className="text-warning text-[11px]">*</span>}
+        </div>
+        {hint && <span className="text-[10px] text-text-light">{hint}</span>}
+      </div>
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <input
+            type="number"
+            step={step}
+            value={value}
+            onChange={e => { setValue(e.target.value); setSaveState('idle'); }}
+            placeholder={placeholder}
+            disabled={saved}
+            className={`field-input w-full ${value ? 'field-input--active' : ''}`}
+            style={{ height: '38px', ...(unit && { paddingRight: '44px' }) }}
+          />
+          {unit && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">
+              {unit}
+            </span>
+          )}
+        </div>
+        <SaveBtn state={saveState} hasValue={value.trim() !== ''} onClick={handleSave} />
+      </div>
+    </div>
+  );
+}
+
+// ── Time input field ──────────────────────────────────────────────────────────
+
+function TimeField({ readingType, label, required, hint, existingReading, onSave }) {
+  const init = existingReading?.value_text ?? '';
+  const [value,     setValue]    = useState(init);
+  const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
+  const saved = saveState === 'saved';
+
+  async function handleSave() {
+    setSaveState('saving');
+    try {
+      await onSave({ reading_type: readingType, value_text: value, recorded_at: new Date().toISOString() });
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  }
+
+  return (
+    <div className="form-card">
+      <div className="flex items-baseline justify-between mb-1.5">
+        <div className="text-[12px] font-semibold text-text-dark">
+          {label} {required && <span className="text-warning text-[11px]">*</span>}
+        </div>
+        {hint && <span className="text-[10px] text-text-light">{hint}</span>}
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="time"
+          value={value}
+          onChange={e => { setValue(e.target.value); setSaveState('idle'); }}
+          disabled={saved}
+          className={`field-input flex-1 ${value ? 'field-input--active' : ''}`}
+          style={{ height: '38px' }}
+        />
+        <SaveBtn state={saveState} hasValue={!!value} onClick={handleSave} />
+      </div>
+    </div>
+  );
+}
+
+// ── Datetime-local field ──────────────────────────────────────────────────────
+
+function DateTimeField({ readingType, label, hint, existingReading, onSave }) {
+  const init = existingReading?.value_text ?? '';
+  const [value,     setValue]    = useState(init);
+  const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
+  const saved = saveState === 'saved';
+
+  async function handleSave() {
+    setSaveState('saving');
+    try {
+      await onSave({ reading_type: readingType, value_text: value, recorded_at: new Date().toISOString() });
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  }
+
+  return (
+    <div className="form-card">
+      <div className="flex items-baseline justify-between mb-1.5">
+        <div className="text-[12px] font-semibold text-text-dark">{label}</div>
+        {hint && <span className="text-[10px] text-text-light">{hint}</span>}
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="datetime-local"
+          value={value}
+          onChange={e => { setValue(e.target.value); setSaveState('idle'); }}
+          disabled={saved}
+          className={`field-input flex-1 ${value ? 'field-input--active' : ''}`}
+          style={{ height: '38px' }}
+        />
+        <SaveBtn state={saveState} hasValue={!!value} onClick={handleSave} />
+      </div>
+    </div>
+  );
+}
+
+// ── Wind vane (3-option) ──────────────────────────────────────────────────────
+
+function WindVaneField({ existingReading, onSave }) {
+  const init = existingReading?.value_text ?? null;
+  const [value,     setValue]    = useState(init);
+  const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
+  const saved = saveState === 'saved';
+
+  async function handleSave() {
+    setSaveState('saving');
+    try {
+      await onSave({ reading_type: 'wind_vane', value_text: value, recorded_at: new Date().toISOString() });
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  }
+
+  return (
+    <div className="form-card">
+      <div className="flex items-baseline justify-between mb-2">
+        <div className="text-[12px] font-semibold text-text-dark">Wind vane readable?</div>
+        <span className="text-[10px] text-text-light">Optional</span>
+      </div>
+      <div className="flex gap-1.5 mb-2.5">
+        {['Yes', 'No', 'Not installed'].map(opt => (
+          <button
+            key={opt}
+            onClick={() => !saved && setValue(value === opt ? null : opt)}
+            disabled={saved}
+            className="flex-1 h-8 rounded-lg text-[11px] font-semibold transition-colors"
+            style={{
+              border:     `1.5px solid ${value === opt ? 'var(--color-blue)' : 'var(--color-border)'}`,
+              background: value === opt ? 'var(--color-blue-light)' : 'var(--color-surface)',
+              color:      value === opt ? 'var(--color-blue-dark)'  : 'var(--color-text-light)',
+            }}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+      <div className="flex justify-end">
+        <SaveBtn state={saveState} hasValue={!!value} onClick={handleSave} />
+      </div>
+    </div>
+  );
+}
+
+// ── Shared site condition ─────────────────────────────────────────────────────
+
+function SiteConditionSection({ existingReading, onSave }) {
+  const init = existingReading?.value_text ?? null;
+  const [value,     setValue]    = useState(init);
+  const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
+  const saved = saveState === 'saved';
+
+  async function handleSave() {
+    setSaveState('saving');
+    try {
+      await onSave({ reading_type: 'overall_site_condition', value_text: value, recorded_at: new Date().toISOString() });
+      setSaveState('saved');
+    } catch {
+      setSaveState('error');
+    }
+  }
+
+  return (
+    <div className="form-card">
+      <div className="text-[13px] font-bold text-text-dark mb-3">
+        🏕 Overall site condition <span className="text-warning text-[11px]">*</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5 mb-2.5">
+        {[
+          { value: 'good',     label: 'Good'     },
+          { value: 'fair',     label: 'Fair'     },
+          { value: 'poor',     label: 'Poor',     danger: true },
+          { value: 'critical', label: 'Critical', danger: true },
+        ].map(opt => (
+          <button
+            key={opt.value}
+            data-selected={value === opt.value ? 'true' : undefined}
+            data-danger={opt.danger ? 'true' : undefined}
+            onClick={() => !saved && setValue(value === opt.value ? null : opt.value)}
+            disabled={saved}
+            className="note-chip"
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex justify-end">
+        <SaveBtn state={saveState} hasValue={!!value} onClick={handleSave} />
+      </div>
+    </div>
+  );
+}
+
+// ── Family form components ────────────────────────────────────────────────────
+
+function RainfallForm({ saved, onSave }) {
+  function ex(type) { return saved.find(r => r.reading_type === type); }
+  return (
+    <>
+      <ChipsField
+        readingType="gauge_condition" label="Gauge condition" required
+        options={[
+          { value: 'good',      label: 'Good' },
+          { value: 'debris',    label: 'Debris inside' },
+          { value: 'damaged',   label: 'Damaged' },
+          { value: 'submerged', label: 'Submerged' },
+          { value: 'missing',   label: 'Missing' },
+        ]}
+        existingReading={ex('gauge_condition')} onSave={onSave}
+      />
+      <NumberField
+        readingType="gauge_reading" label="Gauge reading at visit" hint="Optional"
+        unit="mm" placeholder="0.0"
+        existingReading={ex('gauge_reading')} onSave={onSave}
+      />
+      <DateTimeField
+        readingType="last_emptied" label="Last emptied" hint="Optional"
+        existingReading={ex('last_emptied')} onSave={onSave}
+      />
+      <NumberField
+        readingType="battery_voltage" label="Battery voltage" hint="Optional"
+        unit="V" placeholder="0.0"
+        existingReading={ex('battery_voltage')} onSave={onSave}
+      />
+    </>
+  );
+}
+
+function GroundwaterForm({ saved, onSave }) {
+  function ex(type) { return saved.find(r => r.reading_type === type); }
+  return (
+    <>
+      <NumberField
+        readingType="dipper_depth" label="Dipper depth" required
+        hint="Measured at visit" unit="m" placeholder="0.00"
+        existingReading={ex('dipper_depth')} onSave={onSave}
+      />
+      <TimeField
+        readingType="dipper_time" label="Time of dipper reading" required
+        hint="Exact time tape entered water"
+        existingReading={ex('dipper_time')} onSave={onSave}
+      />
+      <ChipsField
+        readingType="water_colour" label="Water colour / clarity" hint="Optional"
+        options={[
+          { value: 'clear',  label: 'Clear' },
+          { value: 'turbid', label: 'Turbid' },
+          { value: 'brown',  label: 'Brown' },
+          { value: 'black',  label: 'Black' },
+          { value: 'dry',    label: 'Dry — no water' },
+        ]}
+        existingReading={ex('water_colour')} onSave={onSave}
+      />
+      <NumberField
+        readingType="battery_voltage" label="Battery voltage" hint="Optional"
+        unit="V" placeholder="0.0"
+        existingReading={ex('battery_voltage')} onSave={onSave}
+      />
+    </>
+  );
+}
+
+function MetForm({ saved, onSave }) {
+  function ex(type) { return saved.find(r => r.reading_type === type); }
+  return (
+    <>
+      <ToggleField readingType="pyranometer_clean"   label="Pyranometer clean?"   required existingReading={ex('pyranometer_clean')}   onSave={onSave} />
+      <ToggleField readingType="anemometer_spinning" label="Anemometer spinning?" required existingReading={ex('anemometer_spinning')} onSave={onSave} />
+      <ToggleField readingType="rain_gauge_clear"    label="Rain gauge clear?"    required existingReading={ex('rain_gauge_clear')}    onSave={onSave} />
+      <NumberField
+        readingType="battery_voltage" label="Battery voltage" hint="Optional"
+        unit="V" placeholder="0.0"
+        existingReading={ex('battery_voltage')} onSave={onSave}
+      />
+      <WindVaneField existingReading={ex('wind_vane')} onSave={onSave} />
+      <NumberField
+        readingType="logger_screen" label="Data logger screen reading" hint="Optional"
+        placeholder="e.g. 1024" step="1"
+        existingReading={ex('logger_screen')} onSave={onSave}
+      />
+    </>
+  );
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
+const FAMILY_LABEL = { rainfall: 'Rainfall', groundwater: 'Groundwater', met: 'Meteorological' };
+const FAMILY_ICON  = { rainfall: '🌧', groundwater: '💧', met: '🌤' };
+
+export default function ManualReadings({ visitId, dataFamily, onReadingsSaved }) {
+  const [saved,  setSaved]  = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const calledDone = useRef(false);
+
+  // Load existing readings so fields pre-populate as ✓ Saved
+  useEffect(() => {
+    if (!visitId) { setLoaded(true); return; }
+    getVisit(visitId)
+      .then(v => { setSaved(v.readings || []); setLoaded(true); })
+      .catch(()  => setLoaded(true));
+  }, [visitId]);
+
+  // Signal completion once all required readings are saved
+  useEffect(() => {
+    if (calledDone.current) return;
+    const required = REQUIRED_TYPES[dataFamily] || [];
+    if (required.length === 0) return;
+    const savedTypes = new Set(saved.map(r => r.reading_type));
+    if (required.every(t => savedTypes.has(t))) {
+      calledDone.current = true;
+      onReadingsSaved?.();
+    }
+  }, [saved, dataFamily, onReadingsSaved]);
+
+  async function handleSave(reading) {
+    const result = await createReading(visitId, reading);
+    setSaved(prev => [...prev, result]);
+    return result;
+  }
+
+  if (!loaded) {
+    return (
+      <div className="flex items-center justify-center flex-1 text-text-light text-sm">
+        Loading…
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col flex-1" data-family={dataFamily}>
+      <div className="flex-1 overflow-y-auto px-4 pt-3 pb-6">
+
+        {/* Family context strip */}
+        <div className="flex items-center gap-1.5 pb-3 text-[12px] font-semibold" style={{ color: 'var(--fc-text)' }}>
+          <span>{FAMILY_ICON[dataFamily]}</span>
+          {FAMILY_LABEL[dataFamily]} station — record all readings below
+        </div>
+
+        {/* Family-specific fields */}
+        {dataFamily === 'rainfall'    && <RainfallForm    saved={saved} onSave={handleSave} />}
+        {dataFamily === 'groundwater' && <GroundwaterForm saved={saved} onSave={handleSave} />}
+        {dataFamily === 'met'         && <MetForm         saved={saved} onSave={handleSave} />}
+
+        {/* Shared: overall site condition */}
+        <SiteConditionSection
+          existingReading={saved.find(r => r.reading_type === 'overall_site_condition')}
+          onSave={handleSave}
+        />
+
+      </div>
+    </div>
+  );
+}

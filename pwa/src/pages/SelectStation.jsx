@@ -1,5 +1,33 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useStations } from '../hooks/useStations.js';
+import { getVisits } from '../services/api.js';
+
+const MY_TECHNICIAN_ID = 4; // Phase 2: replace with auth context
+
+const OVERDUE_DAYS = 30; // stations not visited in 30+ days are overdue
+
+function daysSince(isoDate) {
+  if (!isoDate) return Infinity;
+  return (Date.now() - new Date(isoDate).getTime()) / (1000 * 60 * 60 * 24);
+}
+
+function lastVisitLabel(isoDate) {
+  if (!isoDate) return 'Never visited';
+  const days = daysSince(isoDate);
+  if (days < 1)  return 'Today';
+  if (days < 7)  return `${Math.floor(days)}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  if (days < 365) return `${Math.floor(days / 30)} month${Math.floor(days / 30) !== 1 ? 's' : ''} ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+function statusDotClass(isoDate) {
+  const days = daysSince(isoDate);
+  if (days === Infinity) return 'dot-never';
+  if (days <= 14)  return 'dot-ok';
+  if (days <= 30)  return 'dot-warning';
+  return 'dot-overdue';
+}
 
 const FAMILY_ICONS = {
   rainfall:    '🌧',
@@ -10,22 +38,34 @@ const FAMILY_ICONS = {
 const FAMILY_LABELS = {
   rainfall:    'Rainfall',
   groundwater: 'Groundwater',
-  met:         'Met',
+  met:         'Meteorological',
+  overdue:     'Overdue',
 };
 
-export default function SelectStation({ setStation, advance }) {
+export default function SelectStation({ onStartVisit, hasDraft, draftStation, onResumeDraft }) {
   const { stations, loading, offline } = useStations();
 
   const [query,      setQuery]      = useState('');
   const [filter,     setFilter]     = useState('all');
   const [selectedId, setSelectedId] = useState(null);
+  const [myVisits,   setMyVisits]   = useState(null);
+
+  useEffect(() => {
+    getVisits({ technician_id: MY_TECHNICIAN_ID })
+      .then(v => setMyVisits(v.length))
+      .catch(() => {});
+  }, []);
+
+  const overdueCount = stations.filter(s => daysSince(s.last_visited_at) >= OVERDUE_DAYS).length;
 
   const filtered = stations
     .filter(s => {
       const q      = query.toLowerCase();
       const matchQ = s.display_name.toLowerCase().includes(q) ||
                      (s.region || '').toLowerCase().includes(q);
-      const matchF = filter === 'all' || s.data_family === filter;
+      const matchF = filter === 'all'      ? true :
+                     filter === 'overdue'  ? daysSince(s.last_visited_at) >= OVERDUE_DAYS :
+                     s.data_family === filter;
       return matchQ && matchF;
     })
     .sort((a, b) => a.display_name.localeCompare(b.display_name));
@@ -34,8 +74,7 @@ export default function SelectStation({ setStation, advance }) {
 
   function handleStart() {
     if (!selectedStation) return;
-    setStation(selectedStation);
-    advance(2);
+    onStartVisit(selectedStation);
   }
 
   return (
@@ -64,13 +103,13 @@ export default function SelectStation({ setStation, advance }) {
           <div className="text-[10px] text-white/40 mt-0.5">Stations</div>
         </div>
         <div className="stat-tile">
-          <div className={`text-lg font-bold ${offline ? 'text-warning' : 'text-white/40'}`}>
-            {offline ? 'Yes' : 'No'}
+          <div className={`text-lg font-bold ${overdueCount > 0 ? 'text-warning' : 'text-white/90'}`}>
+            {loading ? '…' : overdueCount}
           </div>
-          <div className="text-[10px] text-white/40 mt-0.5">Offline</div>
+          <div className="text-[10px] text-white/40 mt-0.5">Overdue</div>
         </div>
         <div className="stat-tile">
-          <div className="text-lg font-bold text-white/40">—</div>
+          <div className="text-lg font-bold text-white/90">{myVisits ?? '…'}</div>
           <div className="text-[10px] text-white/40 mt-0.5">My visits</div>
         </div>
       </div>
@@ -79,6 +118,26 @@ export default function SelectStation({ setStation, advance }) {
       {offline && (
         <div className="bg-warning-light text-warning text-xs text-center py-2 px-4 shrink-0" style={{ borderBottom: '1px solid rgba(230,81,0,0.2)' }}>
           Offline — showing cached stations
+        </div>
+      )}
+
+      {/* ── Active draft banner ───────────────────────────────────── */}
+      {hasDraft && draftStation && (
+        <div className="px-4 pt-3 pb-1 shrink-0">
+          <button onClick={onResumeDraft} className="resume-card">
+            <div className="text-left">
+              <div className="text-[10px] font-semibold text-blue uppercase tracking-wide mb-0.5">
+                Draft in progress
+              </div>
+              <div className="text-[14px] font-bold text-text-dark leading-tight">
+                {draftStation.display_name}
+              </div>
+              <div className="text-[11px] text-text-light mt-0.5">
+                Tap to continue — or select a new station below
+              </div>
+            </div>
+            <span className="resume-btn">Resume →</span>
+          </button>
         </div>
       )}
 
@@ -105,7 +164,7 @@ export default function SelectStation({ setStation, advance }) {
 
       {/* ── Filter chips ──────────────────────────────────────────── */}
       <div className="flex items-center px-4 py-2 gap-1.5 overflow-x-auto shrink-0">
-        {['all', 'rainfall', 'groundwater', 'met'].map(f => (
+        {['all', 'rainfall', 'groundwater', 'met', 'overdue'].map(f => (
           <button
             key={f}
             data-family={f}
@@ -113,8 +172,9 @@ export default function SelectStation({ setStation, advance }) {
             onClick={() => setFilter(f)}
             className="filter-chip"
           >
-            {f !== 'all' && <span>{FAMILY_ICONS[f]}</span>}
-            {f === 'all' ? 'All' : FAMILY_LABELS[f]}
+            {f === 'overdue' && <span>⚠</span>}
+            {f !== 'all' && f !== 'overdue' && <span>{FAMILY_ICONS[f]}</span>}
+            {f === 'all' ? 'All' : f === 'overdue' ? 'Overdue' : FAMILY_LABELS[f]}
           </button>
         ))}
       </div>
@@ -124,7 +184,7 @@ export default function SelectStation({ setStation, advance }) {
         {loading
           ? 'Loading stations…'
           : `${filtered.length} station${filtered.length !== 1 ? 's' : ''}`}
-        {filter !== 'all' && ` · ${FAMILY_LABELS[filter]}`}
+        {filter !== 'all' && ` · ${filter === 'overdue' ? 'Overdue' : FAMILY_LABELS[filter]}`}
         {query && ` · "${query}"`}
       </div>
 
@@ -138,21 +198,25 @@ export default function SelectStation({ setStation, advance }) {
             onClick={() => setSelectedId(s.id)}
             className="station-card"
           >
-            <div className="family-icon">{FAMILY_ICONS[s.data_family]}</div>
-
             <div className="flex-1 min-w-0">
               <div className="font-semibold text-sm text-text-dark truncate">
                 {s.display_name}
               </div>
-              {s.region && (
-                <div className="text-[11px] text-text-light mt-0.5">{s.region}</div>
-              )}
-              <div className="family-badge">
+              <div className={`text-[11px] mt-0.5 flex items-center gap-1 ${daysSince(s.last_visited_at) >= OVERDUE_DAYS ? 'text-warning' : 'text-text-light'}`}>
+                {daysSince(s.last_visited_at) >= OVERDUE_DAYS && <span>⚠</span>}
+                {s.region && <span>{s.region}</span>}
+                {s.region && <span>·</span>}
+                <span>Last: {lastVisitLabel(s.last_visited_at)}</span>
+              </div>
+              <div className="family-badge mt-1">
                 {FAMILY_ICONS[s.data_family]} {FAMILY_LABELS[s.data_family]}
               </div>
             </div>
 
-            <span className={`text-lg shrink-0 ${selectedId === s.id ? 'text-blue' : 'text-border'}`}>›</span>
+            <div className="flex flex-col items-center gap-1 shrink-0">
+              <div className={`status-dot ${statusDotClass(s.last_visited_at)}`} />
+              <span className={`text-lg ${selectedId === s.id ? 'text-blue' : 'text-border'}`}>›</span>
+            </div>
           </div>
         ))}
 
