@@ -9,4 +9,10 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
 });
 
+// Without this handler, a failed DB connection emits an unhandled 'error' event
+// that crashes the Node process silently (no stderr output).
+pool.on('error', (err) => {
+  console.error('pg pool error:', err.message);
+});
+
 module.exports = pool;
