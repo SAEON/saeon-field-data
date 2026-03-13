@@ -49,6 +49,9 @@ async function getStationLastVisit(stationId) {
 async function getAllStationsWithLastVisit() {
   const result = await pool.query(`
     SELECT s.id, s.name, s.display_name, s.data_family, s.region,
+           s.active, s.visit_frequency_days, s.assigned_technician_id,
+           ST_Y(s.location::geometry) AS latitude,
+           ST_X(s.location::geometry) AS longitude,
            MAX(fv.visited_at) AS last_visited_at
     FROM   stations s
     LEFT JOIN field_visits fv ON fv.station_id = s.id
@@ -57,6 +60,80 @@ async function getAllStationsWithLastVisit() {
     ORDER  BY s.name
   `);
   return result.rows;
+}
+
+// Registry view for Sue — includes inactive stations
+async function getAllStationsRegistry() {
+  const result = await pool.query(`
+    SELECT s.id, s.name, s.display_name, s.data_family, s.region,
+           s.active, s.visit_frequency_days, s.assigned_technician_id,
+           s.elevation_m, s.notes,
+           ST_Y(s.location::geometry) AS latitude,
+           ST_X(s.location::geometry) AS longitude,
+           MAX(fv.visited_at) AS last_visited_at
+    FROM   stations s
+    LEFT JOIN field_visits fv ON fv.station_id = s.id
+    GROUP  BY s.id
+    ORDER  BY s.active DESC, s.name
+  `);
+  return result.rows;
+}
+
+async function createStation({ name, displayName, dataFamily, region, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId }) {
+  const result = await pool.query(
+    `INSERT INTO stations
+       (name, display_name, data_family, region, location, elevation_m, notes, visit_frequency_days, assigned_technician_id)
+     VALUES ($1, $2, $3, $4,
+       CASE WHEN $5::numeric IS NOT NULL AND $6::numeric IS NOT NULL
+            THEN ST_MakePoint($6, $5)::geography ELSE NULL END,
+       $7, $8, COALESCE($9, 30), $10)
+     RETURNING *`,
+    [name, displayName, dataFamily, region ?? null,
+     latitude ?? null, longitude ?? null,
+     elevationM ?? null, notes ?? null,
+     visitFrequencyDays ?? null, assignedTechnicianId ?? null]
+  );
+  return result.rows[0];
+}
+
+async function updateStation(id, fields) {
+  const {
+    name, displayName, dataFamily, region,
+    latitude, longitude, elevationM, notes,
+    visitFrequencyDays, assignedTechnicianId, active,
+  } = fields;
+
+  const sets = [];
+  const vals = [id];
+  let i = 2;
+
+  if (name              !== undefined) { sets.push(`name = $${i++}`);                   vals.push(name); }
+  if (displayName       !== undefined) { sets.push(`display_name = $${i++}`);            vals.push(displayName); }
+  if (dataFamily        !== undefined) { sets.push(`data_family = $${i++}`);             vals.push(dataFamily); }
+  if (region            !== undefined) { sets.push(`region = $${i++}`);                  vals.push(region); }
+  if (elevationM        !== undefined) { sets.push(`elevation_m = $${i++}`);             vals.push(elevationM); }
+  if (notes             !== undefined) { sets.push(`notes = $${i++}`);                   vals.push(notes); }
+  if (visitFrequencyDays !== undefined){ sets.push(`visit_frequency_days = $${i++}`);    vals.push(visitFrequencyDays); }
+  if (assignedTechnicianId !== undefined){ sets.push(`assigned_technician_id = $${i++}`); vals.push(assignedTechnicianId); }
+  if (active            !== undefined) { sets.push(`active = $${i++}`);                  vals.push(active); }
+
+  if (latitude !== undefined && longitude !== undefined) {
+    sets.push(`location = ST_MakePoint($${i}, $${i + 1})::geography`);
+    vals.push(longitude, latitude);
+    i += 2;
+  }
+
+  if (sets.length === 0) return null;
+
+  const result = await pool.query(
+    `UPDATE stations SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
+    vals
+  );
+  return result.rows[0] || null;
+}
+
+async function deactivateStation(id) {
+  await pool.query(`UPDATE stations SET active = false WHERE id = $1`, [id]);
 }
 
 
@@ -380,7 +457,7 @@ async function getOrCreateStream(stationId, streamName) {
 
 
 // =============================================================
-// USERS — Phase 2 prep (stubs)
+// USERS
 // =============================================================
 
 async function getUserById(id) {
@@ -393,10 +470,84 @@ async function getUserByEmail(email) {
   return result.rows[0] || null;
 }
 
+// role filter: 'technician' | 'technician_lead' | 'data_manager' | undefined (all)
+async function getAllUsers({ role } = {}) {
+  const params = [];
+  const clauses = ['1=1'];
+  if (role) { params.push(role); clauses.push(`role = $${params.length}`); }
+  const result = await pool.query(
+    `SELECT id, email, full_name, display_name, initials, role, active, last_login, created_at
+     FROM   users
+     WHERE  ${clauses.join(' AND ')}
+     ORDER  BY full_name`,
+    params
+  );
+  return result.rows;
+}
+
+async function createUser({ email, fullName, initials, role }) {
+  const result = await pool.query(
+    `INSERT INTO users (email, full_name, display_name, initials, role, active)
+     VALUES ($1, $2, $2, $3, $4, true)
+     RETURNING id, email, full_name, display_name, initials, role, active, created_at`,
+    [email, fullName, initials, role]
+  );
+  return result.rows[0];
+}
+
+// Only role and active are editable — everything else comes from Keycloak on first login
+async function updateUser(id, { role, active }) {
+  const sets = [];
+  const vals = [id];
+  let i = 2;
+  if (role   !== undefined) { sets.push(`role = $${i++}`);   vals.push(role); }
+  if (active !== undefined) { sets.push(`active = $${i++}`); vals.push(active); }
+  if (!sets.length) return null;
+  const result = await pool.query(
+    `UPDATE users SET ${sets.join(', ')} WHERE id = $1
+     RETURNING id, email, full_name, display_name, initials, role, active`,
+    vals
+  );
+  return result.rows[0] || null;
+}
+
 
 // =============================================================
 // DASHBOARD — Phase 2 prep (stubs)
 // =============================================================
+
+// Stations where time since last SUBMITTED visit exceeds their visit_frequency_days.
+// Stations never visited are always overdue.
+async function getOverdueStations() {
+  const result = await pool.query(`
+    SELECT s.id, s.name, s.display_name, s.data_family, s.region,
+           s.visit_frequency_days,
+           s.assigned_technician_id,
+           u.full_name AS assigned_technician_name,
+           MAX(fv.visited_at) AS last_visited_at,
+           EXTRACT(DAY FROM NOW() - MAX(fv.visited_at))::int AS days_since_visit
+    FROM   stations s
+    LEFT JOIN field_visits fv ON fv.station_id = s.id AND fv.status = 'submitted'
+    LEFT JOIN users u ON u.id = s.assigned_technician_id
+    WHERE  s.active = true
+    GROUP  BY s.id, u.full_name
+    HAVING MAX(fv.visited_at) IS NULL
+        OR NOW() - MAX(fv.visited_at) > (s.visit_frequency_days * INTERVAL '1 day')
+    ORDER  BY days_since_visit DESC NULLS FIRST
+  `);
+  return result.rows;
+}
+
+async function assignVisit(visitId, technicianId) {
+  const result = await pool.query(
+    `UPDATE field_visits
+     SET assigned_technician_id = $2
+     WHERE id = $1
+     RETURNING *`,
+    [visitId, technicianId]
+  );
+  return result.rows[0] || null;
+}
 
 async function getRecentVisitsAllStations(limit = 20) {
   const result = await pool.query(
@@ -488,9 +639,13 @@ module.exports = {
   // Stations
   getAllStations,
   getAllStationsWithLastVisit,
+  getAllStationsRegistry,
   getStationById,
   getStationStreams,
   getStationLastVisit,
+  createStation,
+  updateStation,
+  deactivateStation,
   // Visits
   createFieldVisit,
   updateVisitDetails,
@@ -521,10 +676,15 @@ module.exports = {
   getPhenomenonByName,
   getAllPhenomena,
   getOrCreateStream,
-  // Users (Phase 2 prep)
+  // Users
   getUserById,
   getUserByEmail,
-  // Dashboard (Phase 2 prep)
+  getAllUsers,
+  createUser,
+  updateUser,
+  // Dashboard
+  getOverdueStations,
+  assignVisit,
   getRecentVisitsAllStations,
   getStationsNotVisitedSince,
   getGroundwaterStationsMissingDipper,

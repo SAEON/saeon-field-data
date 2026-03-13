@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { loadDraft, saveDraft, clearDraft } from './hooks/useDraftVisit.js';
 import { createVisit, submitVisit } from './services/api.js';
+import { useAuth } from './auth/AuthContext.jsx';
 import SelectStation  from './pages/SelectStation.jsx';
 import VisitDetails   from './pages/VisitDetails.jsx';
 import UploadFiles    from './pages/UploadFiles.jsx';
 import ManualReadings from './pages/ManualReadings.jsx';
 import QueueTab       from './pages/QueueTab.jsx';
 import HistoryTab     from './pages/HistoryTab.jsx';
+import LeadDashboard    from './pages/LeadDashboard.jsx';
+import ManagerDashboard from './pages/ManagerDashboard.jsx';
 
 function isStandaloneDisplayMode() {
   return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
@@ -203,6 +206,13 @@ function SubmitSheet({ draftVisit, visitFiles, hasReadings, onKeep, onConfirm, s
 
 // ── App ────────────────────────────────────────────────────────────────────
 export default function App() {
+  const user = useAuth();
+  const roles = user?.roles ?? [];
+
+  // Route non-technicians to their own interface
+  if (roles?.includes('technician_lead')) return <LeadDashboard />;
+  if (roles?.includes('data_manager')) return <ManagerDashboard />;
+
   const [activeTab,    setActiveTab]    = useState('stations');
   const [visitSection, setVisitSection] = useState('details');
   const [draftVisit,   setDraftVisit]   = useState(null);   // { visitId, station }
@@ -319,9 +329,8 @@ export default function App() {
   async function doStartVisit(station) {
     try {
       const visit = await createVisit({
-        station_id:    station.id,
-        technician_id: 4,          // Phase 2: from auth
-        status:        'draft',
+        station_id: station.id,
+        status:     'draft',
       });
       const draft = { visitId: visit.id, station };
       setDraftVisit(draft);

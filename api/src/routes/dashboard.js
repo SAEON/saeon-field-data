@@ -1,6 +1,43 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db/queries');
+const { requireAuth, requireRole } = require('../middleware/auth');
+
+router.use(requireAuth);
+
+// =============================================================
+// GET /api/dashboard/stations   (data_manager only)
+// All active stations with last visit date + days_since_visit.
+// =============================================================
+router.get('/stations', requireRole('data_manager'), async (req, res, next) => {
+  try {
+    const stations = await db.getAllStationsWithLastVisit();
+    // Annotate days_since_visit server-side for consistency
+    const now = Date.now();
+    const annotated = stations.map(s => ({
+      ...s,
+      days_since_visit: s.last_visited_at
+        ? Math.floor((now - new Date(s.last_visited_at).getTime()) / 86400000)
+        : null,
+    }));
+    res.json(annotated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =============================================================
+// GET /api/dashboard/overdue   (technician_lead+)
+// Stations exceeding their per-station visit_frequency_days since last submitted visit.
+// =============================================================
+router.get('/overdue', requireRole('technician_lead', 'data_manager'), async (req, res, next) => {
+  try {
+    const stations = await db.getOverdueStations();
+    res.json(stations);
+  } catch (err) {
+    next(err);
+  }
+});
 
 // GET /api/dashboard/visits/recent?limit=20
 router.get('/visits/recent', async (req, res, next) => {

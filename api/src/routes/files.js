@@ -3,6 +3,9 @@ const router  = express.Router();
 const multer  = require('multer');
 const crypto  = require('crypto');
 const fs      = require('fs');
+const { requireAuth } = require('../middleware/auth');
+
+router.use(requireAuth);
 const path    = require('path');
 const db      = require('../db/queries');
 

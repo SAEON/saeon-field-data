@@ -1,6 +1,8 @@
 // src/services/api.js
 // All API calls in one place. Components never call fetch directly.
 
+import keycloak from '../auth/keycloak';
+
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
 async function request(path, options = {}) {
@@ -26,7 +28,10 @@ async function request(path, options = {}) {
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(`${BASE}${path}`, { ...options, signal: controller.signal });
+    const headers = { ...(options.headers || {}) };
+    if (keycloak.token) headers['Authorization'] = `Bearer ${keycloak.token}`;
+
+    const res = await fetch(`${BASE}${path}`, { ...options, headers, signal: controller.signal });
     if (!res.ok) {
       const body = await res.text();
       throw new Error(body || `HTTP ${res.status}`);
@@ -76,12 +81,21 @@ export function getVisit(visitId) {
   return request(`/api/visits/${visitId}`);
 }
 
-export function getVisits({ status, technician_id } = {}) {
+export function getVisits({ status, technician_id, station_id } = {}) {
   const params = new URLSearchParams();
   if (status)       params.set('status', status);
   if (technician_id) params.set('technician_id', technician_id);
+  if (station_id)   params.set('station_id', station_id);
   const qs = params.toString() ? `?${params}` : '';
   return request(`/api/visits${qs}`);
+}
+
+export function assignVisit(visitId, technicianId) {
+  return request(`/api/visits/${visitId}/assign`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ technician_id: technicianId }),
+  });
 }
 
 export function updateVisit(visitId, { visited_at, notes }) {
@@ -118,6 +132,80 @@ export function reparseFile(fileId) {
 
 export function deleteFile(fileId) {
   return request(`/api/files/${fileId}`, { method: 'DELETE' });
+}
+
+// ── Station registry (technician_lead) ─────────────────────────────────────
+
+export function getStationsRegistry() {
+  return request('/api/stations?registry=true');
+}
+
+export function createStation(data) {
+  return request('/api/stations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateStation(stationId, data) {
+  return request(`/api/stations/${stationId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export function deactivateStation(stationId) {
+  return request(`/api/stations/${stationId}`, { method: 'DELETE' });
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+
+export function getOverdueStations() {
+  return request('/api/dashboard/overdue');
+}
+
+export function getDashboardStations() {
+  return request('/api/dashboard/stations');
+}
+
+export function getRecentVisits(limit = 50) {
+  return request(`/api/dashboard/visits/recent?limit=${limit}`);
+}
+
+export function getFilesWithErrors() {
+  return request('/api/dashboard/files/errors');
+}
+
+// ── Users ──────────────────────────────────────────────────────────────────
+
+export function getAvailableKeycloakUsers() {
+  return request('/api/users/available');
+}
+
+export function getMe() {
+  return request('/api/users/me');
+}
+
+export function getUsers() {
+  return request('/api/users');
+}
+
+export function createUser({ email, full_name, role }) {
+  return request('/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, full_name, role }),
+  });
+}
+
+export function updateUser(userId, { role, active }) {
+  return request(`/api/users/${userId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role, active }),
+  });
 }
 
 // ── Readings ───────────────────────────────────────────────────────────────
