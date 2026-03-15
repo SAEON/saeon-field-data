@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import keycloak from './keycloak';
+import { getMe } from '../services/api.js';
 
 const AuthContext = createContext(null);
 
@@ -8,12 +9,24 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (keycloak.authenticated) {
-      setUser({
-        name: keycloak.tokenParsed?.name,
-        email: keycloak.tokenParsed?.email,
-        roles: keycloak.tokenParsed?.realm_access?.roles ?? [],
-        initials: deriveInitials(keycloak.tokenParsed?.name),
-        token: keycloak.token,
+      // Roles come from FDS DB, not Keycloak JWT
+      getMe().then(me => {
+        setUser({
+          name: keycloak.tokenParsed?.name,
+          email: keycloak.tokenParsed?.email,
+          roles: me?.role ? [me.role] : [],
+          initials: deriveInitials(keycloak.tokenParsed?.name),
+          token: keycloak.token,
+        });
+      }).catch(() => {
+        // API unreachable — set user with no roles (technician fallback)
+        setUser({
+          name: keycloak.tokenParsed?.name,
+          email: keycloak.tokenParsed?.email,
+          roles: [],
+          initials: deriveInitials(keycloak.tokenParsed?.name),
+          token: keycloak.token,
+        });
       });
     }
 

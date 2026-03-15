@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useStations } from '../hooks/useStations.js';
 import { getVisits } from '../services/api.js';
-import { useAuth } from '../auth/AuthContext.jsx';
-import ProfileSheet from '../auth/ProfileSheet.jsx';
+import ProfileButton from '../auth/ProfileSheet.jsx';
 
 const OVERDUE_DAYS = 30; // stations not visited in 30+ days are overdue
 
@@ -44,7 +43,6 @@ const FAMILY_LABELS = {
 
 export default function SelectStation({ onStartVisit, hasDraft, draftStation, onResumeDraft }) {
   const { stations, loading, offline } = useStations();
-  const user = useAuth();
 
   const [query,      setQuery]      = useState('');
   const [filter,     setFilter]     = useState('all');
@@ -78,8 +76,6 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
     onStartVisit(selectedStation);
   }
 
-  const [showProfile, setShowProfile] = useState(false);
-
   return (
     <div className="flex flex-col min-h-dvh max-w-[var(--max-width)] mx-auto w-full bg-surface">
 
@@ -93,16 +89,7 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
           </div>
         </div>
 
-        <div style={{ position: 'relative' }}>
-          <button
-            onClick={() => setShowProfile(v => !v)}
-            className="avatar border-none bg-transparent p-0"
-            style={{ cursor: 'pointer' }}
-          >
-            {user?.initials ?? '??'}
-          </button>
-          {showProfile && <ProfileSheet onClose={() => setShowProfile(false)} />}
-        </div>
+        <ProfileButton />
       </header>
 
       {/* ── Summary strip ─────────────────────────────────────────── */}

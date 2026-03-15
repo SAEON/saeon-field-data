@@ -1,14 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../auth/AuthContext.jsx';
-import ProfileSheet from '../auth/ProfileSheet.jsx';
+import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getDashboardStations, getRecentVisits, getFilesWithErrors, deleteFile } from '../services/api.js';
 import UserManagement from './UserManagement.jsx';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 function AppBar({ title, subtitle }) {
-  const { initials } = useAuth() ?? {};
-  const [showProfile, setShowProfile] = useState(false);
   return (
     <header className="bg-navy h-14 flex items-center px-4 sticky top-0 z-50 shrink-0">
       <div className="w-10" />
@@ -16,22 +13,7 @@ function AppBar({ title, subtitle }) {
         <div className="text-white text-[17px] font-bold truncate leading-tight">{title}</div>
         {subtitle && <div className="text-white text-[11px] opacity-60 leading-tight">{subtitle}</div>}
       </div>
-      <div style={{ position: 'relative', flexShrink: 0 }}>
-        <button
-          onClick={() => setShowProfile(v => !v)}
-          className="border-none bg-transparent p-0"
-          style={{
-            width: 34, height: 34, borderRadius: '50%',
-            background: 'rgba(255,255,255,0.18)', color: 'white',
-            fontSize: 13, fontWeight: 700,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer',
-          }}
-        >
-          {initials ?? '??'}
-        </button>
-        {showProfile && <ProfileSheet onClose={() => setShowProfile(false)} />}
-      </div>
+      <ProfileButton />
     </header>
   );
 }

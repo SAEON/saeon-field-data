@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../auth/AuthContext.jsx';
-import ProfileSheet from '../auth/ProfileSheet.jsx';
+import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getStationsRegistry, createStation, updateStation, deactivateStation } from '../services/api.js';
 
 const DATA_FAMILY_OPTIONS = [
@@ -18,30 +17,13 @@ function slugify(text) {
 }
 
 function AppBar({ title }) {
-  const { initials } = useAuth() ?? {};
-  const [showProfile, setShowProfile] = useState(false);
   return (
     <header className="bg-navy h-14 flex items-center px-4 sticky top-0 z-50 shrink-0">
       <div className="w-10" />
       <div className="flex-1 text-center">
         <div className="text-white text-[17px] font-bold">{title}</div>
       </div>
-      <div style={{ position: 'relative', flexShrink: 0 }}>
-        <button
-          onClick={() => setShowProfile(v => !v)}
-          className="border-none bg-transparent p-0"
-          style={{
-            width: 34, height: 34, borderRadius: '50%',
-            background: 'rgba(255,255,255,0.18)', color: 'white',
-            fontSize: 13, fontWeight: 700,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer',
-          }}
-        >
-          {initials ?? '??'}
-        </button>
-        {showProfile && <ProfileSheet onClose={() => setShowProfile(false)} />}
-      </div>
+      <ProfileButton />
     </header>
   );
 }
