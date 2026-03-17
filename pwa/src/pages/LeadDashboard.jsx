@@ -1,12 +1,10 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
-import OverdueDashboard from './OverdueDashboard.jsx';
 import VisitOversight   from './VisitOversight.jsx';
 import StationRegistry  from './StationRegistry.jsx';
 import UserManagement   from './UserManagement.jsx';
 
 const TABS = [
-  { id: 'overdue',  label: 'Overdue',  icon: '⚠' },
   { id: 'visits',   label: 'Visits',   icon: '☑' },
   { id: 'stations', label: 'Stations', icon: '◉' },
   { id: 'users',    label: 'Users',    icon: '◎' },
@@ -53,11 +51,10 @@ function LeadNav({ activeTab, setActiveTab }) {
 }
 
 export default function LeadDashboard() {
-  const [activeTab, setActiveTab] = useState('overdue');
+  const [activeTab, setActiveTab] = useState('visits');
 
   return (
     <div className="flex flex-col min-h-dvh app-layout">
-      {activeTab === 'overdue'  && <OverdueDashboard />}
       {activeTab === 'visits'   && <VisitOversight />}
       {activeTab === 'stations' && <StationRegistry />}
       {activeTab === 'users'    && <UserManagement />}

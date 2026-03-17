@@ -1,19 +1,20 @@
 import { useState, useRef, useEffect } from 'react';
-import { uploadFile, reparseFile, deleteFile, getVisit } from '../services/api.js';
+import { uploadFile, reparseFile, deleteFile, getVisit, getStationCoverage } from '../services/api.js';
 
 const FORMAT_MAP = {
-  xle: { label: 'Solonist XLE',   icon: '💧', families: ['groundwater'] },
-  xml: { label: 'Solonist XML',   icon: '💧', families: ['groundwater'] },
-  dat: { label: 'Campbell TOA5', icon: '🌤', families: ['met'] },
-  csv: { label: 'HOBO / STOM',   icon: '🌧', families: ['rainfall', 'met'] },
+  xle:  { label: 'Solonist XLE',   icon: '💧', families: ['groundwater'] },
+  xml:  { label: 'Solonist XML',   icon: '💧', families: ['groundwater'] },
+  dat:  { label: 'Campbell TOA5', icon: '🌤', families: ['met'] },
+  csv:  { label: 'HOBO / STOM',   icon: '🌧', families: ['rainfall', 'met'] },
+  hobo: { label: 'HOBO Binary',   icon: '🌧', families: ['rainfall'] },
 };
 
 // Accepted extensions and MIME accept string per family
 const FAMILY_ACCEPT = {
   groundwater: '.xle,.xml',
-  rainfall:    '.csv',
+  rainfall:    '.csv,.hobo',
   met:         '.dat,.csv',
-  default:     '.csv,.dat,.xle,.xml',
+  default:     '.csv,.dat,.xle,.xml,.hobo',
 };
 
 // States where the file already exists on the server
@@ -35,7 +36,7 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-export default function UploadFiles({ visitId, files, setFiles, dataFamily }) {
+export default function UploadFiles({ visitId, stationId, files, setFiles, dataFamily }) {
   const acceptedFormats = Object.entries(FORMAT_MAP)
     .filter(([, v]) => !dataFamily || v.families.includes(dataFamily))
     .reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {});
@@ -43,6 +44,7 @@ export default function UploadFiles({ visitId, files, setFiles, dataFamily }) {
   const [dragging,      setDragging]      = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null); // localId awaiting delete confirm
   const [deleting,      setDeleting]      = useState(false);
+  const [coverageEnd,   setCoverageEnd]   = useState(null);
   const fileInputRef   = useRef(null);
   const pollTimers     = useRef({});   // localId → timeout handle
   const onlineTimer    = useRef(null);
@@ -54,6 +56,21 @@ export default function UploadFiles({ visitId, files, setFiles, dataFamily }) {
       clearTimeout(onlineTimer.current);
     };
   }, []);
+
+  // Fetch station data coverage to show last download date hint
+  useEffect(() => {
+    if (!stationId) return;
+    getStationCoverage(stationId)
+      .then(data => {
+        const rows = data.coverage || [];
+        const latest = rows.reduce((max, row) => {
+          if (!row.coverage_end) return max;
+          return !max || row.coverage_end > max ? row.coverage_end : max;
+        }, null);
+        setCoverageEnd(latest);
+      })
+      .catch(() => {}); // non-critical — silently ignore
+  }, [stationId]);
 
   // Auto-retry queued files (current session only — need raw file) on reconnect
   useEffect(() => {
@@ -99,6 +116,8 @@ export default function UploadFiles({ visitId, files, setFiles, dataFamily }) {
           parseState: 'parsed',
           dateRange:  `${fmtDate(dbFile.date_range_start)} — ${fmtDate(dbFile.date_range_end)}`,
           records:    dbFile.record_count,
+          hasGap:     dbFile.has_gap  ?? false,
+          gapDays:    dbFile.gap_days ?? null,
         });
       } else if (dbFile.parse_status === 'error') {
         patchFile(localId, { parseState: 'error' });
@@ -213,6 +232,21 @@ export default function UploadFiles({ visitId, files, setFiles, dataFamily }) {
 
       {/* ── Scrollable body ────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-4 pt-4">
+
+        {/* ── Coverage hint ──────────────────────────────────────── */}
+        {coverageEnd && (
+          <div
+            className="rounded-xl px-3.5 py-2.5 mb-3 flex items-start gap-2"
+            style={{ background: '#EBF2FB', border: '1px solid #3B7DD833' }}
+          >
+            <div>
+              <div className="text-[12px] font-semibold text-navy">Last data ends {fmtDate(coverageEnd)}</div>
+              <div className="text-[11px] text-text-med mt-0.5">
+                Ensure your logger download starts from this date to avoid gaps.
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Drop zone ──────────────────────────────────────────── */}
         <div
@@ -374,6 +408,15 @@ export default function UploadFiles({ visitId, files, setFiles, dataFamily }) {
                         </div>
                       )}
                     </div>
+
+                    {isParsed && file.hasGap && (
+                      <div
+                        className="mt-2 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold"
+                        style={{ background: '#FFF3E0', color: '#E65100', border: '1px solid #E6510033' }}
+                      >
+                        Gap detected — {file.gapDays ?? '?'} day{file.gapDays !== 1 ? 's' : ''} of missing data before this file
+                      </div>
+                    )}
                   </div>
                 );
               })}

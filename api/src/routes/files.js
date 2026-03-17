@@ -15,6 +15,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 // Detect logger format from file extension + buffer peek for CSV disambiguation
 function detectFileFormat(filename, buffer) {
   const ext = path.extname(filename).toLowerCase();
+  if (ext === '.hobo') return 'hobo_binary';
   if (ext === '.xle') return 'solonist_xle';
   if (ext === '.dat') return 'campbell_toa5';
   if (ext === '.csv') {
@@ -119,12 +120,37 @@ async function parseInBackground(fileRecord, visitId) {
     await flush(true);
 
     // Use parser-provided metadata when available (buffer-based parsers); otherwise use tracked values.
-    const meta = result._metadata || {};
+    const meta           = result._metadata || {};
+    const resolvedStart  = meta.date_range_start ?? dateRangeStart;
+    const resolvedEnd    = meta.date_range_end   ?? dateRangeEnd;
+    const resolvedCount  = meta.record_count     ?? recordCount;
+
     await db.updateFileParsed(fileRecord.id, {
-      dateRangeStart: meta.date_range_start ?? dateRangeStart,
-      dateRangeEnd:   meta.date_range_end   ?? dateRangeEnd,
-      recordCount:    meta.record_count     ?? recordCount,
+      dateRangeStart: resolvedStart,
+      dateRangeEnd:   resolvedEnd,
+      recordCount:    resolvedCount,
+      streamName:     result.streamName,
     });
+
+    // ── Gap detection ──────────────────────────────────────────────────────
+    const GAP_TOLERANCE_S = 7200; // 2 hours — allow for download overlap / clock drift
+    if (resolvedStart) {
+      await db.clearFileGap(fileRecord.id); // reset in case of reparse
+      const priorEnd = await db.getPriorCoverageEnd(
+        visit.station_id,
+        result.streamName,
+        fileRecord.id
+      );
+      if (priorEnd !== null) {
+        const gapSeconds = (new Date(resolvedStart).getTime() - new Date(priorEnd).getTime()) / 1000;
+        if (gapSeconds > GAP_TOLERANCE_S) {
+          const gapDays = Math.ceil(gapSeconds / 86400);
+          await db.markFileGap(fileRecord.id, gapDays);
+          await db.updateVisitStatus(visit.id, 'flagged');
+        }
+      }
+    }
+    // ── End gap detection ──────────────────────────────────────────────────
   } catch (err) {
     console.error(`Parse failed for file ${fileRecord.id}:`, err.message);
     await db.updateFileParseError(fileRecord.id, err.message);
@@ -133,6 +159,7 @@ async function parseInBackground(fileRecord, visitId) {
 
 function formatToModule(format) {
   const map = {
+    hobo_binary:   'hobo_binary',
     hobo_csv:      'hobo',
     solonist_xle:  'solonist',
     campbell_toa5: 'campbell_toa5',

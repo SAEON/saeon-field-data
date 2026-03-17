@@ -2,7 +2,7 @@
 // The visit record already exists on the server (created by App.jsx on "Start visit").
 // This component PATCHes /api/visits/:id whenever fields change (debounced 800ms).
 import { useState, useEffect, useRef } from 'react';
-import { updateVisit } from '../services/api.js';
+import { updateVisit, getStationCoverage } from '../services/api.js';
 
 const PROMPTS = [
   {
@@ -36,6 +36,11 @@ function nowDateTime() {
   };
 }
 
+function fmtCoverageDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export default function VisitDetails({ visitId, station, formState, setFormState }) {
   const { date: todayDate, time: nowTime } = nowDateTime();
 
@@ -45,6 +50,13 @@ export default function VisitDetails({ visitId, station, formState, setFormState
   const [selections, setSelections] = useState(formState?.selections || { access: [], weather: [], equipment: [] });
   const [extraNotes, setExtraNotes] = useState(formState?.extraNotes || '');
   const [saveState,  setSaveState]  = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
+  const [coverage,   setCoverage]   = useState(null);
+
+  useEffect(() => {
+    if (station?.id) {
+      getStationCoverage(station.id).then(r => setCoverage(r.coverage)).catch(() => {});
+    }
+  }, [station?.id]);
 
   const dateInputRef = useRef(null);
   const saveTimer    = useRef(null);
@@ -122,6 +134,26 @@ export default function VisitDetails({ visitId, station, formState, setFormState
 
       {/* ── Scrollable body ────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-4 pt-2">
+
+        {/* ── Data coverage card ─────────────────────────────────── */}
+        {coverage && coverage.length > 0 && (
+          <div className="form-card" style={{ marginBottom: 12 }}>
+            <div className="text-[13px] font-semibold text-text-dark mb-2">History</div>
+            <div className="flex flex-col gap-1.5">
+              {coverage.map(s => (
+                <div key={s.stream_name} className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-text-med capitalize">
+                    {s.stream_name.replace(/_/g, ' ')}
+                  </span>
+                  <span className="text-[11px] text-text-light">
+                    {fmtCoverageDate(s.coverage_start)} — {fmtCoverageDate(s.coverage_end)}
+                    <span className="ml-1.5 text-text-med font-semibold">({s.file_count} file{s.file_count !== 1 ? 's' : ''})</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── Date & Time card ───────────────────────────────────── */}
         <div className="form-card">

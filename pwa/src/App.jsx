@@ -479,6 +479,7 @@ export default function App() {
                 {visitSection === 'files' && (
                   <UploadFiles
                     visitId={draftVisit.visitId}
+                    stationId={draftVisit.station.id}
                     files={visitFiles}
                     setFiles={setVisitFiles}
                     dataFamily={draftVisit.station.data_family}

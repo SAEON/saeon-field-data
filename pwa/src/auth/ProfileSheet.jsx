@@ -21,7 +21,7 @@ function ProfileDropdown({ onClose }) {
   }, [onClose]);
 
   function handleLogout() {
-    keycloak.logout({ redirectUri: window.location.origin + '/fds' });
+    keycloak.logout({ redirectUri: window.location.origin + '/fds/' });
   }
 
   const ROLE_LABELS = {

@@ -67,6 +67,10 @@ export function getStationById(id) {
   return request(`/api/stations/${id}`);
 }
 
+export function getStationCoverage(id) {
+  return request(`/api/stations/${id}/coverage`);
+}
+
 // ── Visits ─────────────────────────────────────────────────────────────────
 
 export function createVisit({ station_id, technician_id, visited_at, notes, status }) {

@@ -176,6 +176,7 @@ async function getAllVisits({ stationId, status, technicianId } = {}) {
             u.id AS technician_id, u.full_name AS technician_name,
             (SELECT COUNT(*) FROM uploaded_files  uf WHERE uf.visit_id = fv.id)::int  AS file_count,
             (SELECT COUNT(*) FROM uploaded_files  uf WHERE uf.visit_id = fv.id AND uf.parse_status = 'error')::int AS file_error_count,
+            (SELECT COUNT(*) FROM uploaded_files  uf WHERE uf.visit_id = fv.id AND uf.has_gap = true)::int         AS file_gap_count,
             (SELECT COUNT(*) FROM manual_readings mr WHERE mr.visit_id = fv.id)::int  AS reading_count,
             (SELECT mr.value_text FROM manual_readings mr WHERE mr.visit_id = fv.id AND mr.reading_type = 'overall_site_condition' LIMIT 1) AS site_condition
      FROM   field_visits fv
@@ -206,7 +207,8 @@ async function getVisitById(id) {
 async function getVisitFiles(visitId) {
   const result = await pool.query(
     `SELECT id, original_name, file_format, parse_status,
-            date_range_start, date_range_end, record_count, uploaded_at
+            date_range_start, date_range_end, record_count,
+            has_gap, gap_days, stream_name, uploaded_at
      FROM   uploaded_files
      WHERE  visit_id = $1
      ORDER  BY uploaded_at`,
@@ -271,16 +273,17 @@ async function createUploadedFile({ visitId, originalName, fileHash, fileSizeByt
   return result.rows[0];
 }
 
-async function updateFileParsed(id, { dateRangeStart, dateRangeEnd, recordCount }) {
+async function updateFileParsed(id, { dateRangeStart, dateRangeEnd, recordCount, streamName }) {
   const result = await pool.query(
     `UPDATE uploaded_files
-     SET    parse_status = 'parsed',
+     SET    parse_status     = 'parsed',
             date_range_start = $2,
             date_range_end   = $3,
-            record_count     = $4
+            record_count     = $4,
+            stream_name      = $5
      WHERE  id = $1
      RETURNING *`,
-    [id, dateRangeStart, dateRangeEnd, recordCount]
+    [id, dateRangeStart, dateRangeEnd, recordCount, streamName ?? null]
   );
   return result.rows[0] || null;
 }
@@ -295,6 +298,56 @@ async function updateFileParseError(id, errorMessage) {
     [id, errorMessage]
   );
   return result.rows[0] || null;
+}
+
+async function getPriorCoverageEnd(stationId, streamName, excludeFileId) {
+  const result = await pool.query(
+    `SELECT MAX(uf.date_range_end) AS prior_end
+     FROM   uploaded_files uf
+     JOIN   field_visits   fv ON fv.id = uf.visit_id
+     WHERE  fv.station_id   = $1
+       AND  uf.stream_name  = $2
+       AND  uf.parse_status = 'parsed'
+       AND  uf.id          != $3`,
+    [stationId, streamName, excludeFileId]
+  );
+  return result.rows[0]?.prior_end ?? null;
+}
+
+async function markFileGap(fileId, gapDays) {
+  const result = await pool.query(
+    `UPDATE uploaded_files
+     SET    has_gap  = true,
+            gap_days = $2
+     WHERE  id = $1
+     RETURNING id, has_gap, gap_days`,
+    [fileId, gapDays]
+  );
+  return result.rows[0] || null;
+}
+
+async function clearFileGap(fileId) {
+  await pool.query(
+    `UPDATE uploaded_files SET has_gap = false, gap_days = NULL WHERE id = $1`,
+    [fileId]
+  );
+}
+
+async function getFilesWithGaps() {
+  const result = await pool.query(
+    `SELECT uf.id, uf.original_name, uf.stream_name, uf.gap_days,
+            uf.date_range_start, uf.date_range_end, uf.uploaded_at,
+            s.display_name AS station_name,
+            u.full_name    AS technician_name,
+            fv.visited_at
+     FROM   uploaded_files uf
+     JOIN   field_visits   fv ON fv.id = uf.visit_id
+     JOIN   stations        s  ON s.id  = fv.station_id
+     JOIN   users           u  ON u.id  = fv.technician_id
+     WHERE  uf.has_gap = true
+     ORDER  BY uf.gap_days DESC NULLS LAST, uf.uploaded_at DESC`
+  );
+  return result.rows;
 }
 
 async function resetFileToPending(id) {
@@ -661,6 +714,10 @@ module.exports = {
   updateFileParsed,
   updateFileParseError,
   resetFileToPending,
+  getPriorCoverageEnd,
+  markFileGap,
+  clearFileGap,
+  getFilesWithGaps,
   getFileById,
   getUnparsedFiles,
   deleteMeasurementsByFile,

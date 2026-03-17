@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getStationsRegistry, createStation, updateStation, deactivateStation } from '../services/api.js';
+import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage } from '../services/api.js';
 
 const DATA_FAMILY_OPTIONS = [
   { value: 'groundwater', label: 'Groundwater' },
@@ -283,6 +283,99 @@ function DeactivateSheet({ station, onClose, onDeactivated }) {
   );
 }
 
+const STREAM_LABEL = {
+  raw_rainfall:    { label: 'Rainfall',       icon: '🌧' },
+  raw_groundwater: { label: 'Groundwater',    icon: '💧' },
+  raw_5_min:       { label: 'Met (5-min)',    icon: '🌤' },
+  raw_hourly:      { label: 'Met (hourly)',   icon: '🌤' },
+  raw_stom:        { label: 'STOM',           icon: '📡' },
+};
+
+function CoverageSheet({ station, onClose }) {
+  const [coverage, setCoverage] = useState(null);
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState(null);
+
+  useEffect(() => {
+    getStationCoverage(station.id)
+      .then(data => setCoverage(data.coverage || []))
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [station.id]);
+
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  return (
+    <div className="back-sheet-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="back-sheet" style={{ maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+
+        <div className="flex justify-center pt-2.5 pb-0 shrink-0">
+          <div className="w-9 h-1 rounded-full bg-border" />
+        </div>
+
+        <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
+          <div>
+            <div className="text-[15px] font-bold text-text-dark">{station.display_name}</div>
+            <div className="text-[11px] text-text-light mt-0.5 font-mono">{station.name}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-text-light text-[16px] shrink-0 bg-transparent border-none"
+            style={{ border: '1px solid var(--color-border)' }}
+          >✕</button>
+        </div>
+
+        <div className="text-[11px] font-bold text-text-light uppercase tracking-wide px-5 pb-2 shrink-0">
+          Data Coverage
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 pb-6">
+          {loading && (
+            <div className="text-[13px] text-text-light py-6 text-center">Loading…</div>
+          )}
+          {error && (
+            <div className="text-[12px] text-error py-4 text-center">{error}</div>
+          )}
+          {!loading && !error && coverage?.length === 0 && (
+            <div className="text-[13px] text-text-light py-6 text-center">
+              No data uploaded yet for this station.
+            </div>
+          )}
+          {!loading && !error && coverage?.length > 0 && (
+            <div className="bg-white rounded-xl overflow-hidden" style={{ border: '1.5px solid var(--color-border)' }}>
+              {coverage.map((row, i) => {
+                const meta = STREAM_LABEL[row.stream_name] || { label: row.stream_name, icon: '📁' };
+                return (
+                  <div
+                    key={row.stream_name}
+                    className="px-3.5 py-3"
+                    style={{ borderBottom: i < coverage.length - 1 ? '1px solid var(--color-surface-dark)' : 'none' }}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[12px] font-semibold text-text-dark">
+                        {meta.icon} {meta.label}
+                      </span>
+                      <span className="text-[11px] text-text-light">
+                        {row.file_count} {row.file_count === 1 ? 'file' : 'files'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-text-light">
+                      {fmtDate(row.coverage_start)} — {fmtDate(row.coverage_end)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function StationRegistry() {
   const [stations,         setStations]         = useState([]);
   const [loading,          setLoading]          = useState(true);
@@ -290,6 +383,7 @@ export default function StationRegistry() {
   const [showInactive,     setShowInactive]     = useState(false);
   const [editTarget,       setEditTarget]       = useState(undefined);
   const [deactivateTarget, setDeactivateTarget] = useState(null);
+  const [coverageTarget,   setCoverageTarget]   = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -391,6 +485,13 @@ export default function StationRegistry() {
 
                   <div className="flex gap-1.5 shrink-0">
                     <button
+                      onClick={() => setCoverageTarget(station)}
+                      className="h-7 px-2.5 rounded-lg text-[11px] font-semibold border-none"
+                      style={{ background: '#F3F4F6', color: '#374151' }}
+                    >
+                      History
+                    </button>
+                    <button
                       onClick={() => setEditTarget(station)}
                       className="h-7 px-2.5 rounded-lg text-[11px] font-semibold border-none"
                       style={{ background: '#EAF0FB', color: 'var(--color-navy)' }}
@@ -433,6 +534,13 @@ export default function StationRegistry() {
           station={deactivateTarget}
           onClose={() => setDeactivateTarget(null)}
           onDeactivated={handleDeactivated}
+        />
+      )}
+
+      {coverageTarget && (
+        <CoverageSheet
+          station={coverageTarget}
+          onClose={() => setCoverageTarget(null)}
         />
       )}
     </div>
