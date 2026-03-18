@@ -1,6 +1,9 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db/queries');
+const { requireAuth } = require('../middleware/auth');
+
+router.use(requireAuth);
 
 // GET /api/streams/:id/measurements?from=&to=&limit=
 // Returns parsed measurements for a data stream within a date range.

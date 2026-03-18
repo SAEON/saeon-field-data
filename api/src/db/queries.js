@@ -46,19 +46,27 @@ async function getStationLastVisit(stationId) {
   return result.rows[0] || null;
 }
 
-async function getAllStationsWithLastVisit() {
+async function getAllStationsWithLastVisit(assignedToUserId = null) {
+  const params = [];
+  let assignmentClause = '';
+  if (assignedToUserId) {
+    params.push(assignedToUserId);
+    assignmentClause = `AND s.assigned_technician_id = $${params.length}`;
+  }
   const result = await pool.query(`
     SELECT s.id, s.name, s.display_name, s.data_family, s.region,
            s.active, s.visit_frequency_days, s.assigned_technician_id,
+           u.full_name AS assigned_technician_name,
            ST_Y(s.location::geometry) AS latitude,
            ST_X(s.location::geometry) AS longitude,
            MAX(fv.visited_at) AS last_visited_at
     FROM   stations s
+    LEFT JOIN users u        ON u.id  = s.assigned_technician_id
     LEFT JOIN field_visits fv ON fv.station_id = s.id
-    WHERE  s.active = true
-    GROUP  BY s.id
+    WHERE  s.active = true ${assignmentClause}
+    GROUP  BY s.id, u.full_name
     ORDER  BY s.name
-  `);
+  `, params);
   return result.rows;
 }
 
@@ -67,13 +75,15 @@ async function getAllStationsRegistry() {
   const result = await pool.query(`
     SELECT s.id, s.name, s.display_name, s.data_family, s.region,
            s.active, s.visit_frequency_days, s.assigned_technician_id,
+           u.full_name AS assigned_technician_name,
            s.elevation_m, s.notes,
            ST_Y(s.location::geometry) AS latitude,
            ST_X(s.location::geometry) AS longitude,
            MAX(fv.visited_at) AS last_visited_at
     FROM   stations s
+    LEFT JOIN users u         ON u.id  = s.assigned_technician_id
     LEFT JOIN field_visits fv ON fv.station_id = s.id
-    GROUP  BY s.id
+    GROUP  BY s.id, u.full_name
     ORDER  BY s.active DESC, s.name
   `);
   return result.rows;
@@ -172,16 +182,19 @@ async function getAllVisits({ stationId, status, technicianId } = {}) {
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const result = await pool.query(
     `SELECT fv.id, fv.visited_at, fv.submitted_at, fv.status, fv.notes,
+            fv.assigned_technician_id,
             s.id AS station_id, s.display_name AS station_display_name, s.data_family,
-            u.id AS technician_id, u.full_name AS technician_name,
+            u.id  AS technician_id,          u.full_name  AS technician_name,
+            au.id AS assigned_technician_id, au.full_name AS assigned_technician_name,
             (SELECT COUNT(*) FROM uploaded_files  uf WHERE uf.visit_id = fv.id)::int  AS file_count,
             (SELECT COUNT(*) FROM uploaded_files  uf WHERE uf.visit_id = fv.id AND uf.parse_status = 'error')::int AS file_error_count,
             (SELECT COUNT(*) FROM uploaded_files  uf WHERE uf.visit_id = fv.id AND uf.has_gap = true)::int         AS file_gap_count,
             (SELECT COUNT(*) FROM manual_readings mr WHERE mr.visit_id = fv.id)::int  AS reading_count,
             (SELECT mr.value_text FROM manual_readings mr WHERE mr.visit_id = fv.id AND mr.reading_type = 'overall_site_condition' LIMIT 1) AS site_condition
      FROM   field_visits fv
-     JOIN   stations s ON s.id = fv.station_id
-     JOIN   users    u ON u.id = fv.technician_id
+     JOIN   stations s  ON s.id  = fv.station_id
+     JOIN   users    u  ON u.id  = fv.technician_id
+     LEFT JOIN users au ON au.id = fv.assigned_technician_id
      ${where}
      ORDER  BY fv.visited_at DESC
      LIMIT  100`,
@@ -229,7 +242,6 @@ async function getVisitReadings(visitId) {
 }
 
 async function updateVisitStatus(id, status) {
-  const submitted_at = status === 'submitted' ? new Date() : null;
   const result = await pool.query(
     `UPDATE field_visits
      SET status = $2,
@@ -399,6 +411,12 @@ async function createManualReading({ visitId, readingType, valueNumeric, valueTe
     `INSERT INTO manual_readings
        (visit_id, reading_type, value_numeric, value_text, unit, recorded_at, notes)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (visit_id, reading_type) DO UPDATE SET
+       value_numeric = EXCLUDED.value_numeric,
+       value_text    = EXCLUDED.value_text,
+       unit          = EXCLUDED.unit,
+       recorded_at   = EXCLUDED.recorded_at,
+       notes         = EXCLUDED.notes
      RETURNING *`,
     [visitId, readingType, valueNumeric || null, valueText || null, unit || null, recordedAt, notes || null]
   );
@@ -463,6 +481,144 @@ async function getMeasurementCount(fileId) {
     [fileId]
   );
   return result.rows[0].count;
+}
+
+
+// =============================================================
+// RAINFALL PROCESSING
+// =============================================================
+
+// Raw rainfall tips for a station — sorted by time, with current flag
+async function getRawTipsForStation(stationId) {
+  const result = await pool.query(
+    `SELECT rm.id, rm.stream_id, rm.measured_at, rm.qa_flag
+     FROM   raw_measurements rm
+     JOIN   station_data_streams sds ON sds.id = rm.stream_id
+     JOIN   phenomena p ON p.id = rm.phenomenon_id
+     WHERE  sds.station_id = $1
+       AND  p.name = 'rain_tip'
+       AND  rm.is_interference = false
+     ORDER  BY rm.measured_at`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+// Visit timestamps for a station — used for ±600s interfere window
+async function getVisitTimestampsForStation(stationId) {
+  const result = await pool.query(
+    `SELECT visited_at
+     FROM   field_visits
+     WHERE  station_id = $1
+       AND  status IN ('pending', 'complete', 'flagged')
+     ORDER  BY visited_at`,
+    [stationId]
+  );
+  return result.rows.map(r => new Date(r.visited_at));
+}
+
+// Pseudo-event windows from manual_readings (event_start_dt + event_end_dt pairs)
+async function getPseudoEventWindows(stationId) {
+  const result = await pool.query(
+    `SELECT
+       MAX(CASE WHEN mr.reading_type = 'event_start_dt' THEN mr.value_text END) AS start_dt,
+       MAX(CASE WHEN mr.reading_type = 'event_end_dt'   THEN mr.value_text END) AS end_dt
+     FROM   field_visits fv
+     JOIN   manual_readings mr ON mr.visit_id = fv.id
+     WHERE  fv.station_id = $1
+       AND  fv.status IN ('pending', 'complete', 'flagged')
+       AND  mr.reading_type IN ('event_start_dt', 'event_end_dt')
+     GROUP  BY fv.id
+     HAVING MAX(CASE WHEN mr.reading_type = 'event_start_dt' THEN mr.value_text END) IS NOT NULL
+        AND MAX(CASE WHEN mr.reading_type = 'event_end_dt'   THEN mr.value_text END) IS NOT NULL`,
+    [stationId]
+  );
+  return result.rows.map(r => ({ start: new Date(r.start_dt), end: new Date(r.end_dt) }));
+}
+
+// Bulk-update flag on raw_measurements — only changed rows are passed in
+async function bulkUpdateFlags(updates) {
+  if (!updates.length) return;
+  const ids   = updates.map(u => u.id);
+  const flags = updates.map(u => u.flag); // null = valid (clears old flag)
+  await pool.query(
+    `UPDATE raw_measurements rm
+     SET    qa_flag = u.flag
+     FROM   unnest($1::bigint[], $2::text[]) AS u(id, flag)
+     WHERE  rm.id = u.id`,
+    [ids, flags]
+  );
+}
+
+// Upsert 5-min rainfall aggregates — recalculated on every processing run
+async function upsertRainfallRows(rows) {
+  if (!rows.length) return;
+  const stationIds  = rows.map(r => r.stationId);
+  const streamIds   = rows.map(r => r.streamId);
+  const starts      = rows.map(r => r.periodStart);
+  const rainMms     = rows.map(r => r.rainMm);
+  const tipCounts   = rows.map(r => r.tipCount);
+  const validTipss  = rows.map(r => r.validTips);
+  const anomalies   = rows.map(r => r.isAnomaly);
+
+  await pool.query(
+    `INSERT INTO rainfall
+       (station_id, stream_id, period_start, rain_mm, tip_count, valid_tips, is_anomaly)
+     SELECT * FROM unnest(
+       $1::int[], $2::int[], $3::timestamptz[],
+       $4::numeric[], $5::int[], $6::int[], $7::bool[]
+     )
+     ON CONFLICT (stream_id, period_start) DO UPDATE SET
+       rain_mm      = EXCLUDED.rain_mm,
+       tip_count    = EXCLUDED.tip_count,
+       valid_tips   = EXCLUDED.valid_tips,
+       is_anomaly   = EXCLUDED.is_anomaly,
+       processed_at = NOW()`,
+    [stationIds, streamIds, starts, rainMms, tipCounts, validTipss, anomalies]
+  );
+}
+
+// Query rainfall aggregates at any resolution — aggregation happens here at runtime
+// resolution: '5min' | 'hourly' | 'daily' | 'monthly' | 'yearly'
+async function getRainfallData(stationId, from, to, resolution = 'daily') {
+  if (resolution === '5min') {
+    const result = await pool.query(
+      `SELECT period_start, rain_mm, tip_count, valid_tips, is_anomaly AS has_anomaly
+       FROM   rainfall
+       WHERE  station_id = $1
+         AND  period_start BETWEEN $2 AND $3
+       ORDER  BY period_start`,
+      [stationId, from, to]
+    );
+    return result.rows;
+  }
+
+  // Validated against fixed map — safe to interpolate into SQL
+  const truncMap = {
+    hourly:     `DATE_TRUNC('hour',  period_start)`,
+    daily:      `DATE_TRUNC('day',   period_start)`,
+    saws_daily: `DATE_TRUNC('day',   period_start - INTERVAL '6 hours') + INTERVAL '6 hours'`,
+    monthly:    `DATE_TRUNC('month', period_start)`,
+    yearly:     `DATE_TRUNC('year',  period_start)`,
+  };
+  if (!truncMap[resolution]) throw new Error(`Invalid resolution: ${resolution}`);
+  const trunc = truncMap[resolution];
+
+  const result = await pool.query(
+    `SELECT
+       ${trunc}                       AS period_start,
+       SUM(rain_mm)::numeric(8,3)     AS rain_mm,
+       SUM(tip_count)::integer        AS tip_count,
+       SUM(valid_tips)::integer       AS valid_tips,
+       BOOL_OR(is_anomaly)            AS has_anomaly
+     FROM   rainfall
+     WHERE  station_id = $1
+       AND  period_start BETWEEN $2 AND $3
+     GROUP  BY ${trunc}
+     ORDER  BY ${trunc}`,
+    [stationId, from, to]
+  );
+  return result.rows;
 }
 
 
@@ -725,6 +881,13 @@ module.exports = {
   // Readings
   createManualReading,
   getReadingsByVisit,
+  // Rainfall processing
+  getRawTipsForStation,
+  getVisitTimestampsForStation,
+  getPseudoEventWindows,
+  bulkUpdateFlags,
+  upsertRainfallRows,
+  getRainfallData,
   // Measurements
   bulkInsertMeasurements,
   getMeasurementsByStream,

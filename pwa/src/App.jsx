@@ -80,8 +80,8 @@ function AppBar({ title, subtitle }) {
 // ── Visit section segmented control ───────────────────────────────────────
 const SECTIONS = [
   { id: 'details',  label: 'Details'  },
-  { id: 'files',    label: 'Files'    },
   { id: 'readings', label: 'Readings' },
+  { id: 'files',    label: 'Files'    },
 ];
 
 function VisitSegmentedControl({ section, setSection, completionMap }) {
@@ -228,6 +228,7 @@ export default function App() {
   const [showSubmit,   setShowSubmit]   = useState(false);
   const [submitting,   setSubmitting]   = useState(false);
   const [readingsDone, setReadingsDone] = useState(false);
+  const [detailsAllDone, setDetailsAllDone] = useState(false);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [installDismissed, setInstallDismissed] = useState(false);
   const [isInstalled, setIsInstalled] = useState(isStandaloneDisplayMode());
@@ -337,6 +338,7 @@ export default function App() {
       setFormState(null);
       setVisitFiles([]);
       setReadingsDone(false);
+      setDetailsAllDone(false);
       await saveDraft({ visitId: visit.id, station, formState: null, files: [] });
       setActiveTab('visit');
       setVisitSection('details');
@@ -384,11 +386,11 @@ export default function App() {
   const visitBadge    = draftVisit ? 1 : 0;  // dot indicator when draft exists
 
   // Section completion
-  const detailsDone = !!formState?.visitDate;
+  const detailsDone = detailsAllDone;
   const filesDone   = hasFiles;
   const completionMap = { details: detailsDone, files: filesDone, readings: readingsDone };
 
-  const canSubmit = draftVisit && (hasFiles || readingsDone);
+  const canSubmit = draftVisit && detailsDone && filesDone && readingsDone;
 
   if (draftLoading) {
     return (
@@ -474,6 +476,14 @@ export default function App() {
                     station={draftVisit.station}
                     formState={formState}
                     setFormState={setFormState}
+                    onDetailsDone={() => setDetailsAllDone(true)}
+                  />
+                )}
+                {visitSection === 'readings' && (
+                  <ManualReadings
+                    visitId={draftVisit.visitId}
+                    dataFamily={draftVisit.station.data_family}
+                    onReadingsSaved={() => setReadingsDone(true)}
                   />
                 )}
                 {visitSection === 'files' && (
@@ -485,13 +495,6 @@ export default function App() {
                     dataFamily={draftVisit.station.data_family}
                   />
                 )}
-                {visitSection === 'readings' && (
-                  <ManualReadings
-                    visitId={draftVisit.visitId}
-                    dataFamily={draftVisit.station.data_family}
-                    onReadingsSaved={() => setReadingsDone(true)}
-                  />
-                )}
               </main>
 
               {/* Submit bar */}
@@ -501,7 +504,10 @@ export default function App() {
                   disabled={!canSubmit}
                   className="cta-btn"
                 >
-                  {canSubmit ? 'Review & submit visit →' : 'Add files or readings to submit'}
+                  {canSubmit ? 'Review & submit visit →'
+                    : !detailsDone   ? 'Complete site notes to continue'
+                    : !readingsDone  ? 'Complete manual readings to continue'
+                    : 'Upload a logger file to continue'}
                 </button>
               </div>
             </>

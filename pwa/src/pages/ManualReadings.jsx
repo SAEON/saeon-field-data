@@ -7,10 +7,36 @@ import { createReading, getVisit } from '../services/api.js';
 import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
 
 const REQUIRED_TYPES = {
-  rainfall:    ['gauge_condition', 'overall_site_condition'],
+  rainfall:    ['event_type', 'gauge_condition', 'overall_site_condition'],
   groundwater: ['dipper_depth', 'dipper_time', 'overall_site_condition'],
   met:         ['pyranometer_clean', 'anemometer_spinning', 'rain_gauge_clear', 'overall_site_condition'],
 };
+
+const EVENT_TYPES = [
+  { group: 'Logger', options: [
+    { value: 'logger_download',     label: 'Logger download' },
+    { value: 'logger_maintenance',  label: 'Logger maintenance' },
+    { value: 'logger_missing',      label: 'Logger missing' },
+    { value: 'logger_deploy',       label: 'Logger deployed' },
+    { value: 'logger_decommission', label: 'Logger decommissioned' },
+    { value: 'logger_program',      label: 'Logger programmed' },
+    { value: 'logger_stopped',      label: 'Logger stopped' },
+  ]},
+  { group: 'Raingauge', options: [
+    { value: 'raingauge_maintenance',       label: 'Raingauge maintenance' },
+    { value: 'raingauge_missing',           label: 'Raingauge missing' },
+    { value: 'raingauge_deploy',            label: 'Raingauge deployed' },
+    { value: 'raingauge_decommission',      label: 'Raingauge decommissioned' },
+    { value: 'raingauge_calibrate',         label: 'Raingauge calibration' },
+    { value: 'raingauge_calibration_check', label: 'Calibration check' },
+    { value: 'pseudo_events',              label: 'Non-rainfall water entry' },
+  ]},
+];
+
+const PROBLEMATIC_EVENTS = new Set([
+  'logger_maintenance', 'logger_missing', 'logger_stopped', 'logger_decommission',
+  'raingauge_maintenance', 'raingauge_missing', 'raingauge_decommission',
+]);
 
 // ── Save button ───────────────────────────────────────────────────────────────
 
@@ -237,7 +263,9 @@ function DateTimeField({ readingType, label, hint, existingReading, onSave }) {
   async function handleSave() {
     setSaveState('saving');
     try {
-      await onSave({ reading_type: readingType, value_text: value, recorded_at: new Date().toISOString() });
+      // Convert datetime-local string to ISO with timezone so server-side Date parsing is unambiguous
+      const iso = value ? new Date(value).toISOString() : value;
+      await onSave({ reading_type: readingType, value_text: iso, recorded_at: new Date().toISOString() });
       setSaveState('saved');
     } catch (err) {
       setSaveState(err?.offline ? 'queued' : 'error');
@@ -334,7 +362,7 @@ function SiteConditionSection({ existingReading, onSave }) {
   return (
     <div className="form-card">
       <div className="text-[13px] font-bold text-text-dark mb-3">
-        🏕 Overall site condition <span className="text-warning text-[11px]">*</span>
+        Overall site condition <span className="text-warning text-[11px]">*</span>
       </div>
       <div className="flex flex-wrap gap-1.5 mb-2.5">
         {[
@@ -362,14 +390,138 @@ function SiteConditionSection({ existingReading, onSave }) {
   );
 }
 
+// ── Event type select field ───────────────────────────────────────────────────
+
+function EventTypeField({ existingReading, onSave, onEventTypeChange }) {
+  const init = existingReading?.value_text ?? '';
+  const [value,     setValue]    = useState(init);
+  const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
+  const saved = saveState === 'saved';
+
+  useEffect(() => { onEventTypeChange?.(value); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleChange(e) {
+    const val = e.target.value;
+    setValue(val);
+    setSaveState('saving');
+    onEventTypeChange?.(val);
+    try {
+      await onSave({ reading_type: 'event_type', value_text: val, recorded_at: new Date().toISOString() });
+      setSaveState('saved');
+    } catch (err) {
+      setSaveState(err?.offline ? 'queued' : 'error');
+    }
+  }
+
+  return (
+    <div className="form-card">
+      <div className="flex items-baseline justify-between mb-0.5">
+        <div className="text-[12px] font-semibold text-text-dark">
+          Visit activity <span className="text-warning text-[11px]">*</span>
+        </div>
+        <span className={`text-[10px] font-semibold ${
+          saveState === 'saved'  ? 'text-success' :
+          saveState === 'error'  ? 'text-error'   :
+          saveState === 'queued' ? 'text-blue'     : 'text-transparent'
+        }`}>
+          {saveState === 'saved' ? '✓ Saved' : saveState === 'error' ? 'Save failed' : saveState === 'queued' ? 'Queued' : '·'}
+        </span>
+      </div>
+      <div className="text-[11px] text-text-light mb-1.5">What did you come to do at this station?</div>
+      <select
+        value={value}
+        onChange={handleChange}
+        className={`field-input w-full ${value ? 'field-input--active' : ''}`}
+        style={{ height: '38px' }}
+      >
+        <option value="">Select what you did…</option>
+        {EVENT_TYPES.map(group => (
+          <optgroup key={group.group} label={group.group}>
+            {group.options.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+// ── Event problem notes field ─────────────────────────────────────────────────
+
+function EventProblemNotesField({ existingReading, onSave }) {
+  const init = existingReading?.value_text ?? '';
+  const [value,     setValue]    = useState(init);
+  const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
+  const saved = saveState === 'saved';
+
+  async function handleSave() {
+    setSaveState('saving');
+    try {
+      await onSave({ reading_type: 'event_problem_notes', value_text: value, recorded_at: new Date().toISOString() });
+      setSaveState('saved');
+    } catch (err) {
+      setSaveState(err?.offline ? 'queued' : 'error');
+    }
+  }
+
+  return (
+    <div className="form-card" style={{ borderColor: '#FDE68A' }}>
+      <div className="flex items-baseline justify-between mb-0.5">
+        <div className="text-[12px] font-semibold text-text-dark">
+          Describe what you found <span className="text-warning text-[11px]">*</span>
+        </div>
+      </div>
+      <textarea
+        value={value}
+        onChange={e => { setValue(e.target.value); setSaveState('idle'); }}
+        placeholder="e.g. Logger was missing from mount — bracket broken. No data since last visit."
+        rows={3}
+        disabled={saved}
+        className="notes-textarea w-full mb-2"
+      />
+      <div className="flex justify-end">
+        <SaveBtn state={saveState} hasValue={value.trim() !== ''} onClick={handleSave} />
+      </div>
+    </div>
+  );
+}
+
 // ── Family form components ────────────────────────────────────────────────────
 
 function RainfallForm({ saved, onSave }) {
   function ex(type) { return saved.find(r => r.reading_type === type); }
+  const initEventType = ex('event_type')?.value_text ?? '';
+  const [eventType, setEventType] = useState(initEventType);
+  const isProblematic = PROBLEMATIC_EVENTS.has(eventType);
+
   return (
     <>
+      <EventTypeField
+        existingReading={ex('event_type')}
+        onSave={onSave}
+        onEventTypeChange={setEventType}
+      />
+      {eventType === 'pseudo_events' ? (
+        <>
+          <DateTimeField
+            readingType="event_start_dt" label="Water entry start" hint="When did non-rainfall tipping begin?"
+            existingReading={ex('event_start_dt')} onSave={onSave}
+          />
+          <DateTimeField
+            readingType="event_end_dt" label="Water entry end" hint="When did non-rainfall tipping stop?"
+            existingReading={ex('event_end_dt')} onSave={onSave}
+          />
+        </>
+      ) : isProblematic ? (
+        <EventProblemNotesField
+          existingReading={ex('event_problem_notes')}
+          onSave={onSave}
+        />
+      ) : null}
       <ChipsField
-        readingType="gauge_condition" label="Gauge condition" required
+        readingType="gauge_condition" label="Raingauge condition" required
+        hint="How did you find the gauge?"
         options={[
           { value: 'good',      label: 'Good' },
           { value: 'debris',    label: 'Debris inside' },
@@ -380,18 +532,23 @@ function RainfallForm({ saved, onSave }) {
         existingReading={ex('gauge_condition')} onSave={onSave}
       />
       <NumberField
-        readingType="gauge_reading" label="Gauge reading at visit" hint="Optional"
+        readingType="gauge_reading" label="Rainfall accumulated in gauge" hint="Optional"
         unit="mm" placeholder="0.0"
         existingReading={ex('gauge_reading')} onSave={onSave}
       />
       <DateTimeField
-        readingType="last_emptied" label="Last emptied" hint="Optional"
+        readingType="last_emptied" label="When did you empty the gauge?" hint="Optional"
         existingReading={ex('last_emptied')} onSave={onSave}
       />
       <NumberField
-        readingType="battery_voltage" label="Battery voltage" hint="Optional"
-        unit="V" placeholder="0.0"
+        readingType="battery_voltage" label="Logger battery" hint="From HOBO display (Optional)"
+        unit="%" placeholder="e.g. 87"
         existingReading={ex('battery_voltage')} onSave={onSave}
+      />
+      <NumberField
+        readingType="memory_used_pct" label="Logger memory used" hint="From HOBO display (Optional)"
+        unit="%" placeholder="e.g. 45" step="1"
+        existingReading={ex('memory_used_pct')} onSave={onSave}
       />
     </>
   );
@@ -456,7 +613,6 @@ function MetForm({ saved, onSave }) {
 // ── Main export ───────────────────────────────────────────────────────────────
 
 const FAMILY_LABEL = { rainfall: 'Rainfall', groundwater: 'Groundwater', met: 'Meteorological' };
-const FAMILY_ICON  = { rainfall: '🌧', groundwater: '💧', met: '🌤' };
 
 export default function ManualReadings({ visitId, dataFamily, onReadingsSaved }) {
   const [saved,    setSaved]    = useState([]);
@@ -559,7 +715,6 @@ export default function ManualReadings({ visitId, dataFamily, onReadingsSaved })
 
         {/* Family context strip */}
         <div className="flex items-center gap-1.5 pb-3 text-[12px] font-semibold" style={{ color: 'var(--fc-text)' }}>
-          <span>{FAMILY_ICON[dataFamily]}</span>
           {FAMILY_LABEL[dataFamily]} station — record all readings below
         </div>
 

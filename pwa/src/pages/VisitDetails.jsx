@@ -2,25 +2,17 @@
 // The visit record already exists on the server (created by App.jsx on "Start visit").
 // This component PATCHes /api/visits/:id whenever fields change (debounced 800ms).
 import { useState, useEffect, useRef } from 'react';
-import { updateVisit, getStationCoverage } from '../services/api.js';
+import { updateVisit, getStationCoverage, getVisit, createReading } from '../services/api.js';
 
 const PROMPTS = [
   {
     id: 'access',
     label: 'Site access',
-    icon: '🚗',
     options: ['No issues', 'Gate locked — used key', 'Road flooded', 'Road damaged', '4x4 required'],
-  },
-  {
-    id: 'weather',
-    label: 'Weather',
-    icon: '🌦',
-    options: ['Clear / sunny', 'Overcast', 'Light rain', 'Heavy rain', 'High wind', 'Foggy'],
   },
   {
     id: 'equipment',
     label: 'Equipment',
-    icon: '🔧',
     options: ['All good', 'Minor corrosion', 'Vandalism noted', 'Animal damage', 'Flooding near sensor', 'Equipment missing'],
   },
 ];
@@ -41,22 +33,36 @@ function fmtCoverageDate(iso) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-export default function VisitDetails({ visitId, station, formState, setFormState }) {
+export default function VisitDetails({ visitId, station, formState, setFormState, onDetailsDone }) {
   const { date: todayDate, time: nowTime } = nowDateTime();
 
   // Initialise from restored formState (draft resume) or defaults
   const [visitDate,  setVisitDate]  = useState(formState?.visitDate  || todayDate);
   const [visitTime,  setVisitTime]  = useState(formState?.visitTime  || nowTime);
-  const [selections, setSelections] = useState(formState?.selections || { access: [], weather: [], equipment: [] });
+  const [selections, setSelections] = useState(formState?.selections || { access: [], equipment: [] });
   const [extraNotes, setExtraNotes] = useState(formState?.extraNotes || '');
-  const [saveState,  setSaveState]  = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
-  const [coverage,   setCoverage]   = useState(null);
+  const [saveState,    setSaveState]    = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
+  const [coverage,     setCoverage]     = useState(null);
+  const [raining,      setRaining]      = useState(null);   // null | 'true' | 'false'
+  const [rainConfirmed, setRainConfirmed] = useState(false);
 
   useEffect(() => {
     if (station?.id) {
       getStationCoverage(station.id).then(r => setCoverage(r.coverage)).catch(() => {});
     }
   }, [station?.id]);
+
+  // Load existing raining readings on mount (draft resume)
+  useEffect(() => {
+    if (!station || station.data_family !== 'rainfall') return;
+    getVisit(visitId).then(v => {
+      const readings = v.readings || [];
+      const r = readings.find(x => x.reading_type === 'raining');
+      const c = readings.find(x => x.reading_type === 'no_rainfall_confirmed');
+      if (r) setRaining(r.value_text);
+      if (c) setRainConfirmed(true);
+    }).catch(() => {});
+  }, [visitId, station?.data_family]);
 
   const dateInputRef = useRef(null);
   const saveTimer    = useRef(null);
@@ -69,10 +75,10 @@ export default function VisitDetails({ visitId, station, formState, setFormState
       .map(p => {
         const chosen = selections[p.id];
         if (!chosen.length) return null;
-        return `${p.icon} ${p.label}: ${chosen.join(', ')}`;
+        return `• ${p.label}: ${chosen.join(', ')}`;
       })
       .filter(Boolean);
-    if (extraNotes.trim()) parts.push(`📝 ${extraNotes.trim()}`);
+    if (extraNotes.trim()) parts.push(`• ${extraNotes.trim()}`);
     return parts.join(' · ');
   }
 
@@ -107,11 +113,34 @@ export default function VisitDetails({ visitId, station, formState, setFormState
 
   const allPromptsDone = Object.values(selections).every(arr => arr.length > 0);
 
+  async function saveRaining(val) {
+    if (raining === val) return;
+    setRaining(val);
+    try {
+      await createReading(visitId, { reading_type: 'raining', value_text: val, recorded_at: new Date().toISOString() });
+    } catch {
+      setRaining(raining); // revert on failure
+    }
+  }
+
+  async function saveRainConfirmed(val) {
+    setRainConfirmed(val);
+    if (val) await createReading(visitId, { reading_type: 'no_rainfall_confirmed', value_text: 'true', recorded_at: new Date().toISOString() });
+  }
+
+  const isRainfallReady = station?.data_family !== 'rainfall' ||
+    (raining !== null && (raining === 'true' || rainConfirmed));
+  const allDetailsDone = allPromptsDone && isRainfallReady;
+
+  useEffect(() => {
+    if (allDetailsDone) onDetailsDone?.();
+  }, [allDetailsDone]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const promptSummary = PROMPTS
     .map(p => {
       const chosen = selections[p.id];
       if (!chosen.length) return null;
-      return `${p.icon} ${chosen.join(', ')}`;
+      return `• ${chosen.join(', ')}`;
     })
     .filter(Boolean)
     .join('  ·  ');
@@ -158,7 +187,7 @@ export default function VisitDetails({ visitId, station, formState, setFormState
         {/* ── Date & Time card ───────────────────────────────────── */}
         <div className="form-card">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-[13px] font-semibold text-text-dark">📅 Date &amp; time of visit</span>
+            <span className="text-[13px] font-semibold text-text-dark">Date &amp; time of visit</span>
             <button
               onClick={() => dateInputRef.current?.showPicker?.() ?? dateInputRef.current?.focus()}
               className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full border-[1.5px] ${
@@ -202,9 +231,9 @@ export default function VisitDetails({ visitId, station, formState, setFormState
         </div>
 
         {/* ── Site notes card ────────────────────────────────────── */}
-        <div className={`form-card ${!allPromptsDone ? 'form-card--alert' : ''}`} style={{ marginBottom: 24 }}>
+        <div className={`form-card ${!allPromptsDone ? 'form-card--alert' : ''}`} style={{ marginBottom: station?.data_family === 'rainfall' ? 12 : 24 }}>
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[13px] font-semibold text-text-dark">📝 Site notes</span>
+            <span className="text-[13px] font-semibold text-text-dark">Site notes</span>
             {!allPromptsDone
               ? <span className="text-[10px] font-semibold text-warning bg-warning-light px-2 py-0.5 rounded-full">Required</span>
               : <span className="text-[10px] font-semibold text-success bg-success-light px-2 py-0.5 rounded-full">✓ Done</span>
@@ -217,7 +246,6 @@ export default function VisitDetails({ visitId, station, formState, setFormState
           {PROMPTS.map((section, si) => (
             <div key={section.id} className={si < PROMPTS.length - 1 ? 'mb-3.5' : ''}>
               <div className="text-[11px] font-semibold mb-1.5 flex items-center gap-1.5">
-                <span>{section.icon}</span>
                 <span className={selections[section.id].length > 0 ? 'text-text-dark' : 'text-text-light'}>
                   {section.label}
                 </span>
@@ -251,7 +279,7 @@ export default function VisitDetails({ visitId, station, formState, setFormState
           {/* Free text */}
           <div className="mt-3.5">
             <div className="text-[11px] font-semibold text-text-light mb-1.5 flex justify-between">
-              <span>✏️ Anything else?</span>
+              <span>Anything else?</span>
               <span className="font-normal text-border">Optional</span>
             </div>
             <textarea
@@ -272,12 +300,62 @@ export default function VisitDetails({ visitId, station, formState, setFormState
               <div className="text-[12px] text-text-med leading-relaxed">
                 {promptSummary}
                 {extraNotes && (
-                  <><br /><span className="text-text-light">📝 {extraNotes}</span></>
+                  <><br /><span className="text-text-light">• {extraNotes}</span></>
                 )}
               </div>
             </div>
           )}
         </div>
+
+        {/* ── Rainfall conditions card ────────────────────────────── */}
+        {station?.data_family === 'rainfall' && (
+          <div
+            className={`form-card ${!isRainfallReady ? 'form-card--alert' : ''}`}
+            style={{ marginBottom: 24 }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[13px] font-semibold text-text-dark">Rainfall conditions</span>
+              {!isRainfallReady
+                ? <span className="text-[10px] font-semibold text-warning bg-warning-light px-2 py-0.5 rounded-full">Required</span>
+                : <span className="text-[10px] font-semibold text-success bg-success-light px-2 py-0.5 rounded-full">✓ Done</span>
+              }
+            </div>
+
+            <div className="text-[11px] font-semibold text-text-dark mb-1.5">Was it raining?</div>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {['true', 'false'].map(val => (
+                <button
+                  key={val}
+                  data-selected={raining === val ? 'true' : undefined}
+                  onClick={() => saveRaining(val)}
+                  className="note-chip"
+                >
+                  {val === 'true' ? 'Yes' : 'No'}
+                </button>
+              ))}
+            </div>
+
+            {raining === 'false' && (
+              <label
+                className="flex items-start gap-2.5 cursor-pointer"
+                onClick={() => saveRainConfirmed(!rainConfirmed)}
+              >
+                <div
+                  className="w-5 h-5 rounded flex items-center justify-center shrink-0 mt-0.5 transition-colors"
+                  style={{
+                    border: `2px solid ${rainConfirmed ? '#1565C0' : 'var(--color-border)'}`,
+                    background: rainConfirmed ? '#1565C0' : 'var(--color-surface)',
+                  }}
+                >
+                  {rainConfirmed && <span className="text-white text-[11px] font-bold leading-none">✓</span>}
+                </div>
+                <span className="text-[12px] text-text-med leading-snug">
+                  I confirm no rainfall occurred during this period
+                </span>
+              </label>
+            )}
+          </div>
+        )}
 
       </div>
     </div>

@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db/queries');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { processRainfall } = require('../processors/rainfall');
 
 router.use(requireAuth);
 
@@ -71,6 +72,18 @@ router.patch('/:id/status', async (req, res, next) => {
 
     const visit = await db.updateVisitStatus(id, status);
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
+
+    // When a rainfall visit is submitted, re-run rainfall processing async
+    if (status === 'submitted') {
+      const station = await db.getStationById(visit.station_id);
+      if (station?.data_family === 'rainfall') {
+        setImmediate(() =>
+          processRainfall(visit.station_id).catch(e =>
+            console.error(`Rainfall processing failed for station ${visit.station_id}:`, e.message)
+          )
+        );
+      }
+    }
 
     res.json(visit);
   } catch (err) {

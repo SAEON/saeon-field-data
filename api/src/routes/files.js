@@ -8,6 +8,7 @@ const { requireAuth } = require('../middleware/auth');
 router.use(requireAuth);
 const path    = require('path');
 const db      = require('../db/queries');
+const { processRainfall } = require('../processors/rainfall');
 
 // Multer — store in memory so we can hash before writing to disk
 const upload = multer({ storage: multer.memoryStorage() });
@@ -151,6 +152,13 @@ async function parseInBackground(fileRecord, visitId) {
       }
     }
     // ── End gap detection ──────────────────────────────────────────────────
+
+    // Trigger rainfall processing for rainfall stations after a successful parse
+    if (visit?.data_family === 'rainfall') {
+      processRainfall(visit.station_id).catch(e =>
+        console.error(`Rainfall processing failed for station ${visit.station_id}:`, e.message)
+      );
+    }
   } catch (err) {
     console.error(`Parse failed for file ${fileRecord.id}:`, err.message);
     await db.updateFileParseError(fileRecord.id, err.message);

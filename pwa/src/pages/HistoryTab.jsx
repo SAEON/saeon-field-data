@@ -1,7 +1,7 @@
 // HistoryTab — submitted visit history with family filter, richer cards,
 // and a detail sheet showing site condition, files, and split readings.
 import { useState, useEffect, useRef } from 'react';
-import { getVisits, getVisit, uploadFile } from '../services/api.js';
+import { getVisits, getVisit, uploadFile, getStationRainfall } from '../services/api.js';
 
 const ADD_FILE_WINDOW_DAYS = 7;
 
@@ -39,23 +39,41 @@ const READING_META = {
   dipper_depth:           { label: 'Dipper depth',          unit: 'm'  },
   dipper_time:            { label: 'Time of measurement',   unit: ''   },
   water_colour:           { label: 'Water colour',          unit: ''   },
-  battery_voltage:        { label: 'Battery voltage',       unit: 'V'  },
+  battery_voltage:        { label: 'Logger battery',        unit: '%'  },
   overall_site_condition: { label: 'Site condition',        unit: ''   },
-  gauge_condition:        { label: 'Gauge condition',       unit: ''   },
-  gauge_reading:          { label: 'Gauge reading',         unit: 'mm' },
-  last_emptied:           { label: 'Last emptied',          unit: ''   },
+  gauge_condition:        { label: 'Raingauge condition',   unit: ''   },
+  gauge_reading:          { label: 'Rainfall in gauge',     unit: 'mm' },
+  last_emptied:           { label: 'Gauge last emptied',    unit: ''   },
   pyranometer_clean:      { label: 'Pyranometer clean',     unit: ''   },
   anemometer_spinning:    { label: 'Anemometer spinning',   unit: ''   },
   rain_gauge_clear:       { label: 'Rain gauge clear',      unit: ''   },
   wind_vane:              { label: 'Wind vane readable',    unit: ''   },
   logger_screen:          { label: 'Logger screen reading', unit: ''   },
+  raining:                { label: 'Was it raining',        unit: ''   },
+  no_rainfall_confirmed:  { label: 'No rainfall confirmed', unit: ''   },
+  event_type:             { label: 'Visit activity',         unit: ''   },
+  event_problem_notes:    { label: 'Problem description',   unit: ''   },
+  event_start_dt:         { label: 'Water entry start',     unit: ''   },
+  event_end_dt:           { label: 'Water entry end',       unit: ''   },
+  memory_used_pct:        { label: 'Logger memory used',    unit: '%'  },
 };
 
 // Required reading types per family — excludes overall_site_condition (shown in banner)
 const REQUIRED_PER_FAMILY = {
-  rainfall:    ['gauge_condition'],
+  rainfall:    ['event_type', 'gauge_condition'],
   groundwater: ['dipper_depth', 'dipper_time'],
   met:         ['pyranometer_clean', 'anemometer_spinning', 'rain_gauge_clear'],
+};
+
+const EVENT_TYPE_LABELS = {
+  logger_download: 'Logger download', logger_maintenance: 'Logger maintenance',
+  logger_missing: 'Logger missing', logger_deploy: 'Logger deployed',
+  logger_decommission: 'Logger decommissioned', logger_program: 'Logger programmed',
+  logger_stopped: 'Logger stopped', raingauge_maintenance: 'Raingauge maintenance',
+  raingauge_missing: 'Raingauge missing', raingauge_deploy: 'Raingauge deployed',
+  raingauge_decommission: 'Raingauge decommissioned', raingauge_calibrate: 'Raingauge calibration',
+  raingauge_calibration_check: 'Calibration check',
+  pseudo_events: 'Non-rainfall water entry',
 };
 
 function readingValue(r) {
@@ -64,6 +82,10 @@ function readingValue(r) {
     const unit = r.unit || meta?.unit || '';
     return unit ? `${r.value_numeric} ${unit}` : String(r.value_numeric);
   }
+  if (r.reading_type === 'raining') return r.value_text === 'true' ? 'Yes' : 'No';
+  if (r.reading_type === 'no_rainfall_confirmed') return 'Confirmed';
+  if (r.reading_type === 'event_type') return EVENT_TYPE_LABELS[r.value_text] || r.value_text;
+  if (r.reading_type === 'event_start_dt' || r.reading_type === 'event_end_dt') return fmtDateTime(r.value_text);
   return r.value_text || '—';
 }
 
@@ -148,9 +170,10 @@ function AddFileSheet({ visit, onClose }) {
 // ── Visit detail sheet ────────────────────────────────────────────────────────
 
 function VisitDetailSheet({ visitId, onClose }) {
-  const [visit,   setVisit]   = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
+  const [visit,           setVisit]           = useState(null);
+  const [loading,         setLoading]         = useState(true);
+  const [showAdd,         setShowAdd]         = useState(false);
+  const [rainfallSummary, setRainfallSummary] = useState(null);
 
   useEffect(() => {
     getVisit(visitId)
@@ -158,6 +181,21 @@ function VisitDetailSheet({ visitId, onClose }) {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [visitId]);
+
+  useEffect(() => {
+    if (!visit || visit.data_family !== 'rainfall') return;
+    const parsedFile = (visit.files || []).find(f => f.parse_status === 'parsed' && f.date_range_start);
+    if (!parsedFile) return;
+    getStationRainfall(visit.station_id, {
+      resolution: 'daily',
+      from: parsedFile.date_range_start,
+      to:   parsedFile.date_range_end,
+    }).then(data => {
+      const totalMm = (data.data || []).reduce((sum, r) => sum + parseFloat(r.rain_mm || 0), 0);
+      const days    = (data.data || []).length;
+      setRainfallSummary({ totalMm, days });
+    }).catch(() => {});
+  }, [visit]);
 
   if (loading) {
     return (
@@ -292,6 +330,29 @@ function VisitDetailSheet({ visitId, onClose }) {
               </div>
             )}
           </div>
+
+          {/* Processed rainfall summary — rainfall stations only */}
+          {visit.data_family === 'rainfall' && (
+            <div className="mb-3.5">
+              <div className="text-[11px] font-bold text-text-light uppercase tracking-wide mb-2">
+                Processed rainfall
+              </div>
+              <div className="bg-white rounded-xl px-3.5 py-3" style={{ border: '1.5px solid var(--color-border)' }}>
+                {rainfallSummary ? (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[12px] text-text-med">Total recorded</span>
+                    <span className="text-[13px] font-bold text-text-dark">
+                      {rainfallSummary.totalMm.toFixed(1)} mm over {rainfallSummary.days} day{rainfallSummary.days !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-[12px] text-text-light">
+                    {(visit.files || []).some(f => f.parse_status === 'parsed') ? 'Loading…' : 'Processing…'}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Manual readings */}
           {(requiredReadings.length > 0 || optionalReadings.length > 0) && (

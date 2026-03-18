@@ -31,6 +31,7 @@ app.use('/api/visits',    require('./routes/files'));     // POST /api/visits/:i
 app.use('/api/visits',    require('./routes/readings'));  // POST /api/visits/:id/readings
 app.use('/api/files',     require('./routes/files'));     // GET /api/files/:id/download, POST /api/files/:id/reparse
 app.use('/api/streams',   require('./routes/streams'));   // GET /api/streams/:id/measurements
+app.use('/api/stations', require('./routes/rainfall'));  // GET/POST /api/stations/:id/rainfall[/process]
 app.use('/api/users',     require('./routes/users'));     // GET/POST/PATCH /api/users
 app.use('/api/dashboard', require('./routes/dashboard')); // GET /api/dashboard/*
 

@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getDashboardStations, getRecentVisits, getFilesWithErrors, deleteFile } from '../services/api.js';
+import { getDashboardStations, getRecentVisits, getFilesWithErrors, deleteFile, getStations, getStationRainfall, processStationRainfall } from '../services/api.js';
 import UserManagement from './UserManagement.jsx';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -351,13 +351,190 @@ function ErrorsTab() {
   );
 }
 
-// ── Marc's dashboard shell ────────────────────────────────────────────────────
+// ── Rainfall tab ──────────────────────────────────────────────────────────────
+
+const RESOLUTIONS = [
+  { value: '5min',       label: '5 min' },
+  { value: 'hourly',     label: 'Hourly' },
+  { value: 'daily',      label: 'Daily' },
+  { value: 'saws_daily', label: 'SAWS daily' },
+  { value: 'monthly',    label: 'Monthly' },
+  { value: 'yearly',     label: 'Yearly' },
+];
+
+function isoDate(d) { return d.toISOString().slice(0, 10); }
+
+function RainfallTab() {
+  const [stations,     setStations]     = useState([]);
+  const [selected,     setSelected]     = useState(null);
+  const [resolution,   setResolution]   = useState('daily');
+  const [from,         setFrom]         = useState(isoDate(new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)));
+  const [to,           setTo]           = useState(isoDate(new Date()));
+  const [data,         setData]         = useState([]);
+  const [fetching,     setFetching]     = useState(false);
+  const [fetchErr,     setFetchErr]     = useState(null);
+  const [reprocessing, setReprocessing] = useState(false);
+  const debounceRef = useRef(null);
+
+  useEffect(() => {
+    getStations()
+      .then(all => {
+        const rf = (all || []).filter(s => s.data_family === 'rainfall');
+        setStations(rf);
+        if (rf.length) setSelected(rf[0].id);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setFetching(true);
+      setFetchErr(null);
+      getStationRainfall(selected, {
+        resolution,
+        from: new Date(from).toISOString(),
+        to:   new Date(to + 'T23:59:59').toISOString(),
+      })
+        .then(res => setData(res.data || []))
+        .catch(e => setFetchErr(e.message))
+        .finally(() => setFetching(false));
+    }, 400);
+    return () => clearTimeout(debounceRef.current);
+  }, [selected, resolution, from, to]);
+
+  function handleReprocess() {
+    if (!selected) return;
+    setReprocessing(true);
+    processStationRainfall(selected).finally(() => {
+      setReprocessing(false);
+      setTo(isoDate(new Date())); // nudge effect to refetch
+    });
+  }
+
+  const showQaColumns = resolution === '5min';
+  const totalMm = data.reduce((sum, r) => sum + parseFloat(r.rain_mm || 0), 0);
+
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <AppBar title="Rainfall data" subtitle={stations.find(s => s.id === selected)?.display_name} />
+
+      <main className="flex-1 overflow-y-auto w-full max-w-[var(--max-width)] mx-auto">
+
+        {/* Station selector */}
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border)' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Station</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {stations.map(s => (
+              <button key={s.id} onClick={() => setSelected(s.id)}
+                style={{ fontSize: 12, fontWeight: selected === s.id ? 700 : 500, padding: '4px 12px', borderRadius: 20, border: `1.5px solid ${selected === s.id ? '#1565C0' : 'var(--color-border)'}`, background: selected === s.id ? '#EBF2FB' : 'var(--color-surface)', color: selected === s.id ? '#1565C0' : 'var(--color-text-med)', cursor: 'pointer' }}>
+                {s.display_name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Resolution + date range */}
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border)' }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+            {RESOLUTIONS.map(r => (
+              <button key={r.value} onClick={() => setResolution(r.value)}
+                style={{ fontSize: 11, fontWeight: resolution === r.value ? 700 : 500, padding: '3px 10px', borderRadius: 16, border: `1.5px solid ${resolution === r.value ? '#1565C0' : 'var(--color-border)'}`, background: resolution === r.value ? '#EBF2FB' : 'white', color: resolution === r.value ? '#1565C0' : 'var(--color-text-med)', cursor: 'pointer' }}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+              style={{ flex: 1, fontSize: 12, padding: '6px 8px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'white' }} />
+            <span style={{ fontSize: 11, color: 'var(--color-text-light)' }}>to</span>
+            <input type="date" value={to} onChange={e => setTo(e.target.value)}
+              style={{ flex: 1, fontSize: 12, padding: '6px 8px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'white' }} />
+          </div>
+        </div>
+
+        {/* Summary bar */}
+        {!fetching && data.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', borderBottom: '1px solid var(--color-border)', background: '#F8FAFD' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-dark)' }}>
+              {totalMm.toFixed(1)} mm
+              <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--color-text-light)', marginLeft: 8 }}>{data.length} periods</span>
+            </div>
+            <button onClick={handleReprocess} disabled={reprocessing || !selected}
+              style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'white', cursor: reprocessing ? 'default' : 'pointer', opacity: reprocessing ? 0.5 : 1 }}>
+              {reprocessing ? 'Processing…' : 'Reprocess'}
+            </button>
+          </div>
+        )}
+
+        {/* State messages */}
+        {fetching && (
+          <div style={{ textAlign: 'center', padding: 32, fontSize: 13, color: 'var(--color-text-light)' }}>Loading…</div>
+        )}
+        {!fetching && fetchErr && (
+          <div style={{ margin: 16, padding: '12px 16px', borderRadius: 12, background: '#FFF3E0', fontSize: 12, color: '#E65100' }}>{fetchErr}</div>
+        )}
+        {!fetching && !fetchErr && data.length === 0 && selected && (
+          <div style={{ textAlign: 'center', padding: 32, fontSize: 13, color: 'var(--color-text-light)' }}>No data for this period</div>
+        )}
+
+        {/* Data table */}
+        {!fetching && !fetchErr && data.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead>
+                <tr style={{ background: '#F8FAFD', borderBottom: '2px solid var(--color-border)' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 700, color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>Period start</th>
+                  <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 700, color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>mm</th>
+                  {showQaColumns && (
+                    <>
+                      <th style={{ textAlign: 'right', padding: '8px 8px', fontWeight: 700, color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Tips</th>
+                      <th style={{ textAlign: 'right', padding: '8px 8px', fontWeight: 700, color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Valid</th>
+                    </>
+                  )}
+                  <th style={{ textAlign: 'center', padding: '8px 12px', fontWeight: 700, color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Flag</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((r, i) => (
+                  <tr key={r.period_start} style={{ borderBottom: '1px solid var(--color-surface-dark)', background: i % 2 === 0 ? 'white' : '#FAFBFD' }}>
+                    <td style={{ padding: '7px 12px', fontFamily: 'monospace', color: 'var(--color-text-dark)', whiteSpace: 'nowrap' }}>
+                      {new Date(r.period_start).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' })}
+                    </td>
+                    <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 700, color: parseFloat(r.rain_mm) > 0 ? '#1565C0' : 'var(--color-text-light)' }}>
+                      {parseFloat(r.rain_mm).toFixed(1)}
+                    </td>
+                    {showQaColumns && (
+                      <>
+                        <td style={{ padding: '7px 8px', textAlign: 'right', color: 'var(--color-text-med)' }}>{r.tip_count}</td>
+                        <td style={{ padding: '7px 8px', textAlign: 'right', color: 'var(--color-text-med)' }}>{r.valid_tips}</td>
+                      </>
+                    )}
+                    <td style={{ padding: '7px 12px', textAlign: 'center' }}>
+                      {r.has_anomaly && (
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#FFF3E0', color: '#E65100' }}>Anomaly</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+// ── Dashboard shell ───────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'network', label: 'Network', icon: '◉' },
-  { id: 'feed',    label: 'Feed',    icon: '↓' },
-  { id: 'errors',  label: 'Errors',  icon: '⚠' },
-  { id: 'users',   label: 'Users',   icon: '◎' },
+  { id: 'network',  label: 'Network',  icon: '◉' },
+  { id: 'feed',     label: 'Feed',     icon: '↓' },
+  { id: 'errors',   label: 'Errors',   icon: '⚠' },
+  { id: 'rainfall', label: 'Rainfall', icon: '~' },
+  { id: 'users',    label: 'Users',    icon: '◎' },
 ];
 
 export default function MarcDashboard() {
@@ -365,10 +542,11 @@ export default function MarcDashboard() {
 
   return (
     <div className="flex flex-col min-h-dvh app-layout">
-      {activeTab === 'network' && <NetworkTab />}
-      {activeTab === 'feed'    && <FeedTab />}
-      {activeTab === 'errors'  && <ErrorsTab />}
-      {activeTab === 'users'   && <UserManagement />}
+      {activeTab === 'network'  && <NetworkTab />}
+      {activeTab === 'feed'     && <FeedTab />}
+      {activeTab === 'errors'   && <ErrorsTab />}
+      {activeTab === 'rainfall' && <RainfallTab />}
+      {activeTab === 'users'    && <UserManagement />}
 
       <nav className="bottom-tab-bar shrink-0">
         <div className="sidebar-brand">

@@ -1,6 +1,9 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db/queries');
+const { requireAuth } = require('../middleware/auth');
+
+router.use(requireAuth);
 
 // POST /api/visits/:id/readings
 router.post('/:id/readings', async (req, res, next) => {

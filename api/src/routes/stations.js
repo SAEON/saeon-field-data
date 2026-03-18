@@ -15,7 +15,8 @@ router.get('/', async (req, res, next) => {
       const stations = await db.getAllStationsRegistry();
       return res.json(stations);
     }
-    const stations = await db.getAllStationsWithLastVisit();
+    const assignedTo = (!isLead && !isManager) ? req.user.id : null;
+    const stations = await db.getAllStationsWithLastVisit(assignedTo);
     res.json(stations);
   } catch (err) {
     next(err);

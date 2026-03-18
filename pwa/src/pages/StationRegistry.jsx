@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage } from '../services/api.js';
+import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers } from '../services/api.js';
 
 const DATA_FAMILY_OPTIONS = [
   { value: 'groundwater', label: 'Groundwater' },
@@ -68,26 +68,32 @@ function formatDate(iso) {
 function StationSheet({ station, onClose, onSaved }) {
   const isNew = !station;
   const [form, setForm] = useState({
-    name:                 station?.name                 ?? '',
-    display_name:         station?.display_name         ?? '',
-    data_family:          station?.data_family          ?? 'groundwater',
-    region:               station?.region               ?? '',
-    latitude:             station?.latitude             ?? '',
-    longitude:            station?.longitude            ?? '',
-    elevation_m:          station?.elevation_m          ?? '',
-    visit_frequency_days: station?.visit_frequency_days ?? 30,
-    notes:                station?.notes                ?? '',
-    active:               station?.active               ?? true,
+    name:                    station?.name                    ?? '',
+    display_name:            station?.display_name            ?? '',
+    data_family:             station?.data_family             ?? 'groundwater',
+    region:                  station?.region                  ?? '',
+    latitude:                station?.latitude                ?? '',
+    longitude:               station?.longitude               ?? '',
+    elevation_m:             station?.elevation_m             ?? '',
+    visit_frequency_days:    station?.visit_frequency_days    ?? 30,
+    notes:                   station?.notes                   ?? '',
+    active:                  station?.active                  ?? true,
+    assigned_technician_id:  station?.assigned_technician_id  ?? '',
   });
+  const [technicians, setTechnicians] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState(null);
+
+  useEffect(() => {
+    getUsers()
+      .then(all => setTechnicians((all || []).filter(u => u.role === 'technician' && u.active)))
+      .catch(() => {});
+  }, []);
 
   function set(field, value) {
     setForm(f => {
       const next = { ...f, [field]: value };
-      if (field === 'display_name' && isNew) {
-        next.name = slugify(value);
-      }
+      if (field === 'display_name' && isNew) next.name = slugify(value);
       return next;
     });
   }
@@ -101,15 +107,16 @@ function StationSheet({ station, onClose, onSaved }) {
     setError(null);
     try {
       const payload = {
-        name:                 form.name || slugify(form.display_name),
-        display_name:         form.display_name.trim(),
-        data_family:          form.data_family,
-        region:               form.region.trim() || null,
-        latitude:             form.latitude !== '' ? parseFloat(form.latitude) : null,
-        longitude:            form.longitude !== '' ? parseFloat(form.longitude) : null,
-        elevation_m:          form.elevation_m !== '' ? parseFloat(form.elevation_m) : null,
-        visit_frequency_days: parseInt(form.visit_frequency_days, 10) || 30,
-        notes:                form.notes.trim() || null,
+        name:                   form.name || slugify(form.display_name),
+        display_name:           form.display_name.trim(),
+        data_family:            form.data_family,
+        region:                 form.region.trim() || null,
+        latitude:               form.latitude !== '' ? parseFloat(form.latitude) : null,
+        longitude:              form.longitude !== '' ? parseFloat(form.longitude) : null,
+        elevation_m:            form.elevation_m !== '' ? parseFloat(form.elevation_m) : null,
+        visit_frequency_days:   parseInt(form.visit_frequency_days, 10) || 30,
+        notes:                  form.notes.trim() || null,
+        assigned_technician_id: form.assigned_technician_id ? parseInt(form.assigned_technician_id, 10) : null,
       };
       let saved;
       if (isNew) {
@@ -126,42 +133,41 @@ function StationSheet({ station, onClose, onSaved }) {
     }
   }
 
-  const inputCls = 'w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark';
-  const labelCls = 'text-[11px] font-semibold text-text-light uppercase tracking-wide mb-1';
+  const inputCls = 'w-full h-9 px-2.5 rounded-lg border border-border bg-white text-[12px] text-text-dark';
+  const labelCls = 'text-[10px] font-semibold text-text-light uppercase tracking-wide mb-1';
 
   return (
     <div className="back-sheet-overlay">
-      <div className="back-sheet" style={{ maxHeight: '90dvh', overflowY: 'auto', paddingBottom: 32 }}>
-        <div className="text-[15px] font-bold text-text-dark mb-4">
+      <div className="back-sheet" style={{ maxHeight: '90dvh', overflowY: 'auto', paddingBottom: 24 }}>
+        <div className="text-[13px] font-bold text-text-dark mb-3">
           {isNew ? 'Add station' : 'Edit station'}
         </div>
 
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3.5">
           <div>
             <div className={labelCls}>Display name</div>
             <input className={inputCls} value={form.display_name}
               onChange={e => set('display_name', e.target.value)}
               placeholder="e.g. Klein Nuwejaar Groundwater 01" />
             {isNew && form.name && (
-              <div className="text-[11px] text-text-light mt-1 font-mono">
-                ID: {form.name}
-              </div>
+              <div className="text-[10px] text-text-light mt-0.5 font-mono">ID: {form.name}</div>
             )}
           </div>
 
-          <div>
-            <div className={labelCls}>Data family</div>
-            <select className={inputCls} value={form.data_family} onChange={e => set('data_family', e.target.value)}>
-              {DATA_FAMILY_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <div className={labelCls}>Region</div>
-            <input className={inputCls} value={form.region} onChange={e => set('region', e.target.value)}
-              placeholder="e.g. Western Cape" />
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <div className={labelCls}>Data family</div>
+              <select className={inputCls} value={form.data_family} onChange={e => set('data_family', e.target.value)}>
+                {DATA_FAMILY_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1">
+              <div className={labelCls}>Region</div>
+              <input className={inputCls} value={form.region} onChange={e => set('region', e.target.value)}
+                placeholder="e.g. Western Cape" />
+            </div>
           </div>
 
           <div className="flex gap-2">
@@ -191,10 +197,21 @@ function StationSheet({ station, onClose, onSaved }) {
           </div>
 
           <div>
+            <div className={labelCls}>Assigned technician</div>
+            <select className={inputCls} value={form.assigned_technician_id}
+              onChange={e => set('assigned_technician_id', e.target.value)}>
+              <option value="">Unassigned</option>
+              {technicians.map(u => (
+                <option key={u.id} value={u.id}>{u.full_name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
             <div className={labelCls}>Notes</div>
             <textarea
-              className="w-full px-3 py-2 rounded-xl border border-border bg-white text-[13px] text-text-dark resize-none"
-              rows={3}
+              className="w-full px-2.5 py-2 rounded-lg border border-border bg-white text-[12px] text-text-dark resize-none"
+              rows={2}
               value={form.notes}
               onChange={e => set('notes', e.target.value)}
               placeholder="Access instructions, special conditions, etc."
@@ -202,35 +219,35 @@ function StationSheet({ station, onClose, onSaved }) {
           </div>
 
           {!isNew && (
-            <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-surface">
+            <div className="flex items-center justify-between px-2.5 py-2 rounded-lg bg-surface">
               <div>
-                <div className="text-[13px] font-semibold text-text-dark">Active</div>
-                <div className="text-[11px] text-text-light">Inactive stations are hidden from technicians</div>
+                <div className="text-[12px] font-semibold text-text-dark">Active</div>
+                <div className="text-[10px] text-text-light">Inactive stations are hidden from technicians</div>
               </div>
               <button
                 onClick={() => set('active', !form.active)}
-                className="relative w-12 h-6 rounded-full transition-colors duration-200 border-none"
+                className="relative w-10 h-5 rounded-full transition-colors duration-200 border-none shrink-0"
                 style={{ background: form.active ? 'var(--color-navy)' : '#BDBDBD' }}
                 aria-pressed={form.active}
               >
                 <span
-                  className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
-                  style={{ transform: form.active ? 'translateX(24px)' : 'translateX(0)' }}
+                  className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"
+                  style={{ transform: form.active ? 'translateX(20px)' : 'translateX(0)' }}
                 />
               </button>
             </div>
           )}
         </div>
 
-        {error && <div className="text-[12px] text-error mt-3">{error}</div>}
+        {error && <div className="text-[11px] text-error mt-2">{error}</div>}
 
-        <div className="flex gap-2.5 mt-5">
+        <div className="flex gap-2 mt-4">
           <button onClick={onClose} disabled={saving}
-            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
+            className="flex-1 h-10 border-[1.5px] border-border rounded-xl bg-white text-text-med text-[12px] font-semibold">
             Cancel
           </button>
           <button onClick={handleSave} disabled={saving}
-            className="flex-1 h-12 rounded-xl bg-navy text-white text-sm font-semibold border-none">
+            className="flex-1 h-10 rounded-xl bg-navy text-white text-[12px] font-semibold border-none">
             {saving ? 'Saving…' : isNew ? 'Add station' : 'Save changes'}
           </button>
         </div>
@@ -290,6 +307,71 @@ const STREAM_LABEL = {
   raw_hourly:      { label: 'Met (hourly)',   icon: '🌤' },
   raw_stom:        { label: 'STOM',           icon: '📡' },
 };
+
+function AssignTechnicianSheet({ station, onClose, onAssigned }) {
+  const [users,    setUsers]    = useState([]);
+  const [selected, setSelected] = useState(station.assigned_technician_id ?? '');
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState(null);
+
+  useEffect(() => {
+    getUsers().then(setUsers).catch(() => {});
+  }, []);
+
+  const technicians = users.filter(u => u.role === 'technician' && u.active);
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await updateStation(station.id, {
+        assigned_technician_id: selected ? parseInt(selected, 10) : null,
+      });
+      onAssigned(saved);
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputCls = 'w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark';
+
+  return (
+    <div className="back-sheet-overlay">
+      <div className="back-sheet">
+        <div className="text-[15px] font-bold text-text-dark mb-1">Assign technician</div>
+        <div className="text-[12px] text-text-light mb-4">{station.display_name}</div>
+
+        <select
+          className={inputCls}
+          value={selected}
+          onChange={e => setSelected(e.target.value)}
+          style={{ marginBottom: 16 }}
+        >
+          <option value="">Unassigned</option>
+          {technicians.map(u => (
+            <option key={u.id} value={u.id}>{u.full_name}</option>
+          ))}
+        </select>
+
+        {error && <div className="text-[12px] text-error mb-3">{error}</div>}
+
+        <div className="flex gap-2.5">
+          <button onClick={onClose} disabled={saving}
+            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
+            Cancel
+          </button>
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 h-12 rounded-xl bg-navy text-white text-sm font-semibold border-none">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function CoverageSheet({ station, onClose }) {
   const [coverage, setCoverage] = useState(null);
@@ -384,6 +466,7 @@ export default function StationRegistry() {
   const [editTarget,       setEditTarget]       = useState(undefined);
   const [deactivateTarget, setDeactivateTarget] = useState(null);
   const [coverageTarget,   setCoverageTarget]   = useState(null);
+  const [assignTarget,     setAssignTarget]     = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -411,6 +494,10 @@ export default function StationRegistry() {
     setStations(prev => prev.map(s =>
       s.id === stationId ? { ...s, active: false } : s
     ));
+  }
+
+  function handleAssigned(saved) {
+    setStations(prev => prev.map(s => s.id === saved.id ? { ...s, ...saved } : s));
   }
 
   const displayed = showInactive ? stations : stations.filter(s => s.active);
@@ -481,28 +568,38 @@ export default function StationRegistry() {
                     {station.last_visited_at && (
                       <> · Last: {formatDate(station.last_visited_at)}</>
                     )}
+                    <span className={`ml-2 font-semibold ${station.assigned_technician_name ? 'text-blue' : 'text-warning'}`}>
+                      · {station.assigned_technician_name ? station.assigned_technician_name : 'Unassigned'}
+                    </span>
                   </div>
 
                   <div className="flex gap-1.5 shrink-0">
                     <button
+                      onClick={() => setAssignTarget(station)}
+                      className="h-7 px-2.5 rounded-lg text-[11px] font-semibold"
+                      style={{ background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}
+                    >
+                      Assign
+                    </button>
+                    <button
                       onClick={() => setCoverageTarget(station)}
-                      className="h-7 px-2.5 rounded-lg text-[11px] font-semibold border-none"
-                      style={{ background: '#F3F4F6', color: '#374151' }}
+                      className="h-7 px-2.5 rounded-lg text-[11px] font-semibold"
+                      style={{ background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}
                     >
                       History
                     </button>
                     <button
                       onClick={() => setEditTarget(station)}
-                      className="h-7 px-2.5 rounded-lg text-[11px] font-semibold border-none"
-                      style={{ background: '#EAF0FB', color: 'var(--color-navy)' }}
+                      className="h-7 px-2.5 rounded-lg text-[11px] font-semibold"
+                      style={{ background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}
                     >
                       Edit
                     </button>
                     {station.active && (
                       <button
                         onClick={() => setDeactivateTarget(station)}
-                        className="h-7 px-2.5 rounded-lg text-[11px] font-semibold border-none"
-                        style={{ background: '#FFF3E0', color: '#E65100' }}
+                        className="h-7 px-2.5 rounded-lg text-[11px] font-semibold"
+                        style={{ background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}
                       >
                         Deactivate
                       </button>
@@ -541,6 +638,14 @@ export default function StationRegistry() {
         <CoverageSheet
           station={coverageTarget}
           onClose={() => setCoverageTarget(null)}
+        />
+      )}
+
+      {assignTarget && (
+        <AssignTechnicianSheet
+          station={assignTarget}
+          onClose={() => setAssignTarget(null)}
+          onAssigned={handleAssigned}
         />
       )}
     </div>

@@ -212,6 +212,19 @@ export function updateUser(userId, { role, active }) {
   });
 }
 
+// ── Rainfall ───────────────────────────────────────────────────────────────
+
+export function getStationRainfall(stationId, { resolution = 'daily', from, to } = {}) {
+  const params = new URLSearchParams({ resolution });
+  if (from) params.set('from', from);
+  if (to)   params.set('to',   to);
+  return request(`/api/stations/${stationId}/rainfall?${params}`);
+}
+
+export function processStationRainfall(stationId) {
+  return request(`/api/stations/${stationId}/rainfall/process`, { method: 'POST' });
+}
+
 // ── Readings ───────────────────────────────────────────────────────────────
 
 export function createReading(visitId, { reading_type, value_numeric, value_text, unit, recorded_at, notes }) {
