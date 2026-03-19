@@ -1,7 +1,9 @@
 const express = require('express');
 const router  = express.Router();
+const fs      = require('fs');
 const db      = require('../db/queries');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { log } = require('../middleware/logger');
 const { processRainfall } = require('../processors/rainfall');
 
 router.use(requireAuth);
@@ -126,6 +128,32 @@ router.get('/:id', async (req, res, next) => {
     ]);
 
     res.json({ ...visit, files, readings });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/visits/:id — abandon a draft visit (technician owns it, status must be 'draft')
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const id    = parseInt(req.params.id, 10);
+    const visit = await db.getVisitById(id);
+
+    if (!visit) return res.status(404).json({ error: 'Visit not found' });
+    if (visit.status !== 'draft') return res.status(409).json({ error: 'Only draft visits can be abandoned' });
+    if (visit.technician_id !== req.user.id) return res.status(403).json({ error: 'You can only abandon your own draft visits' });
+
+    const storagePaths = await db.deleteDraftVisit(id);
+
+    // Remove uploaded files from disk (best-effort — DB already cleaned up)
+    for (const p of storagePaths) {
+      if (p && fs.existsSync(p)) {
+        try { fs.unlinkSync(p); } catch { /* ignore */ }
+      }
+    }
+
+    log.info('[visit] Draft abandoned', { visit_id: id, files_deleted: storagePaths.length });
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

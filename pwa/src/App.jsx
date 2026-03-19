@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { loadDraft, saveDraft, clearDraft } from './hooks/useDraftVisit.js';
-import { createVisit, submitVisit } from './services/api.js';
+import { createVisit, submitVisit, abandonVisit } from './services/api.js';
 import { useAuth } from './auth/AuthContext.jsx';
 import SelectStation  from './pages/SelectStation.jsx';
 import VisitDetails   from './pages/VisitDetails.jsx';
@@ -62,10 +62,21 @@ function BottomNav({ activeTab, setActiveTab, visitBadge, queueBadge, queueError
 }
 
 // ── App Bar ────────────────────────────────────────────────────────────────
-function AppBar({ title, subtitle }) {
+function AppBar({ title, subtitle, onAbandon }) {
   return (
     <header className="bg-navy h-14 flex items-center px-4 sticky top-0 z-50 shrink-0">
-      <div className="w-10" />
+      <div className="w-10">
+        {onAbandon && (
+          <button
+            onClick={onAbandon}
+            className="flex items-center justify-center w-8 h-8 rounded-lg border-none bg-transparent"
+            style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}
+            title="Abandon this draft visit"
+          >
+            ✕
+          </button>
+        )}
+      </div>
       <div className="flex-1 text-center px-2">
         <div className="text-white text-[17px] font-bold truncate leading-tight">{title}</div>
         {subtitle && (
@@ -126,6 +137,39 @@ function DiscardSheet({ stationName, onKeep, onDiscard }) {
             style={{ background: 'var(--color-error)' }}
           >
             Discard &amp; start new
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Abandon draft sheet ────────────────────────────────────────────────────
+function AbandonSheet({ stationName, onKeep, onConfirm, abandoning }) {
+  return (
+    <div className="back-sheet-overlay">
+      <div className="back-sheet">
+        <div className="text-[15px] font-bold text-text-dark mb-1.5">
+          Cancel this visit?
+        </div>
+        <div className="text-[13px] text-text-light mb-5 leading-relaxed">
+          The draft visit for <strong>{stationName}</strong> will be permanently deleted — including any uploaded files and readings. This cannot be undone.
+        </div>
+        <div className="flex gap-2.5">
+          <button
+            onClick={onKeep}
+            disabled={abandoning}
+            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold"
+          >
+            Keep draft
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={abandoning}
+            className="flex-1 h-12 border-none rounded-xl text-white text-sm font-semibold"
+            style={{ background: 'var(--color-error)' }}
+          >
+            {abandoning ? 'Cancelling…' : 'Cancel visit'}
           </button>
         </div>
       </div>
@@ -225,6 +269,8 @@ export default function App() {
   // UI state
   const [showDiscard,  setShowDiscard]  = useState(false);
   const [pendingStation, setPendingStation] = useState(null); // station user wants to start
+  const [showAbandon,  setShowAbandon]  = useState(false);
+  const [abandoning,   setAbandoning]   = useState(false);
   const [showSubmit,   setShowSubmit]   = useState(false);
   const [submitting,   setSubmitting]   = useState(false);
   const [readingsDone, setReadingsDone] = useState(false);
@@ -359,6 +405,26 @@ export default function App() {
     }
   }
 
+  // ── Abandon draft ──────────────────────────────────────────────────────
+  async function handleAbandon() {
+    if (!draftVisit) return;
+    setAbandoning(true);
+    try {
+      await abandonVisit(draftVisit.visitId);
+    } catch {
+      // If server call fails (e.g. offline), still clear locally —
+      // a stale draft visit on the server is preferable to a stuck UI.
+    } finally {
+      setAbandoning(false);
+    }
+    await clearDraft();
+    setDraftVisit(null);
+    setVisitFiles([]);
+    setFormState(null);
+    setShowAbandon(false);
+    setActiveTab('stations');
+  }
+
   // ── Submit visit ───────────────────────────────────────────────────────
   async function handleSubmit() {
     if (!draftVisit) return;
@@ -459,6 +525,7 @@ export default function App() {
           <AppBar
             title={draftVisit ? draftVisit.station.display_name : 'Active Visit'}
             subtitle={draftVisit ? 'Draft visit' : 'No active visit'}
+            onAbandon={draftVisit ? () => setShowAbandon(true) : undefined}
           />
 
           {draftVisit ? (
@@ -567,6 +634,15 @@ export default function App() {
           stationName={draftVisit?.station?.display_name}
           onKeep={() => { setShowDiscard(false); setPendingStation(null); }}
           onDiscard={handleDiscardAndStart}
+        />
+      )}
+
+      {showAbandon && (
+        <AbandonSheet
+          stationName={draftVisit?.station?.display_name}
+          onKeep={() => setShowAbandon(false)}
+          onConfirm={handleAbandon}
+          abandoning={abandoning}
         />
       )}
 

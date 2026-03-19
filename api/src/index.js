@@ -3,11 +3,13 @@ const cors    = require('cors');
 require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
 
 const pool = require('./db/pool');
+const { log, requestLogger } = require('./middleware/logger');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+app.use(requestLogger);
 
 // Health — server alive
 app.get('/health', (req, res) => {
@@ -39,7 +41,7 @@ app.use('/api/dashboard', require('./routes/dashboard')); // GET /api/dashboard/
 app.use(require('./middleware/error'));
 
 app.listen(PORT, () => {
-  console.log(`API running on port ${PORT}`);
+  log.info('API started', { port: PORT, db: process.env.DB_NAME, node: process.version });
 
   // On startup: resume any files left in 'pending' state (e.g. process killed mid-parse)
   const db            = require('./db/queries');
@@ -48,13 +50,13 @@ app.listen(PORT, () => {
     try {
       const pending = await db.getUnparsedFiles();
       if (pending.length) {
-        console.log(`Resuming parse for ${pending.length} pending file(s)...`);
+        log.warn('Resuming pending files from previous run', { count: pending.length });
         for (const f of pending) {
           setImmediate(() => parseInBackground(f, f.visit_id));
         }
       }
     } catch (e) {
-      console.error('Startup reparse sweep failed:', e.message);
+      log.error('Startup reparse sweep failed', { error: e.message });
     }
   });
 });

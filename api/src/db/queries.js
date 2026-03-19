@@ -136,7 +136,12 @@ async function updateStation(id, fields) {
   if (sets.length === 0) return null;
 
   const result = await pool.query(
-    `UPDATE stations SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
+    `WITH updated AS (
+       UPDATE stations SET ${sets.join(', ')} WHERE id = $1 RETURNING *
+     )
+     SELECT s.*, u.full_name AS assigned_technician_name
+     FROM   updated s
+     LEFT JOIN users u ON u.id = s.assigned_technician_id`,
     vals
   );
   return result.rows[0] || null;
@@ -399,6 +404,19 @@ async function deleteUploadedFile(id) {
     [id]
   );
   return result.rows[0] || null;
+}
+
+// Returns all storage paths then deletes uploaded_files + manual_readings + the visit itself.
+// Only call this for status='draft' visits.
+async function deleteDraftVisit(visitId) {
+  const files = await pool.query(
+    `SELECT storage_path FROM uploaded_files WHERE visit_id = $1`,
+    [visitId]
+  );
+  await pool.query(`DELETE FROM uploaded_files   WHERE visit_id = $1`, [visitId]);
+  await pool.query(`DELETE FROM manual_readings  WHERE visit_id = $1`, [visitId]);
+  await pool.query(`DELETE FROM field_visits     WHERE id = $1`,       [visitId]);
+  return files.rows.map(r => r.storage_path);
 }
 
 
@@ -878,6 +896,7 @@ module.exports = {
   getUnparsedFiles,
   deleteMeasurementsByFile,
   deleteUploadedFile,
+  deleteDraftVisit,
   // Readings
   createManualReading,
   getReadingsByVisit,

@@ -5,20 +5,20 @@ const FORMAT_MAP = {
   xle:  { label: 'Solonist XLE',   icon: '💧', families: ['groundwater'] },
   xml:  { label: 'Solonist XML',   icon: '💧', families: ['groundwater'] },
   dat:  { label: 'Campbell TOA5', icon: '🌤', families: ['met'] },
-  csv:  { label: 'HOBO / STOM',   icon: '🌧', families: ['rainfall', 'met'] },
+  csv:  { label: 'HOBO / STOM',   icon: '🌧', families: ['met'] },
   hobo: { label: 'HOBO Binary',   icon: '🌧', families: ['rainfall'] },
 };
 
 // Accepted extensions and MIME accept string per family
 const FAMILY_ACCEPT = {
   groundwater: '.xle,.xml',
-  rainfall:    '.csv,.hobo',
+  rainfall:    '.hobo',
   met:         '.dat,.csv',
   default:     '.csv,.dat,.xle,.xml,.hobo',
 };
 
 // States where the file already exists on the server
-const ON_SERVER = new Set(['pending', 'parsed', 'error']);
+const ON_SERVER = new Set(['pending', 'parsed', 'error', 'retrying']);
 
 function detectFormat(filename) {
   const ext = filename.split('.').pop().toLowerCase();
@@ -113,14 +113,15 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
 
       if (dbFile.parse_status === 'parsed') {
         patchFile(localId, {
-          parseState: 'parsed',
-          dateRange:  `${fmtDate(dbFile.date_range_start)} — ${fmtDate(dbFile.date_range_end)}`,
-          records:    dbFile.record_count,
-          hasGap:     dbFile.has_gap  ?? false,
-          gapDays:    dbFile.gap_days ?? null,
+          parseState:  'parsed',
+          dateRange:   `${fmtDate(dbFile.date_range_start)} — ${fmtDate(dbFile.date_range_end)}`,
+          records:     dbFile.record_count,
+          hasGap:      dbFile.has_gap  ?? false,
+          gapDays:     dbFile.gap_days ?? null,
+          parseError:  null,
         });
       } else if (dbFile.parse_status === 'error') {
-        patchFile(localId, { parseState: 'error' });
+        patchFile(localId, { parseState: 'error', parseError: dbFile.parse_error || 'Unknown parse error' });
       } else {
         pollTimers.current[localId] = setTimeout(() => pollStatus(localId, dbId), 2000);
       }
@@ -167,13 +168,14 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
   async function retryFile(localId) {
     const f = files.find(f => f.localId === localId);
     if (!f?.dbId) return;
-    patchFile(localId, { parseState: 'pending' });
+    patchFile(localId, { parseState: 'retrying', parseError: null });
     try {
       await reparseFile(f.dbId);
+      patchFile(localId, { parseState: 'pending' });
       clearTimeout(pollTimers.current[localId]);
       pollTimers.current[localId] = setTimeout(() => pollStatus(localId, f.dbId), 1500);
-    } catch {
-      patchFile(localId, { parseState: 'error' });
+    } catch (err) {
+      patchFile(localId, { parseState: 'error', parseError: err.message || 'Retry request failed' });
     }
   }
 
@@ -309,6 +311,7 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
                 const isUploading = file.parseState === 'uploading';
                 const isPending   = file.parseState === 'pending';
                 const isQueued    = file.parseState === 'queued';
+                const isRetrying  = file.parseState === 'retrying';
 
                 const removeTitle = isUploading
                   ? 'Cancel upload (nothing written to server yet)'
@@ -373,21 +376,23 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
                       style={{ borderTop: '1px solid var(--color-surface)' }}
                     >
                       <div className={`flex items-center gap-1.5 text-[11px] font-semibold ${
-                        isParsed   ? 'text-success' :
-                        isErr      ? 'text-error'   :
-                        isPending  ? 'text-warning'  :
-                        isQueued   ? 'text-warning'  :
+                        isParsed    ? 'text-success' :
+                        isErr       ? 'text-error'   :
+                        isRetrying  ? 'text-blue'    :
+                        isPending   ? 'text-warning'  :
+                        isQueued    ? 'text-warning'  :
                         'text-blue'
                       }`}>
                         <span>
-                          {isParsed ? '✓' : isErr ? '⚠' : isPending ? '🔄' : isQueued ? '📶' : '⏳'}
+                          {isParsed ? '✓' : isErr ? '⚠' : isRetrying ? '↺' : isPending ? '🔄' : isQueued ? '📶' : '⏳'}
                         </span>
                         <span>
-                          {isParsed   ? 'Parsed'
-                          : isErr     ? 'Parse failed'
-                          : isPending ? 'Processing…'
-                          : isQueued  ? 'Queued — offline'
-                          :             'Uploading…'}
+                          {isParsed    ? 'Parsed'
+                          : isErr      ? 'Parse failed'
+                          : isRetrying ? 'Retrying…'
+                          : isPending  ? 'Processing…'
+                          : isQueued   ? 'Queued — offline'
+                          :              'Uploading…'}
                         </span>
                       </div>
 
@@ -404,7 +409,7 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
 
                       {isErr && (
                         <div className="text-[10px] text-error text-right" style={{ maxWidth: '60%' }}>
-                          Parser failed — tap ↺ to retry
+                          {file.parseError || 'Parser failed — tap ↺ to retry'}
                         </div>
                       )}
                     </div>

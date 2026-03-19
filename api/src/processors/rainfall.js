@@ -1,4 +1,5 @@
 const db = require('../db/queries');
+const { log } = require('../middleware/logger');
 
 const RAIN_MM_PER_TIP      = 0.254;
 const INTERFERE_WINDOW_MS  = 600_000;
@@ -55,7 +56,17 @@ async function processRainfall(stationId) {
     db.getPseudoEventWindows(stationId),
   ]);
 
-  if (!tips.length) return { processed: 0, reclassified: 0 };
+  log.info('[rainfall] Classifying tips', {
+    station_id:    stationId,
+    tips:          tips.length,
+    visit_windows: visitTimes.length,
+    pseudo_windows: pseudoWindows.length,
+  });
+
+  if (!tips.length) {
+    log.warn('[rainfall] No tips found — nothing to process', { station_id: stationId });
+    return { processed: 0, reclassified: 0 };
+  }
 
   const flagMap = classifyTips(tips, visitTimes, pseudoWindows);
   const tipById = new Map(tips.map(t => [t.id, t]));
@@ -92,6 +103,17 @@ async function processRainfall(stationId) {
   }
 
   if (rows.length) await db.upsertRainfallRows(rows);
+
+  const flagCounts = {};
+  for (const [, flag] of flagMap) {
+    if (flag) flagCounts[flag] = (flagCounts[flag] || 0) + 1;
+  }
+  log.info('[rainfall] Classification summary', {
+    station_id:    stationId,
+    buckets:       rows.length,
+    reclassified:  updates.length,
+    flags:         flagCounts,
+  });
 
   return { processed: rows.length, reclassified: updates.length };
 }

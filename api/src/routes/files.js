@@ -4,6 +4,7 @@ const multer  = require('multer');
 const crypto  = require('crypto');
 const fs      = require('fs');
 const { requireAuth } = require('../middleware/auth');
+const { log } = require('../middleware/logger');
 
 router.use(requireAuth);
 const path    = require('path');
@@ -49,12 +50,17 @@ async function parseInBackground(fileRecord, visitId) {
   try {
     parser = require(`../parsers/${formatToModule(format)}`);
   } catch (e) {
-    return; // parser not built yet
+    log.warn('[parse] No parser available — skipping', { file_id: fileRecord.id, format });
+    return;
   }
+
+  const parseStart = Date.now();
+  log.info('[parse] Started', { file_id: fileRecord.id, format, file: fileRecord.original_name });
 
   try {
     const visit   = await db.getVisitById(visitId);
     const phenMap = await db.getAllPhenomena();
+    log.info('[parse] Station context', { file_id: fileRecord.id, station_id: visit?.station_id, data_family: visit?.data_family });
 
     // Streaming parsers receive filePath and return { streamName, stream: AsyncGenerator }.
     // Buffer-based parsers (e.g. solonist XML) receive a Buffer and return { streamName, measurements[], metadata }.
@@ -133,6 +139,15 @@ async function parseInBackground(fileRecord, visitId) {
       streamName:     result.streamName,
     });
 
+    log.info('[parse] Complete', {
+      file_id:    fileRecord.id,
+      records:    resolvedCount,
+      stream:     result.streamName,
+      from:       resolvedStart,
+      to:         resolvedEnd,
+      ms:         Date.now() - parseStart,
+    });
+
     // ── Gap detection ──────────────────────────────────────────────────────
     const GAP_TOLERANCE_S = 7200; // 2 hours — allow for download overlap / clock drift
     if (resolvedStart) {
@@ -148,6 +163,13 @@ async function parseInBackground(fileRecord, visitId) {
           const gapDays = Math.ceil(gapSeconds / 86400);
           await db.markFileGap(fileRecord.id, gapDays);
           await db.updateVisitStatus(visit.id, 'flagged');
+          log.warn('[parse] Gap detected — visit flagged', {
+            file_id:    fileRecord.id,
+            station_id: visit.station_id,
+            gap_days:   gapDays,
+            prior_end:  priorEnd,
+            file_start: resolvedStart,
+          });
         }
       }
     }
@@ -155,12 +177,13 @@ async function parseInBackground(fileRecord, visitId) {
 
     // Trigger rainfall processing for rainfall stations after a successful parse
     if (visit?.data_family === 'rainfall') {
-      processRainfall(visit.station_id).catch(e =>
-        console.error(`Rainfall processing failed for station ${visit.station_id}:`, e.message)
-      );
+      log.info('[rainfall] Processing triggered', { station_id: visit.station_id, file_id: fileRecord.id });
+      processRainfall(visit.station_id)
+        .then(r => log.info('[rainfall] Complete', { station_id: visit.station_id, ...r }))
+        .catch(e => log.error('[rainfall] Processing failed', { station_id: visit.station_id, error: e.message }));
     }
   } catch (err) {
-    console.error(`Parse failed for file ${fileRecord.id}:`, err.message);
+    log.error('[parse] Failed', { file_id: fileRecord.id, error: err.message, stack: err.stack?.split('\n')[1]?.trim() });
     await db.updateFileParseError(fileRecord.id, err.message);
   }
 }
@@ -194,6 +217,12 @@ router.post('/:id/files', upload.single('file'), async (req, res, next) => {
       return res.status(404).json({ error: 'Visit not found' });
     }
 
+    // Validate format against station family
+    const fileFormat = detectFileFormat(req.file.originalname, req.file.buffer);
+    if (visit.data_family === 'rainfall' && fileFormat !== 'hobo_binary') {
+      return res.status(400).json({ error: 'Rainfall stations only accept HOBO binary (.hobo) files. CSV exports from HOBOware contain cumulative totals and cannot be used by the rainfall pipeline.' });
+    }
+
     // SHA-256 hash of file contents
     const fileHash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
 
@@ -221,7 +250,15 @@ router.post('/:id/files', upload.single('file'), async (req, res, next) => {
       fileHash,
       fileSizeBytes: req.file.size,
       storagePath,
-      fileFormat:    detectFileFormat(req.file.originalname, req.file.buffer),
+      fileFormat,
+    });
+
+    log.info('[upload] File accepted', {
+      file_id:  fileRecord.id,
+      visit_id: visitId,
+      file:     req.file.originalname,
+      size_kb:  Math.round(req.file.size / 1024),
+      format:   fileRecord.file_format,
     });
 
     // Respond immediately — parse happens in background

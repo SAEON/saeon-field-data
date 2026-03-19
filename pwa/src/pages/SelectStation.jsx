@@ -191,7 +191,7 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
             key={s.id}
             data-family={s.data_family}
             data-selected={selectedId === s.id ? 'true' : undefined}
-            onClick={() => setSelectedId(s.id)}
+            onClick={() => setSelectedId(prev => prev === s.id ? null : s.id)}
             className="station-card"
           >
             <div className="flex-1 min-w-0">

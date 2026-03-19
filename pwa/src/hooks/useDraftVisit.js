@@ -30,10 +30,13 @@ export async function saveDraft(draft) {
         localId:   f.localId,
         name:      f.name,
         size:      f.size,
-        parseState: f.parseState === 'uploading' ? 'error' : f.parseState,
-        dbId:      f.dbId,
-        dateRange: f.dateRange,
-        records:   f.records,
+        parseState:  f.parseState === 'uploading' || f.parseState === 'retrying' ? 'error' : f.parseState,
+        dbId:        f.dbId,
+        dateRange:   f.dateRange,
+        records:     f.records,
+        parseError:  f.parseError  ?? null,
+        hasGap:      f.hasGap      ?? false,
+        gapDays:     f.gapDays     ?? null,
         // raw, abortController intentionally omitted
       })),
     };

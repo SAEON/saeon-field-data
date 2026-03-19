@@ -118,6 +118,10 @@ export function submitVisit(visitId) {
   });
 }
 
+export function abandonVisit(visitId) {
+  return request(`/api/visits/${visitId}`, { method: 'DELETE' });
+}
+
 // ── Files ──────────────────────────────────────────────────────────────────
 
 export function uploadFile(visitId, file, signal) {
