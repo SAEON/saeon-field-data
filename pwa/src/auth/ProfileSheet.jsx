@@ -1,16 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import keycloak from './keycloak.js';
 import { useAuth } from './AuthContext.jsx';
-import { getMe } from '../services/api.js';
 
 // ── Dropdown ────────────────────────────────────────────────────────────────
 function ProfileDropdown({ onClose }) {
-  const [me, setMe] = useState(null);
+  const me = useAuth(); // cached from AuthContext — no extra API call
   const ref = useRef(null);
-
-  useEffect(() => {
-    getMe().then(setMe).catch(() => {});
-  }, []);
 
   useEffect(() => {
     function handlePointer(e) {
@@ -50,13 +45,13 @@ function ProfileDropdown({ onClose }) {
       {/* Identity block */}
       <div style={{ padding: '14px 16px', borderBottom: '1px solid #e4e6ea' }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a2e', marginBottom: 3 }}>
-          {me?.full_name ?? '…'}
+          {me?.full_name ?? me?.name ?? '…'}
         </div>
         <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
           {me?.role ? ROLE_LABELS[me.role] ?? me.role : '…'}
         </div>
         <div style={{ fontSize: 11, color: '#aaa' }}>
-          Technician #{me?.id ?? '…'}
+          ID #{me?.id ?? '…'}
         </div>
       </div>
 

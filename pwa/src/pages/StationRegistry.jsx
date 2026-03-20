@@ -32,10 +32,10 @@ function Fab({ label, onPress }) {
   return (
     <button
       onClick={onPress}
-      className="fixed flex items-center gap-2 rounded-full bg-navy text-white text-[14px] font-semibold shadow-lg border-none z-40"
-      style={{ bottom: 72, right: 16, height: 48, paddingLeft: 20, paddingRight: 20 }}
+      className="fixed flex items-center gap-1.5 rounded-full bg-navy text-white text-[12px] font-semibold shadow-lg border-none z-40"
+      style={{ bottom: 72, right: 16, height: 36, paddingLeft: 14, paddingRight: 14 }}
     >
-      <span style={{ fontSize: 22, lineHeight: 1, marginTop: -1 }}>+</span>
+      <span style={{ fontSize: 16, lineHeight: 1, marginTop: -1 }}>+</span>
       {label}
     </button>
   );
@@ -537,73 +537,52 @@ export default function StationRegistry() {
         )}
 
         {!loading && !error && (
-          <div className="flex flex-col gap-2 p-4">
+          <div className="flex flex-col gap-2.5 p-3">
             {displayed.map(station => (
               <div
                 key={station.id}
-                className="bg-white rounded-2xl px-4 py-3"
+                className="bg-white rounded-xl px-3 py-2"
                 style={{
                   border: '1px solid var(--color-border)',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
                   opacity: station.active ? 1 : 0.6,
                 }}
               >
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <div className="min-w-0">
-                    <div className="text-[13px] font-bold text-text-dark truncate">
-                      {station.display_name}
-                      {!station.active && (
-                        <span className="ml-2 text-[10px] font-normal text-text-light">(inactive)</span>
-                      )}
-                    </div>
-                    <div className="text-[11px] text-text-light font-mono mt-0.5">{station.name}</div>
+                <div className="mb-0.5">
+                  <div className="text-[12px] font-bold text-text-dark truncate">
+                    {station.display_name}
+                    {!station.active && (
+                      <span className="ml-1.5 text-[10px] font-normal text-text-light">(inactive)</span>
+                    )}
                   </div>
-                  <FamilyBadge family={station.data_family} />
                 </div>
 
-                <div className="flex items-center justify-between mt-2">
-                  <div className="text-[11px] text-text-light">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-[10px] text-text-light min-w-0">
+                    <FamilyBadge family={station.data_family} />
                     {station.region ?? 'No region'}
                     {' · '}every {station.visit_frequency_days}d
                     {station.last_visited_at && (
                       <> · Last: {formatDate(station.last_visited_at)}</>
                     )}
-                    <span className={`ml-2 font-semibold ${station.assigned_technician_name ? 'text-blue' : 'text-warning'}`}>
-                      · {station.assigned_technician_name ? station.assigned_technician_name : 'Unassigned'}
+                    <span className={`ml-1 font-semibold ${station.assigned_technician_name ? 'text-blue' : 'text-warning'}`}>
+                      · {station.assigned_technician_name ?? 'Unassigned'}
                     </span>
                   </div>
 
-                  <div className="flex gap-1.5 shrink-0">
-                    <button
-                      onClick={() => setAssignTarget(station)}
-                      className="h-7 px-2.5 rounded-lg text-[11px] font-semibold"
-                      style={{ background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}
-                    >
-                      Assign
-                    </button>
-                    <button
-                      onClick={() => setCoverageTarget(station)}
-                      className="h-7 px-2.5 rounded-lg text-[11px] font-semibold"
-                      style={{ background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}
-                    >
-                      History
-                    </button>
-                    <button
-                      onClick={() => setEditTarget(station)}
-                      className="h-7 px-2.5 rounded-lg text-[11px] font-semibold"
-                      style={{ background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}
-                    >
-                      Edit
-                    </button>
-                    {station.active && (
-                      <button
-                        onClick={() => setDeactivateTarget(station)}
-                        className="h-7 px-2.5 rounded-lg text-[11px] font-semibold"
-                        style={{ background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}
-                      >
-                        Deactivate
+                  <div className="flex gap-1 shrink-0">
+                    {[
+                      { label: 'Assign',     onClick: () => setAssignTarget(station) },
+                      { label: 'History',    onClick: () => setCoverageTarget(station) },
+                      { label: 'Edit',       onClick: () => setEditTarget(station) },
+                      ...(station.active ? [{ label: 'Deactivate', onClick: () => setDeactivateTarget(station) }] : []),
+                    ].map(btn => (
+                      <button key={btn.label} onClick={btn.onClick}
+                        className="h-6 px-1.5 rounded text-[9px] font-semibold"
+                        style={{ background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}>
+                        {btn.label}
                       </button>
-                    )}
+                    ))}
                   </div>
                 </div>
               </div>

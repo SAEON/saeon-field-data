@@ -17,6 +17,9 @@ export function AuthProvider({ children }) {
           roles: me?.role ? [me.role] : [],
           initials: deriveInitials(keycloak.tokenParsed?.name),
           token: keycloak.token,
+          full_name: me?.full_name ?? null,
+          id: me?.id ?? null,
+          role: me?.role ?? null,
         });
       }).catch(() => {
         // API unreachable — set user with no roles (technician fallback)
@@ -26,6 +29,9 @@ export function AuthProvider({ children }) {
           roles: [],
           initials: deriveInitials(keycloak.tokenParsed?.name),
           token: keycloak.token,
+          full_name: null,
+          id: null,
+          role: null,
         });
       });
     }

@@ -7,8 +7,8 @@ const ANOMALY_THRESHOLD_MM = 10;
 
 function to5MinBucket(date) {
   const d = new Date(date);
-  d.setSeconds(0, 0);
-  d.setMinutes(Math.floor(d.getMinutes() / 5) * 5);
+  d.setUTCSeconds(0, 0);
+  d.setUTCMinutes(Math.floor(d.getUTCMinutes() / 5) * 5);
   return d;
 }
 
@@ -50,11 +50,18 @@ function classifyTips(tips, visitTimes, pseudoWindows) {
 }
 
 async function processRainfall(stationId) {
-  const [tips, visitTimes, pseudoWindows] = await Promise.all([
+  const [tips, visitTimes, rawPseudoWindows] = await Promise.all([
     db.getRawTipsForStation(stationId),
     db.getVisitTimestampsForStation(stationId),
     db.getPseudoEventWindows(stationId),
   ]);
+
+  // Discard inverted windows (start >= end) — data entry error
+  const pseudoWindows = rawPseudoWindows.filter(w => w.start < w.end);
+  const invertedCount = rawPseudoWindows.length - pseudoWindows.length;
+  if (invertedCount > 0) {
+    log.warn('[rainfall] Inverted pseudo-event windows discarded', { station_id: stationId, count: invertedCount });
+  }
 
   log.info('[rainfall] Classifying tips', {
     station_id:    stationId,
@@ -82,10 +89,13 @@ async function processRainfall(stationId) {
     const flag   = flagMap.get(tip.id);
     const bucket = to5MinBucket(tip.measured_at);
     const key    = `${tip.stream_id}|${bucket.toISOString()}`;
-    if (!buckets.has(key)) buckets.set(key, { streamId: tip.stream_id, bucket, all: 0, valid: 0 });
+    if (!buckets.has(key)) buckets.set(key, { streamId: tip.stream_id, bucket, all: 0, valid: 0, double_tip: 0, interfere: 0, pseudo_event: 0 });
     const b = buckets.get(key);
     b.all++;
     if (flag === null) b.valid++;
+    else if (flag === 'double_tip')   b.double_tip++;
+    else if (flag === 'interfere')    b.interfere++;
+    else if (flag === 'pseudo_event') b.pseudo_event++;
   }
 
   const rows = [];
@@ -93,12 +103,15 @@ async function processRainfall(stationId) {
     const rainMm = b.valid * RAIN_MM_PER_TIP;
     rows.push({
       stationId,
-      streamId:    b.streamId,
-      periodStart: b.bucket.toISOString(),
+      streamId:         b.streamId,
+      periodStart:      b.bucket.toISOString(),
       rainMm,
-      tipCount:    b.all,
-      validTips:   b.valid,
-      isAnomaly:   rainMm > ANOMALY_THRESHOLD_MM,
+      tipCount:         b.all,
+      validTips:        b.valid,
+      doubleTipCount:   b.double_tip,
+      interfereCount:   b.interfere,
+      pseudoEventCount: b.pseudo_event,
+      isAnomaly:        rainMm > ANOMALY_THRESHOLD_MM,
     });
   }
 

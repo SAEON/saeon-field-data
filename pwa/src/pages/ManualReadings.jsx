@@ -3,7 +3,7 @@
 // Existing readings are loaded from the server on mount to pre-populate saved state.
 // Offline: readings are queued in IndexedDB and flushed when reconnected.
 import { useState, useEffect, useRef } from 'react';
-import { createReading, getVisit } from '../services/api.js';
+import { createReading, deleteReading, getVisit } from '../services/api.js';
 import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
 
 const REQUIRED_TYPES = {
@@ -252,18 +252,25 @@ function TimeField({ readingType, label, required, hint, existingReading, onSave
   );
 }
 
+// Convert stored UTC ISO string → datetime-local input format (local time)
+function isoToLocalInput(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d)) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // ── Datetime-local field ──────────────────────────────────────────────────────
 
 function DateTimeField({ readingType, label, hint, existingReading, onSave }) {
-  const init = existingReading?.value_text ?? '';
+  const init = isoToLocalInput(existingReading?.value_text);
   const [value,     setValue]    = useState(init);
   const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
-  const saved = saveState === 'saved';
 
   async function handleSave() {
     setSaveState('saving');
     try {
-      // Convert datetime-local string to ISO with timezone so server-side Date parsing is unambiguous
       const iso = value ? new Date(value).toISOString() : value;
       await onSave({ reading_type: readingType, value_text: iso, recorded_at: new Date().toISOString() });
       setSaveState('saved');
@@ -283,7 +290,6 @@ function DateTimeField({ readingType, label, hint, existingReading, onSave }) {
           type="datetime-local"
           value={value}
           onChange={e => { setValue(e.target.value); setSaveState('idle'); }}
-          disabled={saved}
           className={`field-input flex-1 ${value ? 'field-input--active' : ''}`}
           style={{ height: '38px' }}
         />
@@ -489,67 +495,203 @@ function EventProblemNotesField({ existingReading, onSave }) {
 
 // ── Family form components ────────────────────────────────────────────────────
 
-function RainfallForm({ saved, onSave }) {
+function RainfallForm({ saved, onSave, onDelete }) {
   function ex(type) { return saved.find(r => r.reading_type === type); }
-  const initEventType = ex('event_type')?.value_text ?? '';
-  const [eventType, setEventType] = useState(initEventType);
+
+  // All field values lifted to form level — single save at the bottom
+  const [eventType,      setEventType]      = useState(ex('event_type')?.value_text ?? '');
+  const [didTip,         setDidTip]         = useState(() => ex('event_start_dt') ? true : ex('event_type') ? false : null);
+  const [startDt,        setStartDt]        = useState(isoToLocalInput(ex('event_start_dt')?.value_text));
+  const [endDt,          setEndDt]          = useState(isoToLocalInput(ex('event_end_dt')?.value_text));
+  const [problemNotes,   setProblemNotes]   = useState(ex('event_problem_notes')?.value_text ?? '');
+  const [gaugeCondition, setGaugeCondition] = useState(ex('gauge_condition')?.value_text ?? null);
+  const [gaugeReading,   setGaugeReading]   = useState(ex('gauge_reading')?.value_numeric != null ? String(ex('gauge_reading').value_numeric) : '');
+  const [lastEmptied,    setLastEmptied]    = useState(isoToLocalInput(ex('last_emptied')?.value_text));
+  const [battery,        setBattery]        = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
+  const [memory,         setMemory]         = useState(ex('memory_used_pct')?.value_numeric != null ? String(ex('memory_used_pct').value_numeric) : '');
+  const [saveState,      setSaveState]      = useState('idle');
+
   const isProblematic = PROBLEMATIC_EVENTS.has(eventType);
+  const isPseudo      = eventType === 'pseudo_events';
+  const showTipFields = isPseudo || didTip === true;
+
+  // event_type is handled by EventTypeField internally (auto-saves on select)
+  // this callback just keeps local state in sync
+  function handleEventTypeChange(val) {
+    setEventType(val);
+  }
+
+  async function handleDidTip(val) {
+    if (val === didTip) return;
+    setDidTip(val);
+    if (val === false) {
+      setStartDt('');
+      setEndDt('');
+      try {
+        if (ex('event_start_dt')) await onDelete('event_start_dt');
+        if (ex('event_end_dt'))   await onDelete('event_end_dt');
+      } catch (_) {
+        // Delete failed — revert so UI stays consistent with DB
+        setDidTip(true);
+        return;
+      }
+    }
+  }
+
+  async function handleSaveAll() {
+    setSaveState('saving');
+    const now = new Date().toISOString();
+    const saves = [];
+    if (gaugeCondition)                    saves.push(onSave({ reading_type: 'gauge_condition',   value_text:    gaugeCondition,                        recorded_at: now }));
+    if (gaugeReading)                      saves.push(onSave({ reading_type: 'gauge_reading',     value_numeric: parseFloat(gaugeReading), unit: 'mm',   recorded_at: now }));
+    if (lastEmptied)                       saves.push(onSave({ reading_type: 'last_emptied',      value_text:    new Date(lastEmptied).toISOString(),    recorded_at: now }));
+    if (battery)                           saves.push(onSave({ reading_type: 'battery_voltage',   value_numeric: parseFloat(battery),      unit: '%',    recorded_at: now }));
+    if (memory)                            saves.push(onSave({ reading_type: 'memory_used_pct',   value_numeric: parseFloat(memory),       unit: '%',    recorded_at: now }));
+    if (isProblematic && problemNotes)     saves.push(onSave({ reading_type: 'event_problem_notes', value_text:  problemNotes,                           recorded_at: now }));
+    if (showTipFields && startDt && endDt) {
+      saves.push(onSave({ reading_type: 'event_start_dt', value_text: new Date(startDt).toISOString(), recorded_at: now }));
+      saves.push(onSave({ reading_type: 'event_end_dt',   value_text: new Date(endDt).toISOString(),   recorded_at: now }));
+    }
+    try {
+      await Promise.all(saves);
+      setSaveState('idle');
+    } catch (err) {
+      setSaveState(err?.offline ? 'idle' : 'error');
+    }
+  }
+
+  const canSave = !!eventType && (isPseudo || didTip !== null) && !!gaugeCondition;
 
   return (
     <>
+      {/* Event type — auto-saves on select */}
       <EventTypeField
         existingReading={ex('event_type')}
         onSave={onSave}
-        onEventTypeChange={setEventType}
+        onEventTypeChange={handleEventTypeChange}
       />
-      {eventType === 'pseudo_events' ? (
-        <>
-          <DateTimeField
-            readingType="event_start_dt" label="Water entry start" hint="When did non-rainfall tipping begin?"
-            existingReading={ex('event_start_dt')} onSave={onSave}
-          />
-          <DateTimeField
-            readingType="event_end_dt" label="Water entry end" hint="When did non-rainfall tipping stop?"
-            existingReading={ex('event_end_dt')} onSave={onSave}
-          />
-        </>
-      ) : isProblematic ? (
-        <EventProblemNotesField
-          existingReading={ex('event_problem_notes')}
-          onSave={onSave}
-        />
-      ) : null}
-      <ChipsField
-        readingType="gauge_condition" label="Raingauge condition" required
-        hint="How did you find the gauge?"
-        options={[
-          { value: 'good',      label: 'Good' },
-          { value: 'debris',    label: 'Debris inside' },
-          { value: 'damaged',   label: 'Damaged' },
-          { value: 'submerged', label: 'Submerged' },
-          { value: 'missing',   label: 'Missing' },
-        ]}
-        existingReading={ex('gauge_condition')} onSave={onSave}
-      />
-      <NumberField
-        readingType="gauge_reading" label="Rainfall accumulated in gauge" hint="Optional"
-        unit="mm" placeholder="0.0"
-        existingReading={ex('gauge_reading')} onSave={onSave}
-      />
-      <DateTimeField
-        readingType="last_emptied" label="When did you empty the gauge?" hint="Optional"
-        existingReading={ex('last_emptied')} onSave={onSave}
-      />
-      <NumberField
-        readingType="battery_voltage" label="Logger battery" hint="From HOBO display (Optional)"
-        unit="%" placeholder="e.g. 87"
-        existingReading={ex('battery_voltage')} onSave={onSave}
-      />
-      <NumberField
-        readingType="memory_used_pct" label="Logger memory used" hint="From HOBO display (Optional)"
-        unit="%" placeholder="e.g. 45" step="1"
-        existingReading={ex('memory_used_pct')} onSave={onSave}
-      />
+
+      {/* Did you tip the bucket? */}
+      {eventType && !isPseudo && (
+        <div className="form-card">
+          <div className="text-[12px] font-semibold text-text-dark mb-2">
+            Did you tip the bucket manually?
+            {didTip === null && <span style={{ color: 'var(--color-error)', marginLeft: 4 }}>*</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="note-chip" data-selected={didTip === true  ? 'true' : undefined} onClick={() => handleDidTip(true)}  style={{ flex: 1 }}>Yes</button>
+            <button className="note-chip" data-selected={didTip === false ? 'true' : undefined} onClick={() => handleDidTip(false)} style={{ flex: 1 }}>No</button>
+          </div>
+        </div>
+      )}
+
+      {/* Tipping period */}
+      {showTipFields && (
+        <div className="form-card">
+          {!isPseudo && <div className="text-[11px] text-text-light mb-3">Record when tipping occurred so those tips are excluded from rainfall totals.</div>}
+          <div className="flex flex-col gap-3">
+            <div>
+              <div className="text-[12px] font-semibold text-text-dark mb-1.5">{isPseudo ? 'Water entry start' : 'Tipping started'}</div>
+              <input type="datetime-local" value={startDt}
+                onChange={e => { setStartDt(e.target.value); }}
+                className={`field-input w-full ${startDt ? 'field-input--active' : ''}`} style={{ height: '38px' }} />
+            </div>
+            <div>
+              <div className="text-[12px] font-semibold text-text-dark mb-1.5">{isPseudo ? 'Water entry end' : 'Tipping ended'}</div>
+              <input type="datetime-local" value={endDt}
+                onChange={e => { setEndDt(e.target.value); }}
+                className={`field-input w-full ${endDt ? 'field-input--active' : ''}`} style={{ height: '38px' }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Problem notes */}
+      {isProblematic && !isPseudo && (
+        <div className="form-card" style={{ borderColor: '#FDE68A' }}>
+          <div className="text-[12px] font-semibold text-text-dark mb-1">Describe what you found <span className="text-warning text-[11px]">*</span></div>
+          <textarea value={problemNotes} onChange={e => { setProblemNotes(e.target.value); }}
+            placeholder="e.g. Logger was missing from mount — bracket broken." rows={3}
+            className="notes-textarea w-full" />
+        </div>
+      )}
+
+      {/* Gauge condition */}
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-2">
+          <div className="text-[12px] font-semibold text-text-dark">Raingauge condition <span className="text-warning text-[11px]">*</span></div>
+          <span className="text-[10px] text-text-light">How did you find the gauge?</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {[{ value: 'good', label: 'Good' }, { value: 'debris', label: 'Debris inside' }, { value: 'damaged', label: 'Damaged' }, { value: 'submerged', label: 'Submerged' }, { value: 'missing', label: 'Missing' }].map(opt => (
+            <button key={opt.value} data-selected={gaugeCondition === opt.value ? 'true' : undefined}
+              onClick={() => { setGaugeCondition(v => v === opt.value ? null : opt.value); }}
+              className="note-chip">{opt.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Gauge reading */}
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-1.5">
+          <div className="text-[12px] font-semibold text-text-dark">Rainfall accumulated in gauge</div>
+          <span className="text-[10px] text-text-light">Optional</span>
+        </div>
+        <div className="relative">
+          <input type="number" step="0.01" value={gaugeReading} onChange={e => { setGaugeReading(e.target.value); }}
+            placeholder="0.0" className={`field-input w-full ${gaugeReading ? 'field-input--active' : ''}`} style={{ height: '38px', paddingRight: '44px' }} />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">mm</span>
+        </div>
+      </div>
+
+      {/* Last emptied */}
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-1.5">
+          <div className="text-[12px] font-semibold text-text-dark">When did you empty the gauge?</div>
+          <span className="text-[10px] text-text-light">Optional</span>
+        </div>
+        <input type="datetime-local" value={lastEmptied} onChange={e => { setLastEmptied(e.target.value); }}
+          className={`field-input w-full ${lastEmptied ? 'field-input--active' : ''}`} style={{ height: '38px' }} />
+      </div>
+
+      {/* Battery */}
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-1.5">
+          <div className="text-[12px] font-semibold text-text-dark">Logger battery</div>
+          <span className="text-[10px] text-text-light">From HOBO display (Optional)</span>
+        </div>
+        <div className="relative">
+          <input type="number" step="1" value={battery} onChange={e => { setBattery(e.target.value); }}
+            placeholder="e.g. 87" className={`field-input w-full ${battery ? 'field-input--active' : ''}`} style={{ height: '38px', paddingRight: '44px' }} />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">%</span>
+        </div>
+      </div>
+
+      {/* Memory */}
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-1.5">
+          <div className="text-[12px] font-semibold text-text-dark">Logger memory used</div>
+          <span className="text-[10px] text-text-light">From HOBO display (Optional)</span>
+        </div>
+        <div className="relative">
+          <input type="number" step="1" value={memory} onChange={e => { setMemory(e.target.value); }}
+            placeholder="e.g. 45" className={`field-input w-full ${memory ? 'field-input--active' : ''}`} style={{ height: '38px', paddingRight: '44px' }} />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">%</span>
+        </div>
+      </div>
+
+      {/* Save button */}
+      {saveState === 'error' && (
+        <div className="text-[12px] text-error text-center mb-2">Save failed — check connection and try again.</div>
+      )}
+      <button
+        onClick={handleSaveAll}
+        disabled={!canSave || saveState === 'saving'}
+        className="w-full h-12 rounded-xl text-[15px] font-bold border-none transition-opacity mt-1 mb-2 bg-navy text-white"
+        style={{ opacity: (!canSave || saveState === 'saving') ? 0.4 : 1 }}
+      >
+        {saveState === 'saving' ? 'Saving…' : 'Save'}
+      </button>
     </>
   );
 }
@@ -671,8 +813,16 @@ export default function ManualReadings({ visitId, dataFamily, onReadingsSaved })
       throw err;
     }
     const result = await createReading(visitId, reading);
-    setSaved(prev => [...prev, result]);
+    setSaved(prev => {
+      const without = prev.filter(r => r.reading_type !== result.reading_type);
+      return [...without, result];
+    });
     return result;
+  }
+
+  async function handleDelete(readingType) {
+    await deleteReading(visitId, readingType);
+    setSaved(prev => prev.filter(r => r.reading_type !== readingType));
   }
 
   async function handleRetryFailed() {
@@ -720,7 +870,7 @@ export default function ManualReadings({ visitId, dataFamily, onReadingsSaved })
 
         {/* Family-specific fields + shared section — keyed so they remount after queue flush */}
         <div key={formKey}>
-          {dataFamily === 'rainfall'    && <RainfallForm    saved={saved} onSave={handleSave} />}
+          {dataFamily === 'rainfall'    && <RainfallForm    saved={saved} onSave={handleSave} onDelete={handleDelete} />}
           {dataFamily === 'groundwater' && <GroundwaterForm saved={saved} onSave={handleSave} />}
           {dataFamily === 'met'         && <MetForm         saved={saved} onSave={handleSave} />}
 

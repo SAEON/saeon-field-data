@@ -31,6 +31,21 @@ router.get('/:id/rainfall', async (req, res, next) => {
   }
 });
 
+// GET /api/stations/:id/rainfall/summary
+router.get('/:id/rainfall/summary', async (req, res, next) => {
+  try {
+    const stationId  = parseInt(req.params.id, 10);
+    const defaultFrom = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+    const from = req.query.from || defaultFrom;
+    const to   = req.query.to   || new Date().toISOString();
+
+    const summary = await db.getRainfallSummary(stationId, from, to);
+    res.json({ station_id: stationId, from, to, ...summary });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/stations/:id/rainfall/process
 router.post('/:id/rainfall/process', requireRole('technician_lead', 'data_manager'), async (req, res, next) => {
   try {

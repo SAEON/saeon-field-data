@@ -37,4 +37,16 @@ router.post('/:id/readings', async (req, res, next) => {
   }
 });
 
+// DELETE /api/visits/:id/readings/:readingType
+router.delete('/:id/readings/:readingType', async (req, res, next) => {
+  try {
+    const visitId     = parseInt(req.params.id, 10);
+    const readingType = req.params.readingType;
+    await db.deleteReadingByType(visitId, readingType);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

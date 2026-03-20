@@ -225,6 +225,13 @@ export function getStationRainfall(stationId, { resolution = 'daily', from, to }
   return request(`/api/stations/${stationId}/rainfall?${params}`);
 }
 
+export function getStationRainfallSummary(stationId, { from, to } = {}) {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to)   params.set('to',   to);
+  return request(`/api/stations/${stationId}/rainfall/summary?${params}`);
+}
+
 export function processStationRainfall(stationId) {
   return request(`/api/stations/${stationId}/rainfall/process`, { method: 'POST' });
 }
@@ -237,4 +244,8 @@ export function createReading(visitId, { reading_type, value_numeric, value_text
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reading_type, value_numeric, value_text, unit, recorded_at, notes }),
   });
+}
+
+export function deleteReading(visitId, readingType) {
+  return request(`/api/visits/${visitId}/readings/${readingType}`, { method: 'DELETE' });
 }

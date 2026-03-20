@@ -4,7 +4,6 @@ const db      = require('../db/queries');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
 router.use(requireAuth);
-router.use(requireRole('technician_lead', 'data_manager'));
 
 // ── Keycloak admin helper ─────────────────────────────────────────────────────
 
@@ -80,7 +79,7 @@ router.get('/me', async (req, res, next) => {
 // GET /api/users
 // Sue sees technicians only. Marc sees all.
 // =============================================================
-router.get('/', async (req, res, next) => {
+router.get('/', requireRole('technician_lead', 'data_manager'), async (req, res, next) => {
   try {
     const isSue = req.user.roles.includes('technician_lead') && !req.user.roles.includes('data_manager');
     const role  = isSue ? 'technician' : undefined;
@@ -96,7 +95,7 @@ router.get('/', async (req, res, next) => {
 // Sue: can only create role=technician.
 // Marc: can assign any role.
 // =============================================================
-router.post('/', async (req, res, next) => {
+router.post('/', requireRole('technician_lead', 'data_manager'), async (req, res, next) => {
   try {
     const { email, full_name, role } = req.body;
 
@@ -132,7 +131,7 @@ router.post('/', async (req, res, next) => {
 // Sue: can only set active=false on technicians (deactivate).
 // Marc: can update role or active on any user.
 // =============================================================
-router.patch('/:id', async (req, res, next) => {
+router.patch('/:id', requireRole('technician_lead', 'data_manager'), async (req, res, next) => {
   try {
     const id     = parseInt(req.params.id, 10);
     const target = await db.getUserById(id);

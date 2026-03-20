@@ -235,7 +235,7 @@ function EditRoleSheet({ user, onClose, onUpdated }) {
 }
 
 export default function UserManagement() {
-  const { roles } = useAuth() ?? {};
+  const { roles, id: currentUserId } = useAuth() ?? {};
   const isManager = roles?.includes('data_manager');
   const isLead    = roles?.includes('technician_lead') && !isManager;
 
@@ -312,6 +312,7 @@ export default function UserManagement() {
                     isLead={isLead}
                     toggling={toggling === user.id}
                     onToggle={() => handleToggleActive(user)}
+                    isSelf={user.id === currentUserId}
                     onEditRole={() => setEditTarget(user)}
                   />
                 ))}
@@ -331,6 +332,7 @@ export default function UserManagement() {
                     isLead={isLead}
                     toggling={toggling === user.id}
                     onToggle={() => handleToggleActive(user)}
+                    isSelf={user.id === currentUserId}
                     onEditRole={() => setEditTarget(user)}
                   />
                 ))}
@@ -367,8 +369,8 @@ export default function UserManagement() {
   );
 }
 
-function UserRow({ user, isManager, isLead, toggling, onToggle, onEditRole }) {
-  const canToggle = isManager || (isLead && user.role === 'technician');
+function UserRow({ user, isManager, isLead, isSelf, toggling, onToggle, onEditRole }) {
+  const canToggle = (isManager || (isLead && user.role === 'technician')) && !isSelf;
 
   return (
     <div
@@ -389,7 +391,7 @@ function UserRow({ user, isManager, isLead, toggling, onToggle, onEditRole }) {
       <div className="flex items-center gap-2 shrink-0">
         <RoleBadge role={user.role} />
 
-        {isManager && (
+        {isManager && !isSelf && (
           <button
             onClick={onEditRole}
             className="h-7 px-2 rounded-lg text-[11px] font-semibold border-none"

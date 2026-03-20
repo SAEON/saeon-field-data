@@ -410,26 +410,26 @@ export default function VisitOversight() {
               <div className="text-[13px] text-text-light">Try adjusting the filters above.</div>
             </div>
           ) : (
-            <div className="flex flex-col gap-2 p-4">
+            <div className="flex flex-col gap-1.5 p-3">
               {filteredVisits.map(visit => (
                 <div
                   key={visit.id}
-                  className="bg-white rounded-2xl px-4 py-3"
-                  style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
+                  className="bg-white rounded-xl px-3 py-2"
+                  style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}
                 >
-                  <div className="flex items-start justify-between gap-2 mb-1.5">
-                    <div className="text-[13px] font-bold text-text-dark truncate">
+                  <div className="flex items-center justify-between gap-2 mb-0.5">
+                    <div className="text-[12px] font-bold text-text-dark truncate">
                       {visit.station_display_name}
                     </div>
                     <StatusBadge status={visit.status} />
                   </div>
 
-                  <div className="text-[12px] text-text-med mb-2">
+                  <div className="text-[11px] text-text-med mb-1">
                     {visit.technician_name} · {formatDate(visit.visited_at)}
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <div className="flex gap-3 text-[11px] text-text-light">
+                    <div className="flex gap-2 text-[10px] text-text-light">
                       <span>{visit.file_count} file{visit.file_count !== 1 ? 's' : ''}</span>
                       {visit.file_error_count > 0 && (
                         <span style={{ color: 'var(--color-error)' }}>
@@ -442,24 +442,21 @@ export default function VisitOversight() {
                         </span>
                       )}
                       <span>{visit.reading_count} reading{visit.reading_count !== 1 ? 's' : ''}</span>
+                      {visit.site_condition && (
+                        <span className="italic">· {visit.site_condition}</span>
+                      )}
                     </div>
 
                     {visit.status === 'draft' && (
                       <button
                         onClick={() => setAssignTarget({ type: 'visit', data: visit })}
-                        className="h-7 px-2.5 rounded-lg text-[11px] font-semibold border-none"
+                        className="h-6 px-1.5 rounded text-[9px] font-semibold border-none shrink-0"
                         style={{ background: '#EAF0FB', color: 'var(--color-navy)' }}
                       >
                         {visit.assigned_technician_id ? 'Reassign' : 'Assign'}
                       </button>
                     )}
                   </div>
-
-                  {visit.site_condition && (
-                    <div className="text-[11px] text-text-light mt-1.5 italic">
-                      Site: {visit.site_condition}
-                    </div>
-                  )}
                 </div>
               ))}
             </div>

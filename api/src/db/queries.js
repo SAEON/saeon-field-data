@@ -445,6 +445,13 @@ async function getReadingsByVisit(visitId) {
   return getVisitReadings(visitId);
 }
 
+async function deleteReadingByType(visitId, readingType) {
+  await pool.query(
+    `DELETE FROM manual_readings WHERE visit_id = $1 AND reading_type = $2`,
+    [visitId, readingType]
+  );
+}
+
 
 // =============================================================
 // RAW MEASUREMENTS
@@ -528,7 +535,7 @@ async function getVisitTimestampsForStation(stationId) {
     `SELECT visited_at
      FROM   field_visits
      WHERE  station_id = $1
-       AND  status IN ('pending', 'complete', 'flagged')
+       AND  status IN ('draft', 'pending', 'submitted', 'approved', 'flagged')
      ORDER  BY visited_at`,
     [stationId]
   );
@@ -544,7 +551,7 @@ async function getPseudoEventWindows(stationId) {
      FROM   field_visits fv
      JOIN   manual_readings mr ON mr.visit_id = fv.id
      WHERE  fv.station_id = $1
-       AND  fv.status IN ('pending', 'complete', 'flagged')
+       AND  fv.status IN ('draft', 'pending', 'submitted', 'approved', 'flagged')
        AND  mr.reading_type IN ('event_start_dt', 'event_end_dt')
      GROUP  BY fv.id
      HAVING MAX(CASE WHEN mr.reading_type = 'event_start_dt' THEN mr.value_text END) IS NOT NULL
@@ -571,28 +578,37 @@ async function bulkUpdateFlags(updates) {
 // Upsert 5-min rainfall aggregates — recalculated on every processing run
 async function upsertRainfallRows(rows) {
   if (!rows.length) return;
-  const stationIds  = rows.map(r => r.stationId);
-  const streamIds   = rows.map(r => r.streamId);
-  const starts      = rows.map(r => r.periodStart);
-  const rainMms     = rows.map(r => r.rainMm);
-  const tipCounts   = rows.map(r => r.tipCount);
-  const validTipss  = rows.map(r => r.validTips);
-  const anomalies   = rows.map(r => r.isAnomaly);
+  const stationIds       = rows.map(r => r.stationId);
+  const streamIds        = rows.map(r => r.streamId);
+  const starts           = rows.map(r => r.periodStart);
+  const rainMms          = rows.map(r => r.rainMm);
+  const tipCounts        = rows.map(r => r.tipCount);
+  const validTipss       = rows.map(r => r.validTips);
+  const doubleTipCounts  = rows.map(r => r.doubleTipCount);
+  const interfereCounts  = rows.map(r => r.interfereCount);
+  const pseudoEventCounts = rows.map(r => r.pseudoEventCount);
+  const anomalies        = rows.map(r => r.isAnomaly);
 
   await pool.query(
     `INSERT INTO rainfall
-       (station_id, stream_id, period_start, rain_mm, tip_count, valid_tips, is_anomaly)
+       (station_id, stream_id, period_start, rain_mm, tip_count, valid_tips,
+        double_tip_count, interfere_count, pseudo_event_count, is_anomaly)
      SELECT * FROM unnest(
        $1::int[], $2::int[], $3::timestamptz[],
-       $4::numeric[], $5::int[], $6::int[], $7::bool[]
+       $4::numeric[], $5::int[], $6::int[],
+       $7::int[], $8::int[], $9::int[], $10::bool[]
      )
      ON CONFLICT (stream_id, period_start) DO UPDATE SET
-       rain_mm      = EXCLUDED.rain_mm,
-       tip_count    = EXCLUDED.tip_count,
-       valid_tips   = EXCLUDED.valid_tips,
-       is_anomaly   = EXCLUDED.is_anomaly,
-       processed_at = NOW()`,
-    [stationIds, streamIds, starts, rainMms, tipCounts, validTipss, anomalies]
+       rain_mm            = EXCLUDED.rain_mm,
+       tip_count          = EXCLUDED.tip_count,
+       valid_tips         = EXCLUDED.valid_tips,
+       double_tip_count   = EXCLUDED.double_tip_count,
+       interfere_count    = EXCLUDED.interfere_count,
+       pseudo_event_count = EXCLUDED.pseudo_event_count,
+       is_anomaly         = EXCLUDED.is_anomaly,
+       processed_at       = NOW()`,
+    [stationIds, streamIds, starts, rainMms, tipCounts, validTipss,
+     doubleTipCounts, interfereCounts, pseudoEventCounts, anomalies]
   );
 }
 
@@ -601,7 +617,9 @@ async function upsertRainfallRows(rows) {
 async function getRainfallData(stationId, from, to, resolution = 'daily') {
   if (resolution === '5min') {
     const result = await pool.query(
-      `SELECT period_start, rain_mm, tip_count, valid_tips, is_anomaly AS has_anomaly
+      `SELECT period_start, rain_mm, tip_count, valid_tips,
+              double_tip_count, interfere_count, pseudo_event_count,
+              is_anomaly AS has_anomaly
        FROM   rainfall
        WHERE  station_id = $1
          AND  period_start BETWEEN $2 AND $3
@@ -624,11 +642,14 @@ async function getRainfallData(stationId, from, to, resolution = 'daily') {
 
   const result = await pool.query(
     `SELECT
-       ${trunc}                       AS period_start,
-       SUM(rain_mm)::numeric(8,3)     AS rain_mm,
-       SUM(tip_count)::integer        AS tip_count,
-       SUM(valid_tips)::integer       AS valid_tips,
-       BOOL_OR(is_anomaly)            AS has_anomaly
+       ${trunc}                            AS period_start,
+       SUM(rain_mm)::numeric(8,3)          AS rain_mm,
+       SUM(tip_count)::integer             AS tip_count,
+       SUM(valid_tips)::integer            AS valid_tips,
+       SUM(double_tip_count)::integer      AS double_tip_count,
+       SUM(interfere_count)::integer       AS interfere_count,
+       SUM(pseudo_event_count)::integer    AS pseudo_event_count,
+       BOOL_OR(is_anomaly)                 AS has_anomaly
      FROM   rainfall
      WHERE  station_id = $1
        AND  period_start BETWEEN $2 AND $3
@@ -637,6 +658,29 @@ async function getRainfallData(stationId, from, to, resolution = 'daily') {
     [stationId, from, to]
   );
   return result.rows;
+}
+
+
+// Single-row summary of rainfall for a station over a date range
+async function getRainfallSummary(stationId, from, to) {
+  const result = await pool.query(
+    `SELECT
+       COUNT(*)::integer                                        AS period_count,
+       COALESCE(SUM(rain_mm), 0)                               AS total_mm,
+       COALESCE(SUM(tip_count), 0)::integer                    AS total_tips,
+       COALESCE(SUM(valid_tips), 0)::integer                   AS total_valid,
+       COALESCE(SUM(double_tip_count), 0)::integer             AS double_tip_count,
+       COALESCE(SUM(interfere_count), 0)::integer              AS interfere_count,
+       COALESCE(SUM(pseudo_event_count), 0)::integer           AS pseudo_event_count,
+       COUNT(*) FILTER (WHERE is_anomaly)::integer             AS anomaly_count,
+       MIN(period_start)                                       AS first_record,
+       MAX(period_start)                                       AS last_record
+     FROM rainfall
+     WHERE station_id = $1
+       AND period_start BETWEEN $2 AND $3`,
+    [stationId, from, to]
+  );
+  return result.rows[0];
 }
 
 
@@ -899,6 +943,7 @@ module.exports = {
   deleteDraftVisit,
   // Readings
   createManualReading,
+  deleteReadingByType,
   getReadingsByVisit,
   // Rainfall processing
   getRawTipsForStation,
@@ -907,6 +952,7 @@ module.exports = {
   bulkUpdateFlags,
   upsertRainfallRows,
   getRainfallData,
+  getRainfallSummary,
   // Measurements
   bulkInsertMeasurements,
   getMeasurementsByStream,

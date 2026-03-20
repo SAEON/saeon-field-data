@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { loadDraft, saveDraft, clearDraft } from './hooks/useDraftVisit.js';
 import { createVisit, submitVisit, abandonVisit } from './services/api.js';
 import { useAuth } from './auth/AuthContext.jsx';
+import ProfileButton from './auth/ProfileSheet.jsx';
 import SelectStation  from './pages/SelectStation.jsx';
 import VisitDetails   from './pages/VisitDetails.jsx';
 import UploadFiles    from './pages/UploadFiles.jsx';
@@ -69,9 +70,16 @@ function AppBar({ title, subtitle, onAbandon }) {
         {onAbandon && (
           <button
             onClick={onAbandon}
-            className="flex items-center justify-center w-8 h-8 rounded-lg border-none bg-transparent"
-            style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}
-            title="Abandon this draft visit"
+            className="flex items-center justify-center w-8 h-8 rounded-full"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              border: '1.5px solid rgba(255,255,255,0.35)',
+              color: 'white',
+              fontSize: 15,
+              fontWeight: 700,
+              lineHeight: 1,
+            }}
+            title="Cancel this draft visit"
           >
             ✕
           </button>
@@ -83,7 +91,7 @@ function AppBar({ title, subtitle, onAbandon }) {
           <div className="text-white text-[11px] opacity-60 leading-tight">{subtitle}</div>
         )}
       </div>
-      <div className="w-10" />
+      <ProfileButton />
     </header>
   );
 }
