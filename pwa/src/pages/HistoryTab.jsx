@@ -23,9 +23,9 @@ function fmtDateTime(iso) {
 // ── Lookup tables ─────────────────────────────────────────────────────────────
 
 const FAMILY_CONFIG = {
-  rainfall:    { label: 'Rainfall',    icon: '🌧', color: '#1565C0', bg: '#EBF2FB', border: '#3B7DD8' },
-  groundwater: { label: 'Groundwater', icon: '💧', color: '#00695C', bg: '#E0F2F1', border: '#00695C' },
-  met:         { label: 'Meteorological', icon: '🌤', color: '#2E7D32', bg: '#E8F5E9', border: '#2E7D32' },
+  rainfall:    { label: 'Rainfall',    icon: '≀', color: '#1565C0', bg: '#EBF2FB', border: '#3B7DD8' },
+  groundwater: { label: 'Groundwater', icon: '⊥', color: '#00695C', bg: '#E0F2F1', border: '#00695C' },
+  met:         { label: 'Meteorological', icon: '△', color: '#2E7D32', bg: '#E8F5E9', border: '#2E7D32' },
 };
 
 const CONDITION_STYLE = {
@@ -53,8 +53,7 @@ const READING_META = {
   no_rainfall_confirmed:  { label: 'No rainfall confirmed', unit: ''   },
   event_type:             { label: 'Visit activity',         unit: ''   },
   event_problem_notes:    { label: 'Problem description',   unit: ''   },
-  event_start_dt:         { label: 'Water entry start',     unit: ''   },
-  event_end_dt:           { label: 'Water entry end',       unit: ''   },
+  did_tip:                { label: 'Tipped bucket',         unit: ''   },
   memory_used_pct:        { label: 'Logger memory used',    unit: '%'  },
 };
 
@@ -85,7 +84,7 @@ function readingValue(r) {
   if (r.reading_type === 'raining') return r.value_text === 'true' ? 'Yes' : 'No';
   if (r.reading_type === 'no_rainfall_confirmed') return 'Confirmed';
   if (r.reading_type === 'event_type') return EVENT_TYPE_LABELS[r.value_text] || r.value_text;
-  if (r.reading_type === 'event_start_dt' || r.reading_type === 'event_end_dt') return fmtDateTime(r.value_text);
+  if (r.reading_type === 'did_tip') return r.value_text === 'yes' ? 'Yes' : 'No';
   return r.value_text || '—';
 }
 
@@ -136,7 +135,7 @@ function AddFileSheet({ visit, onClose }) {
           className="drop-zone mb-4"
           style={{ padding: '24px 16px' }}
         >
-          <div className="text-[28px] mb-1.5">{dragging ? '📂' : '📁'}</div>
+          <div className="text-[28px] mb-1.5">▢</div>
           <div className="text-[13px] font-semibold text-text-dark mb-1">
             {dragging ? 'Drop here' : 'Tap to select a file'}
           </div>

@@ -7,9 +7,9 @@ import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
 // ── Lookup tables ─────────────────────────────────────────────────────────────
 
 const FAMILY_CONFIG = {
-  rainfall:    { label: 'Rainfall',    icon: '🌧', color: '#1565C0', bg: '#EBF2FB' },
-  groundwater: { label: 'Groundwater', icon: '💧', color: '#00695C', bg: '#E0F2F1' },
-  met:         { label: 'Meteorological', icon: '🌤', color: '#2E7D32', bg: '#E8F5E9' },
+  rainfall:    { label: 'Rainfall',    icon: '≀', color: '#1565C0', bg: '#EBF2FB' },
+  groundwater: { label: 'Groundwater', icon: '⊥', color: '#00695C', bg: '#E0F2F1' },
+  met:         { label: 'Meteorological', icon: '△', color: '#2E7D32', bg: '#E8F5E9' },
 };
 
 const READING_META = {

@@ -12,6 +12,7 @@ function to5MinBucket(date) {
   return d;
 }
 
+// Returns Map<id, {flag, reason}> where flag/reason are null for valid tips.
 function classifyTips(tips, visitTimes, pseudoWindows) {
   const result = new Map();
 
@@ -23,27 +24,27 @@ function classifyTips(tips, visitTimes, pseudoWindows) {
     const nextMs = i < tips.length - 1 ? new Date(tips[i + 1].measured_at).getTime() : null;
     if ((prevMs !== null && ts - prevMs === 1000) ||
         (nextMs !== null && nextMs - ts === 1000)) {
-      result.set(tip.id, 'double_tip');
+      result.set(tip.id, { flag: 'double_tip', reason: '1s_bounce' });
       continue;
     }
 
-    let flag = null;
+    let entry = { flag: null, reason: null };
     for (const win of pseudoWindows) {
       if (ts >= win.start.getTime() && ts <= win.end.getTime()) {
-        flag = 'pseudo_event';
+        entry = { flag: 'pseudo_event', reason: win.reason };
         break;
       }
     }
-    if (flag) { result.set(tip.id, flag); continue; }
+    if (entry.flag) { result.set(tip.id, entry); continue; }
 
     for (const vt of visitTimes) {
       if (Math.abs(ts - vt.getTime()) <= INTERFERE_WINDOW_MS) {
-        flag = 'interfere';
+        entry = { flag: 'interfere', reason: 'visit_proximity' };
         break;
       }
     }
 
-    result.set(tip.id, flag);
+    result.set(tip.id, entry);
   }
 
   return result;
@@ -79,23 +80,28 @@ async function processRainfall(stationId) {
   const tipById = new Map(tips.map(t => [t.id, t]));
 
   const updates = [];
-  for (const [id, flag] of flagMap) {
-    if (tipById.get(id).qa_flag !== flag) updates.push({ id, flag });
+  for (const [id, { flag, reason }] of flagMap) {
+    const tip = tipById.get(id);
+    if (tip.qa_flag !== flag || tip.flag_reason !== reason) updates.push({ id, flag, reason });
   }
   if (updates.length) await db.bulkUpdateFlags(updates);
 
   const buckets = new Map();
   for (const tip of tips) {
-    const flag   = flagMap.get(tip.id);
+    const { flag, reason } = flagMap.get(tip.id);
     const bucket = to5MinBucket(tip.measured_at);
     const key    = `${tip.stream_id}|${bucket.toISOString()}`;
-    if (!buckets.has(key)) buckets.set(key, { streamId: tip.stream_id, bucket, all: 0, valid: 0, double_tip: 0, interfere: 0, pseudo_event: 0 });
+    if (!buckets.has(key)) buckets.set(key, { streamId: tip.stream_id, bucket, all: 0, valid: 0, double_tip: 0, interfere: 0, pseudo_event: 0, manual_tip: 0, non_rainfall: 0 });
     const b = buckets.get(key);
     b.all++;
-    if (flag === null) b.valid++;
-    else if (flag === 'double_tip')   b.double_tip++;
-    else if (flag === 'interfere')    b.interfere++;
-    else if (flag === 'pseudo_event') b.pseudo_event++;
+    if (flag === null)              b.valid++;
+    else if (flag === 'double_tip') b.double_tip++;
+    else if (flag === 'interfere')  b.interfere++;
+    else if (flag === 'pseudo_event') {
+      b.pseudo_event++;
+      if (reason === 'manual_tip')         b.manual_tip++;
+      else if (reason === 'non_rainfall_entry') b.non_rainfall++;
+    }
   }
 
   const rows = [];
@@ -111,6 +117,8 @@ async function processRainfall(stationId) {
       doubleTipCount:   b.double_tip,
       interfereCount:   b.interfere,
       pseudoEventCount: b.pseudo_event,
+      manualTipCount:   b.manual_tip,
+      nonRainfallCount: b.non_rainfall,
       isAnomaly:        rainMm > ANOMALY_THRESHOLD_MM,
     });
   }
@@ -118,8 +126,11 @@ async function processRainfall(stationId) {
   if (rows.length) await db.upsertRainfallRows(rows);
 
   const flagCounts = {};
-  for (const [, flag] of flagMap) {
-    if (flag) flagCounts[flag] = (flagCounts[flag] || 0) + 1;
+  for (const [, { flag, reason }] of flagMap) {
+    if (flag) {
+      const key = reason ? `${flag}:${reason}` : flag;
+      flagCounts[key] = (flagCounts[key] || 0) + 1;
+    }
   }
   log.info('[rainfall] Classification summary', {
     station_id:    stationId,

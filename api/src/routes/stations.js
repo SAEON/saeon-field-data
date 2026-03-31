@@ -67,7 +67,7 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
     const {
       name, display_name, data_family, region,
       latitude, longitude, elevation_m, notes,
-      visit_frequency_days, assigned_technician_id,
+      visit_frequency_days, assigned_technician_id, serial_no,
     } = req.body;
 
     if (!name || !display_name || !data_family) {
@@ -78,7 +78,7 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
       name, displayName: display_name, dataFamily: data_family,
       region, latitude, longitude, elevationM: elevation_m,
       notes, visitFrequencyDays: visit_frequency_days,
-      assignedTechnicianId: assigned_technician_id,
+      assignedTechnicianId: assigned_technician_id, serialNo: serial_no ?? null,
     });
 
     res.status(201).json(station);
@@ -100,7 +100,7 @@ router.patch('/:id', requireRole('technician_lead'), async (req, res, next) => {
     const {
       name, display_name, data_family, region,
       latitude, longitude, elevation_m, notes,
-      visit_frequency_days, assigned_technician_id, active,
+      visit_frequency_days, assigned_technician_id, active, serial_no,
     } = req.body;
 
     const updated = await db.updateStation(id, {
@@ -108,6 +108,7 @@ router.patch('/:id', requireRole('technician_lead'), async (req, res, next) => {
       region, latitude, longitude, elevationM: elevation_m,
       notes, visitFrequencyDays: visit_frequency_days,
       assignedTechnicianId: assigned_technician_id, active,
+      serialNo: serial_no,
     });
 
     res.json(updated);

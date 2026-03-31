@@ -77,6 +77,7 @@ function StationSheet({ station, onClose, onSaved }) {
     elevation_m:             station?.elevation_m             ?? '',
     visit_frequency_days:    station?.visit_frequency_days    ?? 30,
     notes:                   station?.notes                   ?? '',
+    serial_no:               station?.serial_no               ?? '',
     active:                  station?.active                  ?? true,
     assigned_technician_id:  station?.assigned_technician_id  ?? '',
   });
@@ -117,6 +118,7 @@ function StationSheet({ station, onClose, onSaved }) {
         visit_frequency_days:   parseInt(form.visit_frequency_days, 10) || 30,
         notes:                  form.notes.trim() || null,
         assigned_technician_id: form.assigned_technician_id ? parseInt(form.assigned_technician_id, 10) : null,
+        serial_no:              form.serial_no.trim() || null,
       };
       let saved;
       if (isNew) {
@@ -218,6 +220,13 @@ function StationSheet({ station, onClose, onSaved }) {
             />
           </div>
 
+          <div>
+            <div className={labelCls}>Instrument serial no.</div>
+            <input className={inputCls} value={form.serial_no}
+              onChange={e => set('serial_no', e.target.value)}
+              placeholder="e.g. 20102577  (optional)" />
+          </div>
+
           {!isNew && (
             <div className="flex items-center justify-between px-2.5 py-2 rounded-lg bg-surface">
               <div>
@@ -301,11 +310,11 @@ function DeactivateSheet({ station, onClose, onDeactivated }) {
 }
 
 const STREAM_LABEL = {
-  raw_rainfall:    { label: 'Rainfall',       icon: '🌧' },
-  raw_groundwater: { label: 'Groundwater',    icon: '💧' },
-  raw_5_min:       { label: 'Met (5-min)',    icon: '🌤' },
-  raw_hourly:      { label: 'Met (hourly)',   icon: '🌤' },
-  raw_stom:        { label: 'STOM',           icon: '📡' },
+  raw_rainfall:    { label: 'Rainfall',       icon: '≀'  },
+  raw_groundwater: { label: 'Groundwater',    icon: '⊥'  },
+  raw_5_min:       { label: 'Met (5-min)',    icon: '△'  },
+  raw_hourly:      { label: 'Met (hourly)',   icon: '△'  },
+  raw_stom:        { label: 'STOM',           icon: '↯'  },
 };
 
 function AssignTechnicianSheet({ station, onClose, onAssigned }) {
@@ -429,7 +438,7 @@ function CoverageSheet({ station, onClose }) {
           {!loading && !error && coverage?.length > 0 && (
             <div className="bg-white rounded-xl overflow-hidden" style={{ border: '1.5px solid var(--color-border)' }}>
               {coverage.map((row, i) => {
-                const meta = STREAM_LABEL[row.stream_name] || { label: row.stream_name, icon: '📁' };
+                const meta = STREAM_LABEL[row.stream_name] || { label: row.stream_name, icon: '▢' };
                 return (
                   <div
                     key={row.stream_name}

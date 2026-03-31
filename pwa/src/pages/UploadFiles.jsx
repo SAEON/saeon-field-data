@@ -2,11 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { uploadFile, reparseFile, deleteFile, getVisit, getStationCoverage } from '../services/api.js';
 
 const FORMAT_MAP = {
-  xle:  { label: 'Solonist XLE',   icon: '💧', families: ['groundwater'] },
-  xml:  { label: 'Solonist XML',   icon: '💧', families: ['groundwater'] },
-  dat:  { label: 'Campbell TOA5', icon: '🌤', families: ['met'] },
-  csv:  { label: 'HOBO / STOM',   icon: '🌧', families: ['met'] },
-  hobo: { label: 'HOBO Binary',   icon: '🌧', families: ['rainfall'] },
+  xle:  { label: 'Solonist XLE',  icon: '⊥', families: ['groundwater'] },
+  xml:  { label: 'Solonist XML',  icon: '⊥', families: ['groundwater'] },
+  dat:  { label: 'Campbell TOA5', icon: '△', families: ['met'] },
+  csv:  { label: 'HOBO / STOM',   icon: '≀', families: ['met'] },
+  hobo: { label: 'HOBO Binary',   icon: '≀', families: ['rainfall'] },
 };
 
 // Accepted extensions and MIME accept string per family
@@ -22,7 +22,7 @@ const ON_SERVER = new Set(['pending', 'parsed', 'error', 'retrying']);
 
 function detectFormat(filename) {
   const ext = filename.split('.').pop().toLowerCase();
-  return { ext, ...(FORMAT_MAP[ext] || { label: 'Unknown', icon: '📄' }) };
+  return { ext, ...(FORMAT_MAP[ext] || { label: 'Unknown', icon: '▢' }) };
 }
 
 function formatBytes(bytes) {
@@ -259,7 +259,7 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
           onClick={() => fileInputRef.current.click()}
           className="drop-zone"
         >
-          <div className="text-[36px] mb-2.5">{dragging ? '📂' : '📁'}</div>
+          <div className="text-[36px] mb-2.5">▢</div>
           <div className="text-[14px] font-semibold text-text-dark mb-1">
             {dragging ? 'Drop files here' : 'Tap to select logger files'}
           </div>
@@ -384,7 +384,7 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
                         'text-blue'
                       }`}>
                         <span>
-                          {isParsed ? '✓' : isErr ? '⚠' : isRetrying ? '↺' : isPending ? '🔄' : isQueued ? '📶' : '⏳'}
+                          {isParsed ? '✓' : isErr ? '⚠' : isRetrying ? '↺' : isPending ? '↻' : isQueued ? '≡' : '○'}
                         </span>
                         <span>
                           {isParsed    ? 'Parsed'

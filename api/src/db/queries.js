@@ -89,19 +89,19 @@ async function getAllStationsRegistry() {
   return result.rows;
 }
 
-async function createStation({ name, displayName, dataFamily, region, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId }) {
+async function createStation({ name, displayName, dataFamily, region, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId, serialNo }) {
   const result = await pool.query(
     `INSERT INTO stations
-       (name, display_name, data_family, region, location, elevation_m, notes, visit_frequency_days, assigned_technician_id)
+       (name, display_name, data_family, region, location, elevation_m, notes, visit_frequency_days, assigned_technician_id, serial_no)
      VALUES ($1, $2, $3, $4,
        CASE WHEN $5::numeric IS NOT NULL AND $6::numeric IS NOT NULL
             THEN ST_MakePoint($6, $5)::geography ELSE NULL END,
-       $7, $8, COALESCE($9, 30), $10)
+       $7, $8, COALESCE($9, 30), $10, $11)
      RETURNING *`,
     [name, displayName, dataFamily, region ?? null,
      latitude ?? null, longitude ?? null,
      elevationM ?? null, notes ?? null,
-     visitFrequencyDays ?? null, assignedTechnicianId ?? null]
+     visitFrequencyDays ?? null, assignedTechnicianId ?? null, serialNo ?? null]
   );
   return result.rows[0];
 }
@@ -110,22 +110,23 @@ async function updateStation(id, fields) {
   const {
     name, displayName, dataFamily, region,
     latitude, longitude, elevationM, notes,
-    visitFrequencyDays, assignedTechnicianId, active,
+    visitFrequencyDays, assignedTechnicianId, active, serialNo,
   } = fields;
 
   const sets = [];
   const vals = [id];
   let i = 2;
 
-  if (name              !== undefined) { sets.push(`name = $${i++}`);                   vals.push(name); }
-  if (displayName       !== undefined) { sets.push(`display_name = $${i++}`);            vals.push(displayName); }
-  if (dataFamily        !== undefined) { sets.push(`data_family = $${i++}`);             vals.push(dataFamily); }
-  if (region            !== undefined) { sets.push(`region = $${i++}`);                  vals.push(region); }
-  if (elevationM        !== undefined) { sets.push(`elevation_m = $${i++}`);             vals.push(elevationM); }
-  if (notes             !== undefined) { sets.push(`notes = $${i++}`);                   vals.push(notes); }
-  if (visitFrequencyDays !== undefined){ sets.push(`visit_frequency_days = $${i++}`);    vals.push(visitFrequencyDays); }
+  if (name              !== undefined) { sets.push(`name = $${i++}`);                     vals.push(name); }
+  if (displayName       !== undefined) { sets.push(`display_name = $${i++}`);              vals.push(displayName); }
+  if (dataFamily        !== undefined) { sets.push(`data_family = $${i++}`);               vals.push(dataFamily); }
+  if (region            !== undefined) { sets.push(`region = $${i++}`);                    vals.push(region); }
+  if (elevationM        !== undefined) { sets.push(`elevation_m = $${i++}`);               vals.push(elevationM); }
+  if (notes             !== undefined) { sets.push(`notes = $${i++}`);                     vals.push(notes); }
+  if (visitFrequencyDays !== undefined){ sets.push(`visit_frequency_days = $${i++}`);      vals.push(visitFrequencyDays); }
   if (assignedTechnicianId !== undefined){ sets.push(`assigned_technician_id = $${i++}`); vals.push(assignedTechnicianId); }
-  if (active            !== undefined) { sets.push(`active = $${i++}`);                  vals.push(active); }
+  if (active            !== undefined) { sets.push(`active = $${i++}`);                    vals.push(active); }
+  if (serialNo          !== undefined) { sets.push(`serial_no = $${i++}`);                 vals.push(serialNo); }
 
   if (latitude !== undefined && longitude !== undefined) {
     sets.push(`location = ST_MakePoint($${i}, $${i + 1})::geography`);
@@ -290,17 +291,21 @@ async function createUploadedFile({ visitId, originalName, fileHash, fileSizeByt
   return result.rows[0];
 }
 
-async function updateFileParsed(id, { dateRangeStart, dateRangeEnd, recordCount, streamName }) {
+async function updateFileParsed(id, { dateRangeStart, dateRangeEnd, recordCount, streamName, loggerLabel, loggerSerial, downloadedAt }) {
   const result = await pool.query(
     `UPDATE uploaded_files
      SET    parse_status     = 'parsed',
             date_range_start = $2,
             date_range_end   = $3,
             record_count     = $4,
-            stream_name      = $5
+            stream_name      = $5,
+            logger_label     = COALESCE($6, logger_label),
+            logger_serial    = COALESCE($7, logger_serial),
+            logger_launched_at = COALESCE($8, logger_launched_at)
      WHERE  id = $1
      RETURNING *`,
-    [id, dateRangeStart, dateRangeEnd, recordCount, streamName ?? null]
+    [id, dateRangeStart, dateRangeEnd, recordCount, streamName ?? null,
+     loggerLabel ?? null, loggerSerial ?? null, downloadedAt ?? null]
   );
   return result.rows[0] || null;
 }
@@ -516,7 +521,7 @@ async function getMeasurementCount(fileId) {
 // Raw rainfall tips for a station — sorted by time, with current flag
 async function getRawTipsForStation(stationId) {
   const result = await pool.query(
-    `SELECT rm.id, rm.stream_id, rm.measured_at, rm.qa_flag
+    `SELECT rm.id, rm.stream_id, rm.measured_at, rm.qa_flag, rm.flag_reason
      FROM   raw_measurements rm
      JOIN   station_data_streams sds ON sds.id = rm.stream_id
      JOIN   phenomena p ON p.id = rm.phenomenon_id
@@ -542,61 +547,80 @@ async function getVisitTimestampsForStation(stationId) {
   return result.rows.map(r => new Date(r.visited_at));
 }
 
-// Pseudo-event windows from manual_readings (event_start_dt + event_end_dt pairs)
+// Pseudo-event windows anchored to date_range_end (last tip timestamp in the file).
+// Tag 0x07 in the HOBO binary is the LAUNCH timestamp (when the logger was configured),
+// not the download time — so date_range_end remains the best proxy for visit time.
+// Window = [date_range_end - 20 min, date_range_end].
+// Returns reason per window: 'manual_tip' or 'non_rainfall_entry'.
 async function getPseudoEventWindows(stationId) {
   const result = await pool.query(
     `SELECT
-       MAX(CASE WHEN mr.reading_type = 'event_start_dt' THEN mr.value_text END) AS start_dt,
-       MAX(CASE WHEN mr.reading_type = 'event_end_dt'   THEN mr.value_text END) AS end_dt
+       MAX(uf.date_range_end) - INTERVAL '20 minutes' AS window_start,
+       MAX(uf.date_range_end)                          AS window_end,
+       CASE
+         WHEN mr.reading_type = 'did_tip'    THEN 'manual_tip'
+         WHEN mr.reading_type = 'event_type' THEN 'non_rainfall_entry'
+       END AS reason
      FROM   field_visits fv
      JOIN   manual_readings mr ON mr.visit_id = fv.id
+     JOIN   uploaded_files  uf ON uf.visit_id = fv.id
      WHERE  fv.station_id = $1
-       AND  fv.status IN ('draft', 'pending', 'submitted', 'approved', 'flagged')
-       AND  mr.reading_type IN ('event_start_dt', 'event_end_dt')
-     GROUP  BY fv.id
-     HAVING MAX(CASE WHEN mr.reading_type = 'event_start_dt' THEN mr.value_text END) IS NOT NULL
-        AND MAX(CASE WHEN mr.reading_type = 'event_end_dt'   THEN mr.value_text END) IS NOT NULL`,
+       AND  fv.status IN ('draft', 'submitted', 'approved', 'flagged')
+       AND  (
+              (mr.reading_type = 'did_tip'    AND mr.value_text = 'yes')
+           OR (mr.reading_type = 'event_type' AND mr.value_text = 'pseudo_events')
+            )
+       AND  uf.stream_name  = 'raw_rainfall'
+       AND  uf.parse_status = 'parsed'
+       AND  uf.date_range_end IS NOT NULL
+     GROUP  BY fv.id, mr.reading_type`,
     [stationId]
   );
-  return result.rows.map(r => ({ start: new Date(r.start_dt), end: new Date(r.end_dt) }));
+  return result.rows.map(r => ({ start: new Date(r.window_start), end: new Date(r.window_end), reason: r.reason }));
 }
 
-// Bulk-update flag on raw_measurements — only changed rows are passed in
+// Bulk-update flag + reason on raw_measurements — only changed rows are passed in
 async function bulkUpdateFlags(updates) {
   if (!updates.length) return;
-  const ids   = updates.map(u => u.id);
-  const flags = updates.map(u => u.flag); // null = valid (clears old flag)
+  const ids     = updates.map(u => u.id);
+  const flags   = updates.map(u => u.flag);   // null = valid (clears flag)
+  const reasons = updates.map(u => u.reason); // null = valid (clears reason)
   await pool.query(
     `UPDATE raw_measurements rm
-     SET    qa_flag = u.flag
-     FROM   unnest($1::bigint[], $2::text[]) AS u(id, flag)
+     SET    qa_flag     = u.flag,
+            flag_reason = u.reason
+     FROM   unnest($1::bigint[], $2::text[], $3::text[]) AS u(id, flag, reason)
      WHERE  rm.id = u.id`,
-    [ids, flags]
+    [ids, flags, reasons]
   );
 }
 
 // Upsert 5-min rainfall aggregates — recalculated on every processing run
 async function upsertRainfallRows(rows) {
   if (!rows.length) return;
-  const stationIds       = rows.map(r => r.stationId);
-  const streamIds        = rows.map(r => r.streamId);
-  const starts           = rows.map(r => r.periodStart);
-  const rainMms          = rows.map(r => r.rainMm);
-  const tipCounts        = rows.map(r => r.tipCount);
-  const validTipss       = rows.map(r => r.validTips);
-  const doubleTipCounts  = rows.map(r => r.doubleTipCount);
-  const interfereCounts  = rows.map(r => r.interfereCount);
+  const stationIds        = rows.map(r => r.stationId);
+  const streamIds         = rows.map(r => r.streamId);
+  const starts            = rows.map(r => r.periodStart);
+  const rainMms           = rows.map(r => r.rainMm);
+  const tipCounts         = rows.map(r => r.tipCount);
+  const validTipss        = rows.map(r => r.validTips);
+  const doubleTipCounts   = rows.map(r => r.doubleTipCount);
+  const interfereCounts   = rows.map(r => r.interfereCount);
   const pseudoEventCounts = rows.map(r => r.pseudoEventCount);
-  const anomalies        = rows.map(r => r.isAnomaly);
+  const manualTipCounts   = rows.map(r => r.manualTipCount);
+  const nonRainfallCounts = rows.map(r => r.nonRainfallCount);
+  const anomalies         = rows.map(r => r.isAnomaly);
 
   await pool.query(
     `INSERT INTO rainfall
        (station_id, stream_id, period_start, rain_mm, tip_count, valid_tips,
-        double_tip_count, interfere_count, pseudo_event_count, is_anomaly)
+        double_tip_count, interfere_count, pseudo_event_count,
+        manual_tip_count, non_rainfall_count, is_anomaly)
      SELECT * FROM unnest(
        $1::int[], $2::int[], $3::timestamptz[],
        $4::numeric[], $5::int[], $6::int[],
-       $7::int[], $8::int[], $9::int[], $10::bool[]
+       $7::int[], $8::int[], $9::int[],
+       $10::int[], $11::int[], $12::bool[]
      )
      ON CONFLICT (stream_id, period_start) DO UPDATE SET
        rain_mm            = EXCLUDED.rain_mm,
@@ -605,10 +629,13 @@ async function upsertRainfallRows(rows) {
        double_tip_count   = EXCLUDED.double_tip_count,
        interfere_count    = EXCLUDED.interfere_count,
        pseudo_event_count = EXCLUDED.pseudo_event_count,
+       manual_tip_count   = EXCLUDED.manual_tip_count,
+       non_rainfall_count = EXCLUDED.non_rainfall_count,
        is_anomaly         = EXCLUDED.is_anomaly,
        processed_at       = NOW()`,
     [stationIds, streamIds, starts, rainMms, tipCounts, validTipss,
-     doubleTipCounts, interfereCounts, pseudoEventCounts, anomalies]
+     doubleTipCounts, interfereCounts, pseudoEventCounts,
+     manualTipCounts, nonRainfallCounts, anomalies]
   );
 }
 
@@ -619,6 +646,7 @@ async function getRainfallData(stationId, from, to, resolution = 'daily') {
     const result = await pool.query(
       `SELECT period_start, rain_mm, tip_count, valid_tips,
               double_tip_count, interfere_count, pseudo_event_count,
+              manual_tip_count, non_rainfall_count,
               is_anomaly AS has_anomaly
        FROM   rainfall
        WHERE  station_id = $1
@@ -649,6 +677,8 @@ async function getRainfallData(stationId, from, to, resolution = 'daily') {
        SUM(double_tip_count)::integer      AS double_tip_count,
        SUM(interfere_count)::integer       AS interfere_count,
        SUM(pseudo_event_count)::integer    AS pseudo_event_count,
+       SUM(manual_tip_count)::integer      AS manual_tip_count,
+       SUM(non_rainfall_count)::integer    AS non_rainfall_count,
        BOOL_OR(is_anomaly)                 AS has_anomaly
      FROM   rainfall
      WHERE  station_id = $1
@@ -672,6 +702,8 @@ async function getRainfallSummary(stationId, from, to) {
        COALESCE(SUM(double_tip_count), 0)::integer             AS double_tip_count,
        COALESCE(SUM(interfere_count), 0)::integer              AS interfere_count,
        COALESCE(SUM(pseudo_event_count), 0)::integer           AS pseudo_event_count,
+       COALESCE(SUM(manual_tip_count), 0)::integer             AS manual_tip_count,
+       COALESCE(SUM(non_rainfall_count), 0)::integer           AS non_rainfall_count,
        COUNT(*) FILTER (WHERE is_anomaly)::integer             AS anomaly_count,
        MIN(period_start)                                       AS first_record,
        MAX(period_start)                                       AS last_record

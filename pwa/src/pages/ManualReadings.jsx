@@ -56,7 +56,7 @@ function SaveBtn({ state, hasValue, onClick }) {
       {state === 'saving' ? '…'
         : state === 'saved'  ? '✓ Saved'
         : state === 'error'  ? 'Retry'
-        : state === 'queued' ? '📶 Queued'
+        : state === 'queued' ? '≡ Queued'
         : 'Save'}
     </button>
   );
@@ -500,9 +500,7 @@ function RainfallForm({ saved, onSave, onDelete }) {
 
   // All field values lifted to form level — single save at the bottom
   const [eventType,      setEventType]      = useState(ex('event_type')?.value_text ?? '');
-  const [didTip,         setDidTip]         = useState(() => ex('event_start_dt') ? true : ex('event_type') ? false : null);
-  const [startDt,        setStartDt]        = useState(isoToLocalInput(ex('event_start_dt')?.value_text));
-  const [endDt,          setEndDt]          = useState(isoToLocalInput(ex('event_end_dt')?.value_text));
+  const [didTip,         setDidTip]         = useState(() => { const r = ex('did_tip'); return r ? r.value_text === 'yes' : ex('event_type') ? false : null; });
   const [problemNotes,   setProblemNotes]   = useState(ex('event_problem_notes')?.value_text ?? '');
   const [gaugeCondition, setGaugeCondition] = useState(ex('gauge_condition')?.value_text ?? null);
   const [gaugeReading,   setGaugeReading]   = useState(ex('gauge_reading')?.value_numeric != null ? String(ex('gauge_reading').value_numeric) : '');
@@ -513,7 +511,6 @@ function RainfallForm({ saved, onSave, onDelete }) {
 
   const isProblematic = PROBLEMATIC_EVENTS.has(eventType);
   const isPseudo      = eventType === 'pseudo_events';
-  const showTipFields = isPseudo || didTip === true;
 
   // event_type is handled by EventTypeField internally (auto-saves on select)
   // this callback just keeps local state in sync
@@ -523,18 +520,12 @@ function RainfallForm({ saved, onSave, onDelete }) {
 
   async function handleDidTip(val) {
     if (val === didTip) return;
+    const prev = didTip;
     setDidTip(val);
-    if (val === false) {
-      setStartDt('');
-      setEndDt('');
-      try {
-        if (ex('event_start_dt')) await onDelete('event_start_dt');
-        if (ex('event_end_dt'))   await onDelete('event_end_dt');
-      } catch (_) {
-        // Delete failed — revert so UI stays consistent with DB
-        setDidTip(true);
-        return;
-      }
+    try {
+      await onSave({ reading_type: 'did_tip', value_text: val ? 'yes' : 'no', recorded_at: new Date().toISOString() });
+    } catch (_) {
+      setDidTip(prev); // revert on failure
     }
   }
 
@@ -547,11 +538,8 @@ function RainfallForm({ saved, onSave, onDelete }) {
     if (lastEmptied)                       saves.push(onSave({ reading_type: 'last_emptied',      value_text:    new Date(lastEmptied).toISOString(),    recorded_at: now }));
     if (battery)                           saves.push(onSave({ reading_type: 'battery_voltage',   value_numeric: parseFloat(battery),      unit: '%',    recorded_at: now }));
     if (memory)                            saves.push(onSave({ reading_type: 'memory_used_pct',   value_numeric: parseFloat(memory),       unit: '%',    recorded_at: now }));
-    if (isProblematic && problemNotes)     saves.push(onSave({ reading_type: 'event_problem_notes', value_text:  problemNotes,                           recorded_at: now }));
-    if (showTipFields && startDt && endDt) {
-      saves.push(onSave({ reading_type: 'event_start_dt', value_text: new Date(startDt).toISOString(), recorded_at: now }));
-      saves.push(onSave({ reading_type: 'event_end_dt',   value_text: new Date(endDt).toISOString(),   recorded_at: now }));
-    }
+    if (isProblematic && problemNotes)     saves.push(onSave({ reading_type: 'event_problem_notes', value_text:  problemNotes, recorded_at: now }));
+    if (didTip !== null && !isPseudo)      saves.push(onSave({ reading_type: 'did_tip', value_text: didTip ? 'yes' : 'no', recorded_at: now }));
     try {
       await Promise.all(saves);
       setSaveState('idle');
@@ -581,27 +569,6 @@ function RainfallForm({ saved, onSave, onDelete }) {
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="note-chip" data-selected={didTip === true  ? 'true' : undefined} onClick={() => handleDidTip(true)}  style={{ flex: 1 }}>Yes</button>
             <button className="note-chip" data-selected={didTip === false ? 'true' : undefined} onClick={() => handleDidTip(false)} style={{ flex: 1 }}>No</button>
-          </div>
-        </div>
-      )}
-
-      {/* Tipping period */}
-      {showTipFields && (
-        <div className="form-card">
-          {!isPseudo && <div className="text-[11px] text-text-light mb-3">Record when tipping occurred so those tips are excluded from rainfall totals.</div>}
-          <div className="flex flex-col gap-3">
-            <div>
-              <div className="text-[12px] font-semibold text-text-dark mb-1.5">{isPseudo ? 'Water entry start' : 'Tipping started'}</div>
-              <input type="datetime-local" value={startDt}
-                onChange={e => { setStartDt(e.target.value); }}
-                className={`field-input w-full ${startDt ? 'field-input--active' : ''}`} style={{ height: '38px' }} />
-            </div>
-            <div>
-              <div className="text-[12px] font-semibold text-text-dark mb-1.5">{isPseudo ? 'Water entry end' : 'Tipping ended'}</div>
-              <input type="datetime-local" value={endDt}
-                onChange={e => { setEndDt(e.target.value); }}
-                className={`field-input w-full ${endDt ? 'field-input--active' : ''}`} style={{ height: '38px' }} />
-            </div>
           </div>
         </div>
       )}

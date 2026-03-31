@@ -29,9 +29,9 @@ function statusDotClass(isoDate) {
 }
 
 const FAMILY_ICONS = {
-  rainfall:    '🌧',
-  groundwater: '💧',
-  met:         '🌤',
+  rainfall:    '≀',
+  groundwater: '⊥',
+  met:         '△',
 };
 
 const FAMILY_LABELS = {
@@ -140,7 +140,7 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
       {/* ── Search ────────────────────────────────────────────────── */}
       <div className="px-4 pt-3.5 pb-1.5 shrink-0">
         <div className="relative flex items-center">
-          <span className="absolute left-3.5 text-text-light pointer-events-none">🔍</span>
+          <span className="absolute left-3.5 text-text-light pointer-events-none">⌕</span>
           <input
             className="search-input"
             value={query}

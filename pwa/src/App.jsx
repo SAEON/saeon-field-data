@@ -18,10 +18,10 @@ function isStandaloneDisplayMode() {
 
 // ── Bottom Tab Bar ─────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'stations', icon: '🧭', label: 'Stations' },
-  { id: 'visit',    icon: '🗒️',  label: 'Visit'    },
-  { id: 'queue',    icon: '🗂️',  label: 'Queue'    },
-  { id: 'history',  icon: '📜', label: 'History'  },
+  { id: 'stations', icon: '◉', label: 'Stations' },
+  { id: 'visit',    icon: '☐', label: 'Visit'    },
+  { id: 'queue',    icon: '▤', label: 'Queue'    },
+  { id: 'history',  icon: '≡', label: 'History'  },
 ];
 
 function BottomNav({ activeTab, setActiveTab, visitBadge, queueBadge, queueErrors }) {
@@ -588,7 +588,7 @@ export default function App() {
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
-              <div className="text-[40px]">🗒️</div>
+              <div className="text-[40px]">☐</div>
               <div className="text-[15px] font-semibold text-text-dark">No active visit</div>
               <div className="text-[13px] text-text-light leading-relaxed">
                 Go to Stations, select a station, and tap "Start visit" to begin.

@@ -137,6 +137,9 @@ async function parseInBackground(fileRecord, visitId) {
       dateRangeEnd:   resolvedEnd,
       recordCount:    resolvedCount,
       streamName:     result.streamName,
+      loggerLabel:    meta.label        ?? null,
+      loggerSerial:   meta.serial       ?? null,
+      downloadedAt:   meta.logger_launched_at ?? null,
     });
 
     log.info('[parse] Complete', {

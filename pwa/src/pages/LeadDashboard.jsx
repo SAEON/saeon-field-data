@@ -9,7 +9,7 @@ import UserManagement  from './UserManagement.jsx';
 const TABS = [
   { id: 'visits',   label: 'Visits',   icon: '☑' },
   { id: 'stations', label: 'Stations', icon: '◉' },
-  { id: 'rainfall', label: 'Rainfall', icon: '~' },
+  { id: 'rainfall', label: 'Rainfall', icon: '≀' },
   { id: 'users',    label: 'Users',    icon: '◎' },
 ];
 
