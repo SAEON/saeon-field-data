@@ -20,10 +20,11 @@ function classifyTips(tips, visitTimes, pseudoWindows) {
     const tip = tips[i];
     const ts  = new Date(tip.measured_at).getTime();
 
-    const prevMs = i > 0               ? new Date(tips[i - 1].measured_at).getTime() : null;
-    const nextMs = i < tips.length - 1 ? new Date(tips[i + 1].measured_at).getTime() : null;
-    if ((prevMs !== null && ts - prevMs === 1000) ||
-        (nextMs !== null && nextMs - ts === 1000)) {
+    // Only the LATER of a 1-second pair is the bounce — keep the earlier (real) tip.
+    // R spec: double_tips vector is prepended with FALSE so only tip[i] is marked
+    // when |date_time[i] − date_time[i−1]| == 1.
+    const prevMs = i > 0 ? new Date(tips[i - 1].measured_at).getTime() : null;
+    if (prevMs !== null && ts - prevMs === 1000) {
       result.set(tip.id, { flag: 'double_tip', reason: '1s_bounce' });
       continue;
     }
@@ -38,7 +39,10 @@ function classifyTips(tips, visitTimes, pseudoWindows) {
     if (entry.flag) { result.set(tip.id, entry); continue; }
 
     for (const vt of visitTimes) {
-      if (Math.abs(ts - vt.getTime()) <= INTERFERE_WINDOW_MS) {
+      // R spec line 156: raining gates ALL false-tip types — if it was raining
+      // during this visit, tips near the download are real rainfall, not interfere.
+      if (vt.raining) continue;
+      if (Math.abs(ts - vt.time.getTime()) <= INTERFERE_WINDOW_MS) {
         entry = { flag: 'interfere', reason: 'visit_proximity' };
         break;
       }

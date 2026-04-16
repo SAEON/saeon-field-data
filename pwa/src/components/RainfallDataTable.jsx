@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { getStationRainfall, processStationRainfall } from '../services/api.js';
+import RainfallTipChart from './RainfallTipChart.jsx';
 
 const RESOLUTIONS = [
   { value: '5min',       label: '5 min'     },
@@ -54,6 +55,8 @@ function pillBtn(active, onClick, label) {
   );
 }
 
+const PAGE_SIZES = [25, 50, 100];
+
 export default function RainfallDataTable({ stationId, canReprocess = false }) {
   const [from,         setFrom]         = useState(isoDate(new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)));
   const [to,           setTo]           = useState(isoDate(new Date()));
@@ -63,6 +66,8 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
   const [fetching,     setFetching]     = useState(false);
   const [fetchErr,     setFetchErr]     = useState(null);
   const [reprocessing, setReprocessing] = useState(false);
+  const [page,         setPage]         = useState(1);
+  const [pageSize,     setPageSize]     = useState(50);
   const debounceRef = useRef(null);
 
   useEffect(() => {
@@ -103,6 +108,15 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
     return true;
   });
 
+  // Reset to page 1 when data or filter changes
+  useEffect(() => { setPage(1); }, [stationId, from, to, resolution, flagFilter]);
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage   = Math.min(page, totalPages);
+  const pageStart  = (safePage - 1) * pageSize;
+  const paginated  = filtered.slice(pageStart, pageStart + pageSize);
+
   // Summary derived from full data
   const totalMm      = data.reduce((s, r) => s + parseFloat(r.rain_mm || 0), 0);
   const totalFlagged = data.reduce((s, r) => s + (r.double_tip_count || 0) + (r.interfere_count || 0) + (r.pseudo_event_count || 0), 0);
@@ -118,19 +132,28 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
           style={{ flex: 1, fontSize: 12, padding: '6px 8px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'white' }} />
       </div>
 
-      {/* Resolution pills */}
+      {/* ── Section gap ── */}
+      <div style={{ height: 8, background: 'var(--color-surface-dark)' }} />
+
+      {/* Resolution pills (aggregation) */}
       <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', gap: 6, overflowX: 'auto' }}>
         {RESOLUTIONS.map(r => pillBtn(resolution === r.value, () => setResolution(r.value), r.label))}
       </div>
 
-      {/* Flag filter pills */}
+      {/* ── Section gap ── */}
+      <div style={{ height: 8, background: 'var(--color-surface-dark)' }} />
+
+      {/* Flag filter pills (tip types) */}
       <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', gap: 6, overflowX: 'auto' }}>
         {FLAG_FILTERS.map(f => pillBtn(flagFilter === f.value, () => setFlagFilter(f.value), f.label))}
       </div>
 
+      {/* ── Section gap ── */}
+      <div style={{ height: 8, background: 'var(--color-surface-dark)' }} />
+
       {/* Summary strip + (optional) reprocess */}
       {data.length > 0 && (
-        <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--color-surface)' }}>
+        <div style={{ padding: '6px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--color-surface)' }}>
           <span style={{ fontSize: 12, color: 'var(--color-text-med)' }}>
             <span style={{ fontWeight: 700, color: '#1565C0' }}>{totalMm.toFixed(1)} mm</span>
             {' · '}{data.length} periods
@@ -139,11 +162,23 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
           </span>
           {canReprocess && (
             <button onClick={handleReprocess} disabled={reprocessing || !stationId}
-              style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'white', color: 'var(--color-text-med)', cursor: reprocessing ? 'default' : 'pointer', opacity: reprocessing ? 0.5 : 1 }}>
+              style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 8, border: '1.5px solid #BDBDBD', background: '#E0E0E0', color: '#555', cursor: reprocessing ? 'default' : 'pointer', opacity: reprocessing ? 0.5 : 1 }}>
               {reprocessing ? 'Processing…' : 'Reprocess'}
             </button>
           )}
         </div>
+      )}
+
+      {/* Tip count chart — daily / saws_daily / monthly / yearly only */}
+      {!fetching && !fetchErr && filtered.length > 0 && (resolution === 'daily' || resolution === 'saws_daily' || resolution === 'monthly' || resolution === 'yearly') && (
+        <div style={{ padding: '4px 16px', borderBottom: '1px solid var(--color-border)' }}>
+          <RainfallTipChart data={filtered} resolution={resolution} />
+        </div>
+      )}
+
+      {/* ── Section gap (before table) ── */}
+      {!fetching && !fetchErr && filtered.length > 0 && (
+        <div style={{ height: 8, background: 'var(--color-surface-dark)' }} />
       )}
 
       {fetching && <div style={{ textAlign: 'center', padding: 32, fontSize: 13, color: 'var(--color-text-light)' }}>Loading…</div>}
@@ -175,7 +210,7 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((row, i) => (
+                  {paginated.map((row, i) => (
                     <tr key={row.period_start} style={{ borderBottom: '1px solid var(--color-surface-dark)', background: i % 2 === 0 ? 'white' : 'var(--color-surface)' }}>
                       <td style={{ padding: '5px 10px', color: 'var(--color-text-dark)', whiteSpace: 'nowrap' }}>{fmtPeriod(row.period_start, resolution)}</td>
                       <td style={{ padding: '5px 10px', textAlign: 'right', fontWeight: 600, color: parseFloat(row.rain_mm) > 0 ? '#1565C0' : 'var(--color-text-light)' }}>{parseFloat(row.rain_mm).toFixed(3)}</td>
@@ -193,6 +228,42 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
               </table>
             </div>
           )
+      )}
+
+      {/* Pagination bar */}
+      {!fetching && !fetchErr && filtered.length > pageSize && (
+        <div style={{ padding: '8px 16px', borderTop: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'var(--color-surface)' }}>
+          {/* Row range label */}
+          <span style={{ fontSize: 11, color: 'var(--color-text-light)', whiteSpace: 'nowrap' }}>
+            {pageStart + 1}–{Math.min(pageStart + pageSize, filtered.length)} of {filtered.length}
+          </span>
+
+          {/* Prev / page indicator / Next */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={safePage === 1}
+              style={{ fontSize: 13, fontWeight: 600, padding: '3px 10px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'white', color: safePage === 1 ? 'var(--color-text-light)' : 'var(--color-text-dark)', cursor: safePage === 1 ? 'default' : 'pointer' }}
+            >‹</button>
+            <span style={{ fontSize: 11, color: 'var(--color-text-med)', padding: '0 4px', whiteSpace: 'nowrap' }}>
+              {safePage} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={safePage === totalPages}
+              style={{ fontSize: 13, fontWeight: 600, padding: '3px 10px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'white', color: safePage === totalPages ? 'var(--color-text-light)' : 'var(--color-text-dark)', cursor: safePage === totalPages ? 'default' : 'pointer' }}
+            >›</button>
+          </div>
+
+          {/* Page size selector */}
+          <select
+            value={pageSize}
+            onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
+            style={{ fontSize: 11, padding: '3px 6px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'white', color: 'var(--color-text-med)', cursor: 'pointer' }}
+          >
+            {PAGE_SIZES.map(n => <option key={n} value={n}>{n} / page</option>)}
+          </select>
+        </div>
       )}
     </>
   );

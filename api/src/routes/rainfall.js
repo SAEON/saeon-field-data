@@ -47,7 +47,7 @@ router.get('/:id/rainfall/summary', async (req, res, next) => {
 });
 
 // POST /api/stations/:id/rainfall/process
-router.post('/:id/rainfall/process', requireRole('technician_lead', 'data_manager'), async (req, res, next) => {
+router.post('/:id/rainfall/process', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const stationId = parseInt(req.params.id, 10);
     const station   = await db.getStationById(stationId);

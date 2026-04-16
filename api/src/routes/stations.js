@@ -1,21 +1,20 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db/queries');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, ROLE_HIERARCHY } = require('../middleware/auth');
 
 router.use(requireAuth);
 
 // GET /api/stations
-// ?registry=true (technician_lead only) — includes inactive stations for Sue's registry UI
+// ?registry=true (technician_lead+) — includes inactive stations for the registry UI
 router.get('/', async (req, res, next) => {
   try {
-    const isLead    = req.user.roles.includes('technician_lead');
-    const isManager = req.user.roles.includes('data_manager');
-    if (req.query.registry === 'true' && (isLead || isManager)) {
+    const callerLevel = ROLE_HIERARCHY[req.user.roles[0]] ?? 0;
+    if (req.query.registry === 'true' && callerLevel >= ROLE_HIERARCHY['technician_lead']) {
       const stations = await db.getAllStationsRegistry();
       return res.json(stations);
     }
-    const assignedTo = (!isLead && !isManager) ? req.user.id : null;
+    const assignedTo = callerLevel < ROLE_HIERARCHY['technician_lead'] ? req.user.id : null;
     const stations = await db.getAllStationsWithLastVisit(assignedTo);
     res.json(stations);
   } catch (err) {

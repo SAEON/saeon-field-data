@@ -14,7 +14,7 @@ VALUES
     'Sileza Camp',
     'rainfall',
     'Maputaland',
-    NULL,   -- update with GPS once Sue confirms
+    NULL,   -- GPS coordinates to be confirmed
     NULL,
     true,
     'HOBO rainfall pendant. Example file: Sileza_Camp_2024_06_12.csv'

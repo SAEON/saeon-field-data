@@ -9,6 +9,7 @@ import UploadFiles    from './pages/UploadFiles.jsx';
 import ManualReadings from './pages/ManualReadings.jsx';
 import QueueTab       from './pages/QueueTab.jsx';
 import HistoryTab     from './pages/HistoryTab.jsx';
+import TechnicianDataTab from './pages/TechnicianDataTab.jsx';
 import LeadDashboard    from './pages/LeadDashboard.jsx';
 import ManagerDashboard from './pages/ManagerDashboard.jsx';
 
@@ -22,9 +23,10 @@ const TABS = [
   { id: 'visit',    icon: '☐', label: 'Visit'    },
   { id: 'queue',    icon: '▤', label: 'Queue'    },
   { id: 'history',  icon: '≡', label: 'History'  },
+  { id: 'data',     icon: '≀', label: 'Data'     },
 ];
 
-function BottomNav({ activeTab, setActiveTab, visitBadge, queueBadge, queueErrors }) {
+function BottomNav({ activeTab, setActiveTab, visitBadge, queueBadge, queueErrors, tabs = TABS }) {
   return (
     <nav className="bottom-tab-bar shrink-0">
       {/* Visible only on desktop — hidden via CSS on mobile */}
@@ -35,7 +37,7 @@ function BottomNav({ activeTab, setActiveTab, visitBadge, queueBadge, queueError
           <div style={{ fontSize: '10px', color: 'var(--color-text-light)' }}>Field Data System</div>
         </div>
       </div>
-      {TABS.map(tab => {
+      {tabs.map(tab => {
         const badge    = tab.id === 'visit' ? visitBadge : tab.id === 'queue' ? queueBadge : 0;
         const hasError = tab.id === 'queue' && queueErrors > 0;
         return (
@@ -256,15 +258,8 @@ function SubmitSheet({ draftVisit, visitFiles, hasReadings, onKeep, onConfirm, s
   );
 }
 
-// ── App ────────────────────────────────────────────────────────────────────
-export default function App() {
-  const user = useAuth();
-  const roles = user?.roles ?? [];
-
-  // Route non-technicians to their own interface
-  if (roles?.includes('technician_lead')) return <LeadDashboard />;
-  if (roles?.includes('data_manager')) return <ManagerDashboard />;
-
+// ── Field PWA (shared by technicians, leads, and managers) ────────────────
+export function FieldApp({ onExit, embedded = false }) {
   const [activeTab,    setActiveTab]    = useState('stations');
   const [visitSection, setVisitSection] = useState('details');
   const [draftVisit,   setDraftVisit]   = useState(null);   // { visitId, station }
@@ -474,8 +469,26 @@ export default function App() {
     );
   }
 
+  const visibleTabs = embedded ? TABS.filter(t => t.id !== 'data') : TABS;
+
   return (
-    <div className="flex flex-col min-h-dvh app-layout">
+    <div className={embedded ? 'flex flex-col flex-1 overflow-hidden' : 'flex flex-col min-h-dvh app-layout'}>
+
+      {/* ── Back to dashboard strip (leads/managers only) ────────────── */}
+      {onExit && !embedded && (
+        <div
+          className="shrink-0 flex items-center px-4 py-2"
+          style={{ background: '#EBF2FB', borderBottom: '1px solid #BFDBFE' }}
+        >
+          <button
+            onClick={onExit}
+            className="text-[12px] font-semibold bg-transparent border-none"
+            style={{ color: '#1565C0', cursor: 'pointer', padding: 0 }}
+          >
+            ← Back to dashboard
+          </button>
+        </div>
+      )}
 
       {/* ── Global offline banner ────────────────────────────────────── */}
       {isOffline && (
@@ -627,6 +640,9 @@ export default function App() {
         </div>
       )}
 
+      {/* ── Data tab (read-only rainfall + parse errors for own stations) ─ */}
+      {activeTab === 'data' && <TechnicianDataTab />}
+
       {/* ── Bottom nav (always visible) ─────────────────────────────── */}
       <BottomNav
         activeTab={activeTab}
@@ -634,6 +650,7 @@ export default function App() {
         visitBadge={visitBadge}
         queueBadge={queueBadge}
         queueErrors={queueErrors}
+        tabs={visibleTabs}
       />
 
       {/* ── Sheets ──────────────────────────────────────────────────── */}
@@ -666,4 +683,15 @@ export default function App() {
       )}
     </div>
   );
+}
+
+// ── App — role router ──────────────────────────────────────────────────────
+export default function App() {
+  const user  = useAuth();
+  const roles = user?.roles ?? [];
+
+  if (roles?.includes('technician_lead')) return <LeadDashboard />;
+  if (roles?.includes('data_manager'))    return <ManagerDashboard />;
+
+  return <FieldApp />;
 }

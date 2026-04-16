@@ -2,6 +2,12 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import keycloak from './keycloak';
 import { getMe } from '../services/api.js';
 
+const ROLE_HIERARCHY = {
+  technician:      1,
+  technician_lead: 2,
+  data_manager:    3,
+};
+
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
@@ -44,7 +50,13 @@ export function AuthProvider({ children }) {
     return () => clearInterval(interval);
   }, []);
 
-  return <AuthContext.Provider value={user}>{children}</AuthContext.Provider>;
+  const hasRole = (minimumRole) => {
+    const userLevel = ROLE_HIERARCHY[user?.role] ?? 0;
+    const required  = ROLE_HIERARCHY[minimumRole] ?? 99;
+    return userLevel >= required;
+  };
+
+  return <AuthContext.Provider value={user ? { ...user, hasRole } : null}>{children}</AuthContext.Provider>;
 }
 
 export const useAuth = () => useContext(AuthContext);

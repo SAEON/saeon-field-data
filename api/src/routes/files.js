@@ -3,7 +3,7 @@ const router  = express.Router();
 const multer  = require('multer');
 const crypto  = require('crypto');
 const fs      = require('fs');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireRole, ROLE_HIERARCHY } = require('../middleware/auth');
 const { log } = require('../middleware/logger');
 
 router.use(requireAuth);
@@ -152,7 +152,7 @@ async function parseInBackground(fileRecord, visitId) {
     });
 
     // ── Gap detection ──────────────────────────────────────────────────────
-    const GAP_TOLERANCE_S = 7200; // 2 hours — allow for download overlap / clock drift
+    const GAP_TOLERANCE_S = 21_600; // 6 hours — R spec rain_g_gaps.r default (6 * 60 * 60)
     if (resolvedStart) {
       await db.clearFileGap(fileRecord.id); // reset in case of reparse
       const priorEnd = await db.getPriorCoverageEnd(
@@ -220,6 +220,12 @@ router.post('/:id/files', upload.single('file'), async (req, res, next) => {
       return res.status(404).json({ error: 'Visit not found' });
     }
 
+    // Plain technicians can only upload to their own visits
+    const isPriv = (ROLE_HIERARCHY[req.user.roles[0]] ?? 0) >= ROLE_HIERARCHY['technician_lead'];
+    if (!isPriv && visit.technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'You can only upload files to your own visits' });
+    }
+
     // Validate format against station family
     const fileFormat = detectFileFormat(req.file.originalname, req.file.buffer);
     if (visit.data_family === 'rainfall' && fileFormat !== 'hobo_binary') {
@@ -278,7 +284,7 @@ router.post('/:id/files', upload.single('file'), async (req, res, next) => {
 // POST /api/files/:id/reparse
 // Re-triggers background parsing for a file stuck in pending/error.
 // =============================================================
-router.post('/:id/reparse', async (req, res, next) => {
+router.post('/:id/reparse', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const fileRecord = await db.getFileById(parseInt(req.params.id, 10));
     if (!fileRecord) return res.status(404).json({ error: 'File not found' });
@@ -306,7 +312,7 @@ router.post('/:id/reparse', async (req, res, next) => {
 // DELETE /api/files/:id
 // Removes DB record, raw_measurements, and the file from disk.
 // =============================================================
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const fileRecord = await db.getFileById(parseInt(req.params.id, 10));
     if (!fileRecord) return res.status(404).json({ error: 'File not found' });

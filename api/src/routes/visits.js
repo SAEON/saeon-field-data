@@ -2,7 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const fs      = require('fs');
 const db      = require('../db/queries');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, ROLE_HIERARCHY } = require('../middleware/auth');
 const { log } = require('../middleware/logger');
 const { processRainfall } = require('../processors/rainfall');
 
@@ -37,8 +37,8 @@ router.get('/', async (req, res, next) => {
   try {
     const stationId = req.query.station_id ? parseInt(req.query.station_id, 10) : undefined;
     const status    = req.query.status || undefined;
-    const isManager = req.user.roles.some(r => ['data_manager', 'technician_lead'].includes(r));
-    const technicianId = isManager ? undefined : req.user.id;
+    const callerLevel  = ROLE_HIERARCHY[req.user.roles[0]] ?? 0;
+    const technicianId = callerLevel >= ROLE_HIERARCHY['technician_lead'] ? undefined : req.user.id;
     const visits = await db.getAllVisits({ stationId, status, technicianId });
     res.json(visits);
   } catch (err) {
@@ -51,6 +51,14 @@ router.patch('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { visited_at, notes } = req.body;
+
+    const existing = await db.getVisitById(id);
+    if (!existing) return res.status(404).json({ error: 'Visit not found' });
+
+    const isPriv = (ROLE_HIERARCHY[req.user.roles[0]] ?? 0) >= ROLE_HIERARCHY['technician_lead'];
+    if (!isPriv && existing.technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'You can only edit your own visits' });
+    }
 
     const visit = await db.updateVisitDetails(id, { visitedAt: visited_at, notes });
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
@@ -70,6 +78,14 @@ router.patch('/:id/status', async (req, res, next) => {
     const VALID = ['draft', 'pending', 'submitted', 'approved', 'flagged'];
     if (!status || !VALID.includes(status)) {
       return res.status(400).json({ error: `status must be one of: ${VALID.join(', ')}` });
+    }
+
+    const existing = await db.getVisitById(id);
+    if (!existing) return res.status(404).json({ error: 'Visit not found' });
+
+    const isPriv = (ROLE_HIERARCHY[req.user.roles[0]] ?? 0) >= ROLE_HIERARCHY['technician_lead'];
+    if (!isPriv && existing.technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'You can only update status on your own visits' });
     }
 
     const visit = await db.updateVisitStatus(id, status);
@@ -95,7 +111,7 @@ router.patch('/:id/status', async (req, res, next) => {
 
 // =============================================================
 // PATCH /api/visits/:id/assign  (technician_lead only)
-// Sue assigns an upcoming visit to a specific technician.
+// Leads/managers assign an upcoming visit to a specific technician.
 // =============================================================
 router.patch('/:id/assign', requireRole('technician_lead'), async (req, res, next) => {
   try {

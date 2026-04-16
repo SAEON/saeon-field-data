@@ -1,7 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db/queries');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, ROLE_HIERARCHY } = require('../middleware/auth');
 
 router.use(requireAuth);
 
@@ -31,7 +31,7 @@ async function getKeycloakAdminToken() {
 // Returns Keycloak users in the realm who are NOT yet in FDS.
 // Used by the "Add user" picker in the dashboard.
 // =============================================================
-router.get('/available', requireRole('technician_lead', 'data_manager'), async (req, res, next) => {
+router.get('/available', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const token = await getKeycloakAdminToken();
 
@@ -77,12 +77,12 @@ router.get('/me', async (req, res, next) => {
 
 // =============================================================
 // GET /api/users
-// Sue sees technicians only. Marc sees all.
+// Leads see technicians only. Managers see all roles.
 // =============================================================
-router.get('/', requireRole('technician_lead', 'data_manager'), async (req, res, next) => {
+router.get('/', requireRole('technician_lead'), async (req, res, next) => {
   try {
-    const isSue = req.user.roles.includes('technician_lead') && !req.user.roles.includes('data_manager');
-    const role  = isSue ? 'technician' : undefined;
+    const callerLevel = ROLE_HIERARCHY[req.user.roles[0]] ?? 0;
+    const role = callerLevel < ROLE_HIERARCHY['data_manager'] ? 'technician' : undefined;
     const users = await db.getAllUsers({ role });
     res.json(users);
   } catch (err) {
@@ -92,10 +92,10 @@ router.get('/', requireRole('technician_lead', 'data_manager'), async (req, res,
 
 // =============================================================
 // POST /api/users
-// Sue: can only create role=technician.
-// Marc: can assign any role.
+// Leads: can only create technician accounts.
+// Managers: can create any role.
 // =============================================================
-router.post('/', requireRole('technician_lead', 'data_manager'), async (req, res, next) => {
+router.post('/', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const { email, full_name, role } = req.body;
 
@@ -108,10 +108,12 @@ router.post('/', requireRole('technician_lead', 'data_manager'), async (req, res
       return res.status(400).json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` });
     }
 
-    // Sue can only create technician accounts
-    const isSue = req.user.roles.includes('technician_lead') && !req.user.roles.includes('data_manager');
-    if (isSue && role !== 'technician') {
-      return res.status(403).json({ error: 'Technician leads can only create technician accounts' });
+    // A caller can only create accounts strictly below their own level (leads → technicians; managers → any)
+    const callerLevel   = ROLE_HIERARCHY[req.user.roles[0]] ?? 0;
+    const targetLevel   = ROLE_HIERARCHY[role] ?? 0;
+    const maxManageable = callerLevel === ROLE_HIERARCHY['data_manager'] ? callerLevel : callerLevel - 1;
+    if (targetLevel > maxManageable) {
+      return res.status(403).json({ error: 'Cannot create a user with this role' });
     }
 
     // Compute initials from full_name (first letter of first + last word)
@@ -128,10 +130,10 @@ router.post('/', requireRole('technician_lead', 'data_manager'), async (req, res
 
 // =============================================================
 // PATCH /api/users/:id
-// Sue: can only set active=false on technicians (deactivate).
-// Marc: can update role or active on any user.
+// Leads: can only toggle active on technician accounts.
+// Managers: can update role or active on any user.
 // =============================================================
-router.patch('/:id', requireRole('technician_lead', 'data_manager'), async (req, res, next) => {
+router.patch('/:id', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const id     = parseInt(req.params.id, 10);
     const target = await db.getUserById(id);
@@ -139,14 +141,16 @@ router.patch('/:id', requireRole('technician_lead', 'data_manager'), async (req,
 
     const { role, active } = req.body;
 
-    const isSue = req.user.roles.includes('technician_lead') && !req.user.roles.includes('data_manager');
-    if (isSue) {
-      // Sue can only deactivate technicians — no role changes, no editing elevated accounts
-      if (target.role !== 'technician') {
-        return res.status(403).json({ error: 'Technician leads can only manage technician accounts' });
-      }
+    const callerLevel   = ROLE_HIERARCHY[req.user.roles[0]] ?? 0;
+    const targetLevel   = ROLE_HIERARCHY[target.role] ?? 0;
+    const maxManageable = callerLevel === ROLE_HIERARCHY['data_manager'] ? callerLevel : callerLevel - 1;
+    if (targetLevel > maxManageable) {
+      return res.status(403).json({ error: 'Cannot manage this account' });
+    }
+    // Non-managers can only toggle active; they cannot reassign roles
+    if (callerLevel < ROLE_HIERARCHY['data_manager']) {
       if (role !== undefined) {
-        return res.status(403).json({ error: 'Technician leads cannot change user roles' });
+        return res.status(403).json({ error: 'Cannot change user roles' });
       }
       if (active === undefined) {
         return res.status(400).json({ error: 'active is required' });

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { getVisit, reparseFile } from '../services/api.js';
 import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 // ── Lookup tables ─────────────────────────────────────────────────────────────
 
@@ -20,7 +21,7 @@ const READING_META = {
   overall_site_condition: { label: 'Site condition',        unit: ''   },
   gauge_condition:        { label: 'Gauge condition',       unit: ''   },
   gauge_reading:          { label: 'Gauge reading',         unit: 'mm' },
-  last_emptied:           { label: 'Last emptied',          unit: ''   },
+  last_emptied:           { label: 'Gauge last checked',    unit: ''   },
   pyranometer_clean:      { label: 'Pyranometer clean',     unit: ''   },
   anemometer_spinning:    { label: 'Anemometer spinning',   unit: ''   },
   rain_gauge_clear:       { label: 'Rain gauge clear',      unit: ''   },
@@ -65,6 +66,9 @@ function readingValue(payload) {
 export default function QueueTab({ visitId, files, setFiles, onGoToFiles, station }) {
   const pollTimer = useRef(null);
   const { items: queuedReadings, failedCount, retryItem } = useOfflineQueue(visitId);
+  const auth = useAuth();
+  // Reparse is privileged: only leads/managers can retry a failed parse server-side.
+  const canReparse = auth?.hasRole?.('technician_lead') ?? false;
 
   const pendingReadings = queuedReadings.filter(r => r.status !== 'synced');
 
@@ -188,7 +192,7 @@ export default function QueueTab({ visitId, files, setFiles, onGoToFiles, statio
                     style={{ color: stateStyle.color, background: `${stateStyle.color}18` }}
                   >{groupFiles.length}</span>
                 </div>
-                {state === 'error' && (
+                {state === 'error' && canReparse && (
                   <button
                     onClick={() => groupFiles.forEach(f => retryFile(f.localId))}
                     className="text-[11px] font-semibold text-blue bg-transparent border-none"
@@ -232,12 +236,14 @@ export default function QueueTab({ visitId, files, setFiles, onGoToFiles, statio
                             <div className="text-[10px] text-text-light mt-0.5">{file.dateRange}</div>
                           )}
                           {state === 'error' && (
-                            <div className="text-[10px] text-error mt-1">Parser failed — tap ↺ to retry</div>
+                            <div className="text-[10px] text-error mt-1">
+                              {canReparse ? 'Parser failed — tap ↺ to retry' : 'Parser failed — contact your team lead to retry'}
+                            </div>
                           )}
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {state === 'error' && (
+                          {state === 'error' && canReparse && (
                             <button
                               onClick={e => { e.stopPropagation(); retryFile(file.localId); }}
                               className="w-7 h-7 rounded-lg flex items-center justify-center text-[13px] font-bold"

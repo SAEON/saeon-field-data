@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getStations, getFilesWithErrors } from '../services/api.js';
 import RainfallDataTable from '../components/RainfallDataTable.jsx';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 function formatDateTime(iso) {
   if (!iso) return '—';
@@ -59,6 +60,8 @@ function ErrorBanner({ errors, onToggle, expanded }) {
 }
 
 export default function TechnicianDataTab() {
+  const auth = useAuth();
+  const canReprocess = auth?.hasRole('technician_lead') ?? false;
   const [stations, setStations] = useState([]);
   const [selected, setSelected] = useState(null);
   const [allErrors, setAllErrors] = useState([]);
@@ -120,7 +123,7 @@ export default function TechnicianDataTab() {
               onToggle={() => setErrorsExpanded(v => !v)}
             />
 
-            <RainfallDataTable stationId={selected} canReprocess={false} />
+            <RainfallDataTable stationId={selected} canReprocess={canReprocess} />
           </>
         )}
       </main>

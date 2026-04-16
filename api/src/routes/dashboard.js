@@ -1,7 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db/queries');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, ROLE_HIERARCHY } = require('../middleware/auth');
 
 router.use(requireAuth);
 
@@ -30,7 +30,7 @@ router.get('/stations', requireRole('data_manager'), async (req, res, next) => {
 // GET /api/dashboard/overdue   (technician_lead+)
 // Stations exceeding their per-station visit_frequency_days since last submitted visit.
 // =============================================================
-router.get('/overdue', requireRole('technician_lead', 'data_manager'), async (req, res, next) => {
+router.get('/overdue', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const stations = await db.getOverdueStations();
     res.json(stations);
@@ -81,10 +81,12 @@ router.get('/stations/missing-dipper', async (req, res, next) => {
 });
 
 // GET /api/dashboard/files/errors
-// Files with parse_status = 'error' — for ops monitoring.
+// Files with parse_status = 'error'. Privileged users see everything;
+// plain technicians see only errors on their assigned stations.
 router.get('/files/errors', async (req, res, next) => {
   try {
-    const files = await db.getFilesWithParseErrors();
+    const isPriv = (ROLE_HIERARCHY[req.user.roles[0]] ?? 0) >= ROLE_HIERARCHY['technician_lead'];
+    const files  = await db.getFilesWithParseErrors({ technicianId: isPriv ? null : req.user.id });
     res.json(files);
   } catch (err) {
     next(err);

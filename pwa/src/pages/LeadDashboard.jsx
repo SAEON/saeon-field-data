@@ -2,15 +2,18 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getStations, getStationRainfall, getStationRainfallSummary, processStationRainfall } from '../services/api.js';
+import RainfallTipChart from '../components/RainfallTipChart.jsx';
 import VisitOversight  from './VisitOversight.jsx';
 import StationRegistry from './StationRegistry.jsx';
 import UserManagement  from './UserManagement.jsx';
+import { FieldApp } from '../App.jsx';
 
 const TABS = [
   { id: 'visits',   label: 'Visits',   icon: '☑' },
   { id: 'stations', label: 'Stations', icon: '◉' },
   { id: 'rainfall', label: 'Rainfall', icon: '≀' },
   { id: 'users',    label: 'Users',    icon: '◎' },
+  { id: 'field',    label: 'Field',    icon: '⊕' },
 ];
 
 // ── SVG bar chart ─────────────────────────────────────────────────────────────
@@ -174,7 +177,13 @@ function RainfallOverview() {
                   </div>
                   {sd?.chartData ? (
                     sd.chartData.length > 0
-                      ? <RainfallBarChart data={sd.chartData} />
+                      ? (
+                        <>
+                          <RainfallBarChart data={sd.chartData} />
+                          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '8px 0 2px' }}>Tip counts</div>
+                          <RainfallTipChart data={sd.chartData} resolution="daily" />
+                        </>
+                      )
                       : <div style={{ fontSize: 12, color: 'var(--color-text-light)', textAlign: 'center', padding: '12px 0' }}>No data for this period</div>
                   ) : (
                     <div style={{ fontSize: 12, color: 'var(--color-text-light)', textAlign: 'center', padding: '12px 0' }}>Loading…</div>
@@ -242,6 +251,7 @@ export default function LeadDashboard() {
       {activeTab === 'stations' && <StationRegistry />}
       {activeTab === 'rainfall' && <RainfallOverview />}
       {activeTab === 'users'    && <UserManagement />}
+      {activeTab === 'field'    && <FieldApp embedded={true} />}
       <LeadNav activeTab={activeTab} setActiveTab={setActiveTab} />
     </div>
   );

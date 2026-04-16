@@ -85,12 +85,18 @@ async function requireAuth(req, res, next) {
   );
 }
 
-function requireRole(...roles) {
+const ROLE_HIERARCHY = {
+  technician:      1,
+  technician_lead: 2,
+  data_manager:    3,
+};
+
+function requireRole(minimumRole) {
+  const requiredLevel = ROLE_HIERARCHY[minimumRole] ?? 99;
   return (req, res, next) => {
-    const userRoles = req.user?.roles ?? [];
-    const allowed = roles.some(r => userRoles.includes(r));
-    if (!allowed) return res.status(403).json({ error: 'Forbidden' });
-    next();
+    const userLevel = ROLE_HIERARCHY[req.user?.roles?.[0]] ?? 0;
+    if (userLevel >= requiredLevel) return next();
+    return res.status(403).json({ error: 'Insufficient role' });
   };
 }
 
@@ -99,4 +105,4 @@ function deriveInitials(name) {
   return name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
 }
 
-module.exports = { requireAuth, requireRole };
+module.exports = { requireAuth, requireRole, ROLE_HIERARCHY };

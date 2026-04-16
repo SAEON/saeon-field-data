@@ -124,7 +124,7 @@ function AddUserSheet({ isLead, onClose, onCreated }) {
           )}
           {!loading && !error && filtered.length === 0 && (
             <div className="text-center text-text-light text-[13px] py-6">
-              {search ? 'No matches.' : 'All Keycloak users are already in FDS.'}
+              {search ? 'No matches.' : 'All users are already in FDS.'}
             </div>
           )}
           {!loading && filtered.map(u => (
@@ -235,9 +235,9 @@ function EditRoleSheet({ user, onClose, onUpdated }) {
 }
 
 export default function UserManagement() {
-  const { roles, id: currentUserId } = useAuth() ?? {};
-  const isManager = roles?.includes('data_manager');
-  const isLead    = roles?.includes('technician_lead') && !isManager;
+  const { id: currentUserId, hasRole } = useAuth() ?? {};
+  const isManager = hasRole?.('data_manager') ?? false;
+  const isLead    = (hasRole?.('technician_lead') ?? false) && !isManager;
 
   const [users,      setUsers]      = useState([]);
   const [loading,    setLoading]    = useState(true);

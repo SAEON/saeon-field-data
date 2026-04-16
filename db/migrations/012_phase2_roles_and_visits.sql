@@ -19,7 +19,7 @@ ALTER TABLE users
 
 -- -------------------------------------------------------------
 -- 2. field_visits — assigned_technician_id
---    Set by Sue when she assigns an upcoming visit to a technician.
+--    Set by a lead or manager when assigning an upcoming visit to a technician.
 --    NULL = unassigned.
 -- -------------------------------------------------------------
 ALTER TABLE field_visits

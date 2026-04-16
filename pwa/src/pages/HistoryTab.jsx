@@ -43,7 +43,7 @@ const READING_META = {
   overall_site_condition: { label: 'Site condition',        unit: ''   },
   gauge_condition:        { label: 'Raingauge condition',   unit: ''   },
   gauge_reading:          { label: 'Rainfall in gauge',     unit: 'mm' },
-  last_emptied:           { label: 'Gauge last emptied',    unit: ''   },
+  last_emptied:           { label: 'Gauge last checked',    unit: ''   },
   pyranometer_clean:      { label: 'Pyranometer clean',     unit: ''   },
   anemometer_spinning:    { label: 'Anemometer spinning',   unit: ''   },
   rain_gauge_clear:       { label: 'Rain gauge clear',      unit: ''   },

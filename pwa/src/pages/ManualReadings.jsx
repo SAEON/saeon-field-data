@@ -507,6 +507,7 @@ function RainfallForm({ saved, onSave, onDelete }) {
   const [lastEmptied,    setLastEmptied]    = useState(isoToLocalInput(ex('last_emptied')?.value_text));
   const [battery,        setBattery]        = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
   const [memory,         setMemory]         = useState(ex('memory_used_pct')?.value_numeric != null ? String(ex('memory_used_pct').value_numeric) : '');
+  const [siteCondition,  setSiteCondition]  = useState(ex('overall_site_condition')?.value_text ?? null);
   const [saveState,      setSaveState]      = useState('idle');
 
   const isProblematic = PROBLEMATIC_EVENTS.has(eventType);
@@ -540,6 +541,7 @@ function RainfallForm({ saved, onSave, onDelete }) {
     if (memory)                            saves.push(onSave({ reading_type: 'memory_used_pct',   value_numeric: parseFloat(memory),       unit: '%',    recorded_at: now }));
     if (isProblematic && problemNotes)     saves.push(onSave({ reading_type: 'event_problem_notes', value_text:  problemNotes, recorded_at: now }));
     if (didTip !== null && !isPseudo)      saves.push(onSave({ reading_type: 'did_tip', value_text: didTip ? 'yes' : 'no', recorded_at: now }));
+    if (siteCondition)                     saves.push(onSave({ reading_type: 'overall_site_condition', value_text: siteCondition, recorded_at: now }));
     try {
       await Promise.all(saves);
       setSaveState('idle');
@@ -548,7 +550,7 @@ function RainfallForm({ saved, onSave, onDelete }) {
     }
   }
 
-  const canSave = !!eventType && (isPseudo || didTip !== null) && !!gaugeCondition;
+  const canSave = !!eventType && (isPseudo || didTip !== null) && !!gaugeCondition && !!siteCondition;
 
   return (
     <>
@@ -611,10 +613,10 @@ function RainfallForm({ saved, onSave, onDelete }) {
         </div>
       </div>
 
-      {/* Last emptied */}
+      {/* Gauge last checked */}
       <div className="form-card">
         <div className="flex items-baseline justify-between mb-1.5">
-          <div className="text-[12px] font-semibold text-text-dark">When did you empty the gauge?</div>
+          <div className="text-[12px] font-semibold text-text-dark">When did you last check the gauge?</div>
           <span className="text-[10px] text-text-light">Optional</span>
         </div>
         <input type="datetime-local" value={lastEmptied} onChange={e => { setLastEmptied(e.target.value); }}
@@ -644,6 +646,31 @@ function RainfallForm({ saved, onSave, onDelete }) {
           <input type="number" step="1" value={memory} onChange={e => { setMemory(e.target.value); }}
             placeholder="e.g. 45" className={`field-input w-full ${memory ? 'field-input--active' : ''}`} style={{ height: '38px', paddingRight: '44px' }} />
           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">%</span>
+        </div>
+      </div>
+
+      {/* Overall site condition */}
+      <div className="form-card">
+        <div className="text-[13px] font-bold text-text-dark mb-3">
+          Overall site condition <span className="text-warning text-[11px]">*</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { value: 'good',     label: 'Good'     },
+            { value: 'fair',     label: 'Fair'     },
+            { value: 'poor',     label: 'Poor',     danger: true },
+            { value: 'critical', label: 'Critical', danger: true },
+          ].map(opt => (
+            <button
+              key={opt.value}
+              data-selected={siteCondition === opt.value ? 'true' : undefined}
+              data-danger={opt.danger ? 'true' : undefined}
+              onClick={() => setSiteCondition(v => v === opt.value ? null : opt.value)}
+              className="note-chip"
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -841,10 +868,12 @@ export default function ManualReadings({ visitId, dataFamily, onReadingsSaved })
           {dataFamily === 'groundwater' && <GroundwaterForm saved={saved} onSave={handleSave} />}
           {dataFamily === 'met'         && <MetForm         saved={saved} onSave={handleSave} />}
 
-          <SiteConditionSection
-            existingReading={saved.find(r => r.reading_type === 'overall_site_condition')}
-            onSave={handleSave}
-          />
+          {dataFamily !== 'rainfall' && (
+            <SiteConditionSection
+              existingReading={saved.find(r => r.reading_type === 'overall_site_condition')}
+              onSave={handleSave}
+            />
+          )}
         </div>
 
       </div>

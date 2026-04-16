@@ -70,7 +70,7 @@ async function getAllStationsWithLastVisit(assignedToUserId = null) {
   return result.rows;
 }
 
-// Registry view for Sue — includes inactive stations
+// Registry view (leads/managers) — includes inactive stations
 async function getAllStationsRegistry() {
   const result = await pool.query(`
     SELECT s.id, s.name, s.display_name, s.data_family, s.region,
@@ -534,17 +534,40 @@ async function getRawTipsForStation(stationId) {
   return result.rows;
 }
 
-// Visit timestamps for a station — used for ±600s interfere window
+// Interference event timestamps for a station — used for ±600s interfere window.
+//
+// Uses actual logger interference events (Coupler Detached / Host Connected)
+// stored in raw_measurements (is_interference = true) rather than
+// field_visits.visited_at. This is the JS equivalent of R's logg_interfere
+// table (auto-extracted from the logger file itself).
+//
+// Reason: visited_at reflects when the technician submitted the visit in the
+// app, which may be hours after the physical download (e.g. from home). The
+// interference event timestamp in the file is the true anchor for the ±600s
+// false-tip window.
+//
+// Also carries raining flag (R spec line 156): if the technician confirmed it
+// was raining during that visit, tips near the logger connection are real
+// rainfall and must not be flagged as interfere.
 async function getVisitTimestampsForStation(stationId) {
   const result = await pool.query(
-    `SELECT visited_at
-     FROM   field_visits
-     WHERE  station_id = $1
-       AND  status IN ('draft', 'pending', 'submitted', 'approved', 'flagged')
-     ORDER  BY visited_at`,
+    `SELECT rm.measured_at,
+            EXISTS (
+              SELECT 1 FROM manual_readings mr
+              WHERE  mr.visit_id     = uf.visit_id
+                AND  mr.reading_type = 'raining'
+                AND  mr.value_text   = 'true'
+            ) AS raining
+     FROM   raw_measurements rm
+     JOIN   station_data_streams sds ON sds.id  = rm.stream_id
+     JOIN   uploaded_files        uf  ON uf.id   = rm.file_id
+     WHERE  sds.station_id    = $1
+       AND  rm.is_interference = true
+       AND  uf.parse_status    = 'parsed'
+     ORDER  BY rm.measured_at`,
     [stationId]
   );
-  return result.rows.map(r => new Date(r.visited_at));
+  return result.rows.map(r => ({ time: new Date(r.measured_at), raining: r.raining }));
 }
 
 // Pseudo-event windows anchored to date_range_end (last tip timestamp in the file).
@@ -570,6 +593,18 @@ async function getPseudoEventWindows(stationId) {
               (mr.reading_type = 'did_tip'    AND mr.value_text = 'yes')
            OR (mr.reading_type = 'event_type' AND mr.value_text = 'pseudo_events')
             )
+       -- Suppress manual-tip window when technician confirmed it was raining:
+       -- a bucket tip during active rainfall should not erase real rain tips.
+       -- (non-rainfall water entry / pseudo_events is deliberate and is NOT suppressed)
+       AND NOT (
+         mr.reading_type = 'did_tip'
+         AND EXISTS (
+           SELECT 1 FROM manual_readings mr2
+           WHERE  mr2.visit_id      = fv.id
+             AND  mr2.reading_type  = 'raining'
+             AND  mr2.value_text    = 'true'
+         )
+       )
        AND  uf.stream_name  = 'raw_rainfall'
        AND  uf.parse_status = 'parsed'
        AND  uf.date_range_end IS NOT NULL
@@ -661,7 +696,7 @@ async function getRainfallData(stationId, from, to, resolution = 'daily') {
   const truncMap = {
     hourly:     `DATE_TRUNC('hour',  period_start)`,
     daily:      `DATE_TRUNC('day',   period_start)`,
-    saws_daily: `DATE_TRUNC('day',   period_start - INTERVAL '6 hours') + INTERVAL '6 hours'`,
+    saws_daily: `DATE_TRUNC('day',   period_start - INTERVAL '8 hours') + INTERVAL '8 hours'`,
     monthly:    `DATE_TRUNC('month', period_start)`,
     yearly:     `DATE_TRUNC('year',  period_start)`,
   };
@@ -904,17 +939,27 @@ async function getGroundwaterStationsMissingDipper() {
   return result.rows;
 }
 
-async function getFilesWithParseErrors() {
+async function getFilesWithParseErrors({ technicianId } = {}) {
+  // When technicianId is supplied, scope to files belonging to stations
+  // assigned to that technician — used for the technician's own error feed.
+  const params = [];
+  let where = `WHERE uf.parse_status = 'error'`;
+  if (technicianId != null) {
+    params.push(technicianId);
+    where += ` AND s.assigned_technician_id = $${params.length}`;
+  }
   const result = await pool.query(
     `SELECT uf.id, uf.original_name, uf.parse_error, uf.uploaded_at,
+            s.id           AS station_id,
             s.display_name AS station_name,
             u.full_name    AS technician_name
      FROM   uploaded_files uf
      JOIN   field_visits fv ON fv.id = uf.visit_id
      JOIN   stations     s  ON s.id  = fv.station_id
      JOIN   users        u  ON u.id  = fv.technician_id
-     WHERE  uf.parse_status = 'error'
-     ORDER  BY uf.uploaded_at DESC`
+     ${where}
+     ORDER  BY uf.uploaded_at DESC`,
+    params
   );
   return result.rows;
 }
