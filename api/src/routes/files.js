@@ -137,9 +137,10 @@ async function parseInBackground(fileRecord, visitId) {
       dateRangeEnd:   resolvedEnd,
       recordCount:    resolvedCount,
       streamName:     result.streamName,
-      loggerLabel:    meta.label        ?? null,
-      loggerSerial:   meta.serial       ?? null,
-      downloadedAt:   meta.logger_launched_at ?? null,
+      loggerLabel:         meta.label               ?? null,
+      loggerSerial:        meta.serial              ?? null,
+      loggerLaunchedAt:    meta.logger_launched_at  ?? null,
+      loggerDownloadedAt:  meta.logger_downloaded_at ?? null,
     });
 
     log.info('[parse] Complete', {
@@ -229,7 +230,7 @@ router.post('/:id/files', upload.single('file'), async (req, res, next) => {
     // Validate format against station family
     const fileFormat = detectFileFormat(req.file.originalname, req.file.buffer);
     if (visit.data_family === 'rainfall' && fileFormat !== 'hobo_binary') {
-      return res.status(400).json({ error: 'Rainfall stations only accept HOBO binary (.hobo) files. CSV exports from HOBOware contain cumulative totals and cannot be used by the rainfall pipeline.' });
+      return res.status(400).json({ error: 'Rainfall stations only accept HOBO binary (.hobo) files.' });
     }
 
     // SHA-256 hash of file contents

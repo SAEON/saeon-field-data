@@ -25,6 +25,9 @@ router.post('/', async (req, res, next) => {
       status:       status || 'draft',
     });
 
+    // Auto-assign visiting user to station — gives accountability visibility to other users
+    await db.updateStation(station_id, { assignedTechnicianId: req.user.id });
+
     res.status(201).json(visit);
   } catch (err) {
     next(err);

@@ -291,21 +291,22 @@ async function createUploadedFile({ visitId, originalName, fileHash, fileSizeByt
   return result.rows[0];
 }
 
-async function updateFileParsed(id, { dateRangeStart, dateRangeEnd, recordCount, streamName, loggerLabel, loggerSerial, downloadedAt }) {
+async function updateFileParsed(id, { dateRangeStart, dateRangeEnd, recordCount, streamName, loggerLabel, loggerSerial, loggerLaunchedAt, loggerDownloadedAt }) {
   const result = await pool.query(
     `UPDATE uploaded_files
-     SET    parse_status     = 'parsed',
-            date_range_start = $2,
-            date_range_end   = $3,
-            record_count     = $4,
-            stream_name      = $5,
-            logger_label     = COALESCE($6, logger_label),
-            logger_serial    = COALESCE($7, logger_serial),
-            logger_launched_at = COALESCE($8, logger_launched_at)
+     SET    parse_status          = 'parsed',
+            date_range_start      = $2,
+            date_range_end        = $3,
+            record_count          = $4,
+            stream_name           = $5,
+            logger_label          = COALESCE($6, logger_label),
+            logger_serial         = COALESCE($7, logger_serial),
+            logger_launched_at    = COALESCE($8, logger_launched_at),
+            logger_downloaded_at  = COALESCE($9, logger_downloaded_at)
      WHERE  id = $1
      RETURNING *`,
     [id, dateRangeStart, dateRangeEnd, recordCount, streamName ?? null,
-     loggerLabel ?? null, loggerSerial ?? null, downloadedAt ?? null]
+     loggerLabel ?? null, loggerSerial ?? null, loggerLaunchedAt ?? null, loggerDownloadedAt ?? null]
   );
   return result.rows[0] || null;
 }
@@ -570,16 +571,16 @@ async function getVisitTimestampsForStation(stationId) {
   return result.rows.map(r => ({ time: new Date(r.measured_at), raining: r.raining }));
 }
 
-// Pseudo-event windows anchored to date_range_end (last tip timestamp in the file).
-// Tag 0x07 in the HOBO binary is the LAUNCH timestamp (when the logger was configured),
-// not the download time — so date_range_end remains the best proxy for visit time.
-// Window = [date_range_end - 20 min, date_range_end].
+// Pseudo-event windows anchored to logger_downloaded_at (the Host Connected event —
+// the exact moment the technician plugged the cable in to download data).
+// Window = [logger_downloaded_at - 10 min, logger_downloaded_at + 10 min].
+// Falls back to date_range_end if logger_downloaded_at is not populated (older files).
 // Returns reason per window: 'manual_tip' or 'non_rainfall_entry'.
 async function getPseudoEventWindows(stationId) {
   const result = await pool.query(
     `SELECT
-       MAX(uf.date_range_end) - INTERVAL '20 minutes' AS window_start,
-       MAX(uf.date_range_end)                          AS window_end,
+       COALESCE(MAX(uf.logger_downloaded_at), MAX(uf.date_range_end)) - INTERVAL '10 minutes' AS window_start,
+       COALESCE(MAX(uf.logger_downloaded_at), MAX(uf.date_range_end)) + INTERVAL '10 minutes' AS window_end,
        CASE
          WHEN mr.reading_type = 'did_tip'    THEN 'manual_tip'
          WHEN mr.reading_type = 'event_type' THEN 'non_rainfall_entry'
@@ -607,7 +608,7 @@ async function getPseudoEventWindows(stationId) {
        )
        AND  uf.stream_name  = 'raw_rainfall'
        AND  uf.parse_status = 'parsed'
-       AND  uf.date_range_end IS NOT NULL
+       AND  COALESCE(uf.logger_downloaded_at, uf.date_range_end) IS NOT NULL
      GROUP  BY fv.id, mr.reading_type`,
     [stationId]
   );

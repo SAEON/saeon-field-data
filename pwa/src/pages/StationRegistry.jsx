@@ -319,15 +319,28 @@ const STREAM_LABEL = {
 
 function AssignTechnicianSheet({ station, onClose, onAssigned }) {
   const [users,    setUsers]    = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [search,   setSearch]   = useState('');
   const [selected, setSelected] = useState(station.assigned_technician_id ?? '');
   const [saving,   setSaving]   = useState(false);
   const [error,    setError]    = useState(null);
 
   useEffect(() => {
-    getUsers().then(setUsers).catch(() => {});
+    getUsers()
+      .then(setUsers)
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
-  const technicians = users.filter(u => u.role === 'technician' && u.active);
+  const assignable = users.filter(u => (u.role === 'technician' || u.role === 'technician_lead') && u.active);
+
+  const filtered = search.trim()
+    ? assignable.filter(u => {
+        const q = search.toLowerCase();
+        return (u.full_name ?? '').toLowerCase().includes(q) ||
+               (u.email ?? '').toLowerCase().includes(q);
+      })
+    : [];
 
   async function handleSave() {
     setSaving(true);
@@ -345,25 +358,72 @@ function AssignTechnicianSheet({ station, onClose, onAssigned }) {
     }
   }
 
-  const inputCls = 'w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark';
+  const selectedUser = assignable.find(u => u.id === selected || String(u.id) === String(selected));
 
   return (
     <div className="back-sheet-overlay">
       <div className="back-sheet">
         <div className="text-[15px] font-bold text-text-dark mb-1">Assign technician</div>
-        <div className="text-[12px] text-text-light mb-4">{station.display_name}</div>
+        <div className="text-[12px] text-text-light mb-3">{station.display_name}</div>
 
-        <select
-          className={inputCls}
-          value={selected}
-          onChange={e => setSelected(e.target.value)}
-          style={{ marginBottom: 16 }}
-        >
-          <option value="">Unassigned</option>
-          {technicians.map(u => (
-            <option key={u.id} value={u.id}>{u.full_name}</option>
+        {/* Search input */}
+        <input
+          type="text"
+          placeholder="Search by name or email…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          autoFocus
+          className="w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark mb-2"
+        />
+
+        {/* User list */}
+        <div className="flex flex-col gap-1.5 mb-3 overflow-y-auto" style={{ maxHeight: 220 }}>
+          {loading && (
+            <div className="text-center text-[13px] text-text-light py-4">Loading…</div>
+          )}
+          {!loading && (
+            <button
+              onClick={() => setSelected('')}
+              className="text-left px-3 py-2.5 rounded-xl border text-[13px]"
+              style={{
+                borderColor: selected === '' ? 'var(--color-navy)' : 'var(--color-border)',
+                background:  selected === '' ? '#EAF0FB' : 'white',
+                fontWeight:  selected === '' ? 600 : 400,
+              }}
+            >
+              Unassigned
+            </button>
+          )}
+          {!loading && filtered.map(u => (
+            <button
+              key={u.id}
+              onClick={() => setSelected(u.id)}
+              className="text-left px-3 py-2.5 rounded-xl border text-[13px]"
+              style={{
+                borderColor: String(selected) === String(u.id) ? 'var(--color-navy)' : 'var(--color-border)',
+                background:  String(selected) === String(u.id) ? '#EAF0FB' : 'white',
+                fontWeight:  String(selected) === String(u.id) ? 600 : 400,
+              }}
+            >
+              <div className="text-text-dark">{u.full_name}</div>
+              <div className="text-[11px] text-text-light">{u.email}</div>
+            </button>
           ))}
-        </select>
+          {!loading && !search.trim() && (
+            <div className="text-center text-[13px] text-text-light py-3">
+              Type a name or email to search
+            </div>
+          )}
+          {!loading && search.trim() && filtered.length === 0 && (
+            <div className="text-center text-[13px] text-text-light py-3">No matches.</div>
+          )}
+        </div>
+
+        {selectedUser && (
+          <div className="text-[11px] text-text-light mb-2">
+            Selected: <span className="font-semibold text-text-dark">{selectedUser.full_name}</span>
+          </div>
+        )}
 
         {error && <div className="text-[12px] text-error mb-3">{error}</div>}
 

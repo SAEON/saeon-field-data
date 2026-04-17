@@ -13,7 +13,8 @@
 // HEADER TAGS (key ones)
 //   0x05  model string
 //   0x06  serial number string
-//   0x07  download timestamp [century*100+year, month, day, hour, min, sec, 0, 0]
+//   0x07  launch timestamp [century*100+year, month, day, hour, min, sec, 0, 0]
+//          = when the logger was deployed in the field (anchor for forward time deltas)
 //          NOTE: stored in local time (CAT = UTC+2 for South African stations)
 //   0x0a  station label string
 //   0x14  timezone string (e.g. "Central African Time")
@@ -102,9 +103,10 @@ async function parseHoboBinary(buf) {
     nibbles[i * 2 + 1] = dataSection[i] & 0xF;
   }
 
-  // Parse nibble-aligned records, accumulate time forward from download timestamp
+  // Parse nibble-aligned records, accumulate time forward from launch timestamp
   let cursorMs = meta.downloaded.getTime();
-  const tips = [];
+  const tips          = [];
+  const connectEvents = []; // typeHi=0x1 = Host Connected (technician plugged cable in)
   let npos = 0;
 
   while (npos + 2 <= nibbles.length) {
@@ -124,19 +126,33 @@ async function parseHoboBinary(buf) {
 
     cursorMs += delta * 1000;
 
-    // Only type 0x7x events are rainfall tip events
     if (typeHi === 7) {
+      // Rainfall tip event
       tips.push(new Date(cursorMs));
+    } else if (typeHi === 0x1) {
+      // Host Connected — the exact moment the technician plugged in the cable.
+      // Emitted as is_interference so the rainfall processor can anchor the
+      // ±10 min interfere window on the true visit time rather than date_range_end.
+      connectEvents.push(new Date(cursorMs));
     }
   }
 
-  const measurements = tips.map(ts => ({
-    phenomenon_name: 'rain_tip',
-    measured_at:     ts.toISOString(),
-    value_numeric:   meta.mmPerTip,
-    value_text:      null,
-    is_interference: false,
-  }));
+  const measurements = [
+    ...tips.map(ts => ({
+      phenomenon_name: 'rain_tip',
+      measured_at:     ts.toISOString(),
+      value_numeric:   meta.mmPerTip,
+      value_text:      null,
+      is_interference: false,
+    })),
+    ...connectEvents.map(ts => ({
+      phenomenon_name: 'logger_interference',
+      measured_at:     ts.toISOString(),
+      value_numeric:   null,
+      value_text:      'Host Connected',
+      is_interference: true,
+    })),
+  ];
 
   return {
     streamName: 'raw_rainfall',
@@ -147,7 +163,10 @@ async function parseHoboBinary(buf) {
       model:            meta.model      || null,
       timezone:         meta.timezone   || null,
       mmPerTip:         meta.mmPerTip,
-      logger_launched_at: meta.downloaded ? meta.downloaded.toISOString() : null,
+      logger_launched_at:  meta.downloaded ? meta.downloaded.toISOString() : null,
+      logger_downloaded_at: connectEvents.length
+        ? connectEvents[connectEvents.length - 1].toISOString()
+        : null,
       date_range_start: tips.length ? tips[0].toISOString()               : null,
       date_range_end:   tips.length ? tips[tips.length - 1].toISOString() : null,
       record_count:     tips.length,

@@ -75,7 +75,7 @@ function classifyColumn(cleanedHeader) {
   }
   const h = cleanedHeader.toLowerCase();
   if (h.includes('rainfall') || h.includes('rain')) {
-    return { phenomenonName: 'rainfall_tot', isInterference: false };
+    return { phenomenonName: 'rain_tip', isInterference: false };
   }
   const slug = h.replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
   return { phenomenonName: slug || 'unknown', isInterference: false };

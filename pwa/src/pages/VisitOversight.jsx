@@ -75,8 +75,17 @@ function daysSinceLabel(days) {
 // ── Assign visit sheet ───────────────────────────────────────────────────────
 function AssignVisitSheet({ visit, technicians, onClose, onAssigned }) {
   const [selected, setSelected] = useState(visit.assigned_technician_id ?? '');
+  const [search,   setSearch]   = useState('');
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState(null);
+
+  const filtered = search.trim()
+    ? technicians.filter(t => {
+        const q = search.toLowerCase();
+        return (t.full_name ?? '').toLowerCase().includes(q) ||
+               (t.email ?? '').toLowerCase().includes(q);
+      })
+    : [];
 
   async function handleSave() {
     setSaving(true);
@@ -96,9 +105,18 @@ function AssignVisitSheet({ visit, technicians, onClose, onAssigned }) {
     <div className="back-sheet-overlay">
       <div className="back-sheet">
         <div className="text-[15px] font-bold text-text-dark mb-1">Assign visit</div>
-        <div className="text-[12px] text-text-light mb-4">
+        <div className="text-[12px] text-text-light mb-3">
           {visit.station_display_name} · {formatDate(visit.visited_at)}
         </div>
+
+        <input
+          type="text"
+          placeholder="Search by name or email…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          autoFocus
+          className="w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark mb-2"
+        />
 
         <div className="flex flex-col gap-2 mb-4 max-h-52 overflow-y-auto">
           <button
@@ -112,7 +130,7 @@ function AssignVisitSheet({ visit, technicians, onClose, onAssigned }) {
           >
             Unassigned
           </button>
-          {technicians.map(t => (
+          {filtered.map(t => (
             <button
               key={t.id}
               onClick={() => setSelected(t.id)}
@@ -123,9 +141,16 @@ function AssignVisitSheet({ visit, technicians, onClose, onAssigned }) {
                 fontWeight:  selected === t.id ? 600 : 400,
               }}
             >
-              {t.full_name}
+              <div>{t.full_name}</div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-light)' }}>{t.email}</div>
             </button>
           ))}
+          {!search.trim() && (
+            <div className="text-center text-[13px] text-text-light py-3">Type a name or email to search</div>
+          )}
+          {search.trim() && filtered.length === 0 && (
+            <div className="text-center text-[13px] text-text-light py-2">No matches.</div>
+          )}
         </div>
 
         {error && <div className="text-[12px] text-error mb-3">{error}</div>}
@@ -148,8 +173,17 @@ function AssignVisitSheet({ visit, technicians, onClose, onAssigned }) {
 // ── Assign station sheet (overdue mode) ──────────────────────────────────────
 function AssignStationSheet({ station, technicians, onClose, onAssigned }) {
   const [selected, setSelected] = useState(station.assigned_technician_id ?? '');
+  const [search,   setSearch]   = useState('');
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState(null);
+
+  const filtered = search.trim()
+    ? technicians.filter(t => {
+        const q = search.toLowerCase();
+        return (t.full_name ?? '').toLowerCase().includes(q) ||
+               (t.email ?? '').toLowerCase().includes(q);
+      })
+    : [];
 
   async function handleSave() {
     setSaving(true);
@@ -169,9 +203,18 @@ function AssignStationSheet({ station, technicians, onClose, onAssigned }) {
     <div className="back-sheet-overlay">
       <div className="back-sheet">
         <div className="text-[15px] font-bold text-text-dark mb-1">Assign technician</div>
-        <div className="text-[12px] text-text-light mb-4">{station.display_name}</div>
+        <div className="text-[12px] text-text-light mb-3">{station.display_name}</div>
 
-        <div className="flex flex-col gap-2 mb-4 max-h-60 overflow-y-auto">
+        <input
+          type="text"
+          placeholder="Search by name or email…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          autoFocus
+          className="w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark mb-2"
+        />
+
+        <div className="flex flex-col gap-2 mb-4 max-h-52 overflow-y-auto">
           <button
             onClick={() => setSelected('')}
             className="text-left px-3 py-2.5 rounded-xl border text-[13px]"
@@ -183,7 +226,7 @@ function AssignStationSheet({ station, technicians, onClose, onAssigned }) {
           >
             Unassigned
           </button>
-          {technicians.map(t => (
+          {filtered.map(t => (
             <button
               key={t.id}
               onClick={() => setSelected(t.id)}
@@ -194,10 +237,16 @@ function AssignStationSheet({ station, technicians, onClose, onAssigned }) {
                 fontWeight:  selected === t.id ? 600 : 400,
               }}
             >
-              {t.full_name}
-              {!t.active && <span className="ml-2 text-[11px] text-text-light">(inactive)</span>}
+              <div>{t.full_name}</div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-light)' }}>{t.email}</div>
             </button>
           ))}
+          {!search.trim() && (
+            <div className="text-center text-[13px] text-text-light py-3">Type a name or email to search</div>
+          )}
+          {search.trim() && filtered.length === 0 && (
+            <div className="text-center text-[13px] text-text-light py-2">No matches.</div>
+          )}
         </div>
 
         {error && <div className="text-[12px] text-error mb-3">{error}</div>}
@@ -240,11 +289,11 @@ export default function VisitOversight() {
       if (isOverdueMode) {
         const [s, u] = await Promise.all([getOverdueStations(), getUsers()]);
         setOverdueStations(s);
-        setTechnicians(u.filter(u => u.active));
+        setTechnicians(u.filter(u => (u.role === 'technician' || u.role === 'technician_lead') && u.active));
       } else {
         const [v, u, s] = await Promise.all([getVisits({}), getUsers(), getStations()]);
         setVisits(v);
-        setTechnicians(u.filter(u => u.role === 'technician' && u.active));
+        setTechnicians(u.filter(u => (u.role === 'technician' || u.role === 'technician_lead') && u.active));
         setStations(s);
       }
     } catch (err) {
