@@ -249,3 +249,17 @@ export function createReading(visitId, { reading_type, value_numeric, value_text
 export function deleteReading(visitId, readingType) {
   return request(`/api/visits/${visitId}/readings/${readingType}`, { method: 'DELETE' });
 }
+
+// ── Instruments ────────────────────────────────────────────────────────────
+
+export function getInstrumentHistory(stationId) {
+  return request(`/api/stations/${stationId}/instruments`);
+}
+
+export function createInstrumentRecord(stationId, { instrument_type, serial_no, mm_per_tip, visit_id, notes }) {
+  return request(`/api/stations/${stationId}/instruments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instrument_type, serial_no, mm_per_tip, visit_id, notes }),
+  });
+}

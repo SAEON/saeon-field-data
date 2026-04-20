@@ -80,6 +80,20 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
       assignedTechnicianId: assigned_technician_id, serialNo: serial_no ?? null,
     });
 
+    // Seed instrument_history for rainfall stations created with a serial number
+    if (data_family === 'rainfall' && serial_no) {
+      await db.createInstrumentRecord({
+        stationId:      station.id,
+        instrumentType: 'raingauge',
+        serialNo:       serial_no,
+        mmPerTip:       0.254,
+        visitId:        null,
+        effectiveFrom:  new Date().toISOString(),
+        recordedBy:     req.user.id,
+        notes:          'Initial instrument registered at station creation',
+      });
+    }
+
     res.status(201).json(station);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Station name already exists' });

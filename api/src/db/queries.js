@@ -984,6 +984,50 @@ async function getStationDataCoverage(stationId) {
 }
 
 
+// =============================================================
+// Instrument history
+// =============================================================
+
+async function getInstrumentHistory(stationId) {
+  const result = await pool.query(
+    `SELECT ih.id, ih.instrument_type, ih.serial_no, ih.mm_per_tip,
+            ih.effective_from, ih.notes, ih.created_at,
+            u.full_name AS recorded_by_name,
+            fv.visited_at
+     FROM   instrument_history ih
+     JOIN   users u        ON u.id  = ih.recorded_by
+     LEFT   JOIN field_visits fv ON fv.id = ih.visit_id
+     WHERE  ih.station_id = $1
+     ORDER  BY ih.instrument_type, ih.effective_from DESC`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+async function getCalibrationPeriodsForStation(stationId) {
+  const result = await pool.query(
+    `SELECT serial_no, mm_per_tip, effective_from
+     FROM   instrument_history
+     WHERE  station_id      = $1
+       AND  instrument_type = 'raingauge'
+       AND  mm_per_tip      IS NOT NULL
+     ORDER  BY effective_from ASC`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+async function createInstrumentRecord({ stationId, instrumentType, serialNo, mmPerTip, visitId, effectiveFrom, recordedBy, notes }) {
+  const result = await pool.query(
+    `INSERT INTO instrument_history
+       (station_id, instrument_type, serial_no, mm_per_tip, visit_id, effective_from, recorded_by, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING *`,
+    [stationId, instrumentType, serialNo, mmPerTip ?? null, visitId ?? null, effectiveFrom, recordedBy, notes ?? null]
+  );
+  return result.rows[0];
+}
+
 module.exports = {
   // Stations
   getAllStations,
@@ -1045,6 +1089,10 @@ module.exports = {
   getAllUsers,
   createUser,
   updateUser,
+  // Instrument history
+  getInstrumentHistory,
+  getCalibrationPeriodsForStation,
+  createInstrumentRecord,
   // Dashboard
   getOverdueStations,
   assignVisit,

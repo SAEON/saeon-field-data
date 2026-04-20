@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers } from '../services/api.js';
+import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers, getInstrumentHistory, createInstrumentRecord, getVisits } from '../services/api.js';
 
 const DATA_FAMILY_OPTIONS = [
   { value: 'groundwater', label: 'Groundwater' },
@@ -220,12 +220,19 @@ function StationSheet({ station, onClose, onSaved }) {
             />
           </div>
 
-          <div>
-            <div className={labelCls}>Instrument serial no.</div>
-            <input className={inputCls} value={form.serial_no}
-              onChange={e => set('serial_no', e.target.value)}
-              placeholder="e.g. 20102577  (optional)" />
-          </div>
+          {isNew && (
+            <div>
+              <div className={labelCls}>
+                {form.data_family === 'rainfall' ? 'Raingauge serial no.' : 'Instrument serial no.'}
+              </div>
+              <input className={inputCls} value={form.serial_no}
+                onChange={e => set('serial_no', e.target.value)}
+                placeholder="e.g. 20102577  (optional)" />
+              {form.data_family === 'rainfall' && form.serial_no.trim() && (
+                <div className="text-[10px] text-text-light mt-1">Calibration defaults to 0.254 mm/tip — update via instrument history after first visit.</div>
+              )}
+            </div>
+          )}
 
           {!isNew && (
             <div className="flex items-center justify-between px-2.5 py-2 rounded-lg bg-surface">
@@ -248,6 +255,10 @@ function StationSheet({ station, onClose, onSaved }) {
           )}
         </div>
 
+        {!isNew && station?.data_family === 'rainfall' && (
+          <InstrumentsSection station={station} />
+        )}
+
         {error && <div className="text-[11px] text-error mt-2">{error}</div>}
 
         <div className="flex gap-2 mt-4">
@@ -261,6 +272,135 @@ function StationSheet({ station, onClose, onSaved }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Instrument history section ───────────────────────────────────────────────
+function InstrumentsSection({ station }) {
+  const [history,      setHistory]      = useState(null);
+  const [showForm,     setShowForm]     = useState(false);
+  const [instrType,    setInstrType]    = useState('raingauge');
+  const [serial,       setSerial]       = useState('');
+  const [mmPerTip,     setMmPerTip]     = useState('');
+  const [visitId,      setVisitId]      = useState('');
+  const [notes,        setNotes]        = useState('');
+  const [saveState,    setSaveState]    = useState('idle');
+  const [visits,       setVisits]       = useState([]);
+
+  useEffect(() => {
+    if (!station?.id) return;
+    getInstrumentHistory(station.id).then(setHistory).catch(() => setHistory([]));
+  }, [station?.id]);
+
+  // Load recent visits for the visit picker
+  useEffect(() => {
+    if (!showForm || !station?.id) return;
+    getVisits({ station_id: station.id }).then(v => setVisits(v || [])).catch(() => {});
+  }, [showForm, station?.id]);
+
+  async function handleSave() {
+    if (!serial || !visitId || (instrType === 'raingauge' && !mmPerTip)) return;
+    setSaveState('saving');
+    try {
+      await createInstrumentRecord(station.id, {
+        instrument_type: instrType,
+        serial_no:       serial.trim(),
+        mm_per_tip:      instrType === 'raingauge' ? parseFloat(mmPerTip) : null,
+        visit_id:        parseInt(visitId, 10),
+        notes:           notes.trim() || null,
+      });
+      const updated = await getInstrumentHistory(station.id);
+      setHistory(updated);
+      setShowForm(false);
+      setSerial(''); setMmPerTip(''); setVisitId(''); setNotes('');
+      setSaveState('idle');
+    } catch {
+      setSaveState('error');
+    }
+  }
+
+  const byType = (type) => (history || []).filter(h => h.instrument_type === type);
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[12px] font-semibold text-text-dark">Instrument history</div>
+        <button onClick={() => setShowForm(v => !v)}
+          className="text-[11px] font-semibold text-navy border-none bg-transparent p-0">
+          {showForm ? 'Cancel' : '+ Record change'}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="form-card mb-3" style={{ borderColor: '#BBF7D0' }}>
+          <select value={instrType} onChange={e => setInstrType(e.target.value)}
+            className={`field-input w-full field-input--active`} style={{ height: 36 }}>
+            <option value="raingauge">Raingauge</option>
+            <option value="datalogger">Datalogger</option>
+          </select>
+          <div className="flex flex-col gap-2">
+            <input type="text" value={serial} onChange={e => setSerial(e.target.value)}
+              placeholder="Serial number (from instrument label)"
+              className={`field-input w-full ${serial ? 'field-input--active' : ''}`} style={{ height: 36 }} />
+            {instrType === 'raingauge' && (
+              <div className="relative">
+                <input type="number" step="0.001" value={mmPerTip}
+                  onChange={e => setMmPerTip(e.target.value)}
+                  placeholder="mm per tip (e.g. 0.254)"
+                  className={`field-input w-full ${mmPerTip ? 'field-input--active' : ''}`} style={{ height: 36, paddingRight: 60 }} />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">mm/tip</span>
+              </div>
+            )}
+            <select value={visitId} onChange={e => setVisitId(e.target.value)}
+              className={`field-input w-full ${visitId ? 'field-input--active' : ''}`} style={{ height: 36 }}>
+              <option value="">Select visit when swap occurred</option>
+              {visits.map(v => (
+                <option key={v.id} value={v.id}>
+                  {v.visited_at ? new Date(v.visited_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : `Visit #${v.id}`}
+                </option>
+              ))}
+            </select>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Notes (optional)" rows={2} className="notes-textarea w-full" />
+            <button onClick={handleSave}
+              disabled={!serial || !visitId || (instrType === 'raingauge' && !mmPerTip) || saveState === 'saving'}
+              className="save-btn" style={{ alignSelf: 'flex-start' }}>
+              {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Error — retry' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {history === null && <div className="text-[11px] text-text-light">Loading…</div>}
+
+      {['raingauge', 'datalogger'].map(type => {
+        const rows = byType(type);
+        if (!rows.length) return null;
+        return (
+          <div key={type} className="mb-3">
+            <div className="text-[11px] font-semibold text-text-light uppercase mb-1">{type === 'raingauge' ? 'Raingauge' : 'Datalogger'}</div>
+            {rows.map(r => (
+              <div key={r.id} className="flex items-start justify-between py-1.5 border-b border-border last:border-0">
+                <div>
+                  <div className="text-[12px] font-semibold text-text-dark">{r.serial_no}
+                    {r.mm_per_tip && <span className="ml-2 text-[11px] font-normal text-text-light">{r.mm_per_tip} mm/tip</span>}
+                  </div>
+                  <div className="text-[11px] text-text-light">
+                    From {r.effective_from ? new Date(r.effective_from).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                    {' · '}{r.recorded_by_name}
+                  </div>
+                  {r.notes && <div className="text-[11px] text-text-light italic">{r.notes}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+      {history?.length === 0 && !showForm && (
+        <div className="text-[11px] text-text-light">No instrument changes recorded yet.</div>
+      )}
     </div>
   );
 }

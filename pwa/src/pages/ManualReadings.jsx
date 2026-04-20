@@ -3,40 +3,38 @@
 // Existing readings are loaded from the server on mount to pre-populate saved state.
 // Offline: readings are queued in IndexedDB and flushed when reconnected.
 import { useState, useEffect, useRef } from 'react';
-import { createReading, deleteReading, getVisit } from '../services/api.js';
+import { createReading, deleteReading, getVisit, createInstrumentRecord } from '../services/api.js';
 import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
 
 const REQUIRED_TYPES = {
-  rainfall:    ['event_type', 'gauge_condition', 'overall_site_condition'],
+  rainfall:    ['logger_activities', 'raingauge_activities', 'gauge_condition', 'overall_site_condition'],
   groundwater: ['dipper_depth', 'dipper_time', 'overall_site_condition'],
   met:         ['pyranometer_clean', 'anemometer_spinning', 'rain_gauge_clear', 'overall_site_condition'],
 };
 
-const EVENT_TYPES = [
-  { group: 'Logger', options: [
-    { value: 'logger_download',     label: 'Logger download' },
-    { value: 'logger_maintenance',  label: 'Logger maintenance' },
-    { value: 'logger_missing',      label: 'Logger missing' },
-    { value: 'logger_deploy',       label: 'Logger deployed' },
-    { value: 'logger_decommission', label: 'Logger decommissioned' },
-    { value: 'logger_program',      label: 'Logger programmed' },
-    { value: 'logger_stopped',      label: 'Logger stopped' },
-  ]},
-  { group: 'Raingauge', options: [
-    { value: 'raingauge_maintenance',       label: 'Raingauge maintenance' },
-    { value: 'raingauge_missing',           label: 'Raingauge missing' },
-    { value: 'raingauge_deploy',            label: 'Raingauge deployed' },
-    { value: 'raingauge_decommission',      label: 'Raingauge decommissioned' },
-    { value: 'raingauge_calibrate',         label: 'Raingauge calibration' },
-    { value: 'raingauge_calibration_check', label: 'Calibration check' },
-    { value: 'pseudo_events',              label: 'Non-rainfall water entry' },
-  ]},
+const LOGGER_ACTS = [
+  { value: 'logger_download',     label: 'Download' },
+  { value: 'logger_maintenance',  label: 'Maintenance' },
+  { value: 'logger_missing',      label: 'Missing' },
+  { value: 'logger_deploy',       label: 'Deployed' },
+  { value: 'logger_decommission', label: 'Decommission' },
+  { value: 'logger_program',      label: 'Programmed' },
+  { value: 'logger_stopped',      label: 'Stopped' },
 ];
 
-const PROBLEMATIC_EVENTS = new Set([
-  'logger_maintenance', 'logger_missing', 'logger_stopped', 'logger_decommission',
-  'raingauge_maintenance', 'raingauge_missing', 'raingauge_decommission',
-]);
+const RAINGAUGE_ACTS = [
+  { value: 'raingauge_maintenance',       label: 'Maintenance' },
+  { value: 'raingauge_missing',           label: 'Missing' },
+  { value: 'raingauge_deploy',            label: 'Deployed' },
+  { value: 'raingauge_decommission',      label: 'Decommission' },
+  { value: 'raingauge_calibrate',         label: 'Calibrate' },
+  { value: 'raingauge_calibration_check', label: 'Cal. check' },
+  { value: 'pseudo_events',               label: 'Water entry' },
+];
+
+const LOGGER_PROBLEM    = new Set(['logger_maintenance', 'logger_missing', 'logger_stopped', 'logger_decommission']);
+const RAINGAUGE_PROBLEM = new Set(['raingauge_maintenance', 'raingauge_missing', 'raingauge_decommission']);
+
 
 // ── Save button ───────────────────────────────────────────────────────────────
 
@@ -396,152 +394,127 @@ function SiteConditionSection({ existingReading, onSave }) {
   );
 }
 
-// ── Event type select field ───────────────────────────────────────────────────
+// ── Section divider ───────────────────────────────────────────────────────────
 
-function EventTypeField({ existingReading, onSave, onEventTypeChange }) {
-  const init = existingReading?.value_text ?? '';
-  const [value,     setValue]    = useState(init);
-  const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
-  const saved = saveState === 'saved';
-
-  useEffect(() => { onEventTypeChange?.(value); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function handleChange(e) {
-    const val = e.target.value;
-    setValue(val);
-    setSaveState('saving');
-    onEventTypeChange?.(val);
-    try {
-      await onSave({ reading_type: 'event_type', value_text: val, recorded_at: new Date().toISOString() });
-      setSaveState('saved');
-    } catch (err) {
-      setSaveState(err?.offline ? 'queued' : 'error');
-    }
-  }
-
+function SectionDivider({ label }) {
   return (
-    <div className="form-card">
-      <div className="flex items-baseline justify-between mb-0.5">
-        <div className="text-[12px] font-semibold text-text-dark">
-          Visit activity <span className="text-warning text-[11px]">*</span>
-        </div>
-        <span className={`text-[10px] font-semibold ${
-          saveState === 'saved'  ? 'text-success' :
-          saveState === 'error'  ? 'text-error'   :
-          saveState === 'queued' ? 'text-blue'     : 'text-transparent'
-        }`}>
-          {saveState === 'saved' ? '✓ Saved' : saveState === 'error' ? 'Save failed' : saveState === 'queued' ? 'Queued' : '·'}
-        </span>
-      </div>
-      <div className="text-[11px] text-text-light mb-1.5">What did you come to do at this station?</div>
-      <select
-        value={value}
-        onChange={handleChange}
-        className={`field-input w-full ${value ? 'field-input--active' : ''}`}
-        style={{ height: '38px' }}
-      >
-        <option value="">Select what you did…</option>
-        {EVENT_TYPES.map(group => (
-          <optgroup key={group.group} label={group.group}>
-            {group.options.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-// ── Event problem notes field ─────────────────────────────────────────────────
-
-function EventProblemNotesField({ existingReading, onSave }) {
-  const init = existingReading?.value_text ?? '';
-  const [value,     setValue]    = useState(init);
-  const [saveState, setSaveState] = useState(existingReading ? 'saved' : 'idle');
-  const saved = saveState === 'saved';
-
-  async function handleSave() {
-    setSaveState('saving');
-    try {
-      await onSave({ reading_type: 'event_problem_notes', value_text: value, recorded_at: new Date().toISOString() });
-      setSaveState('saved');
-    } catch (err) {
-      setSaveState(err?.offline ? 'queued' : 'error');
-    }
-  }
-
-  return (
-    <div className="form-card" style={{ borderColor: '#FDE68A' }}>
-      <div className="flex items-baseline justify-between mb-0.5">
-        <div className="text-[12px] font-semibold text-text-dark">
-          Describe what you found <span className="text-warning text-[11px]">*</span>
-        </div>
-      </div>
-      <textarea
-        value={value}
-        onChange={e => { setValue(e.target.value); setSaveState('idle'); }}
-        placeholder="e.g. Logger was missing from mount — bracket broken. No data since last visit."
-        rows={3}
-        disabled={saved}
-        className="notes-textarea w-full mb-2"
-      />
-      <div className="flex justify-end">
-        <SaveBtn state={saveState} hasValue={value.trim() !== ''} onClick={handleSave} />
-      </div>
+    <div style={{
+      fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+      textTransform: 'uppercase', color: 'var(--color-text-light)',
+      borderTop: '1px solid var(--color-border)',
+      paddingTop: 10, marginTop: 6, marginBottom: 4,
+    }}>
+      {label}
     </div>
   );
 }
 
 // ── Family form components ────────────────────────────────────────────────────
 
-function RainfallForm({ saved, onSave, onDelete }) {
+function RainfallForm({ saved, onSave, visitId, stationId }) {
   function ex(type) { return saved.find(r => r.reading_type === type); }
 
-  // All field values lifted to form level — single save at the bottom
-  const [eventType,      setEventType]      = useState(ex('event_type')?.value_text ?? '');
-  const [didTip,         setDidTip]         = useState(() => { const r = ex('did_tip'); return r ? r.value_text === 'yes' : ex('event_type') ? false : null; });
-  const [problemNotes,   setProblemNotes]   = useState(ex('event_problem_notes')?.value_text ?? '');
+  function parseActs(reading) {
+    if (!reading?.value_text) return new Set();
+    try { return new Set(JSON.parse(reading.value_text)); }
+    catch { return new Set(); }
+  }
+
+  // Activity selections
+  const [loggerActs, setLoggerActs] = useState(() => parseActs(ex('logger_activities')));
+  const [rgActs,     setRgActs]     = useState(() => parseActs(ex('raingauge_activities')));
+
+  // Logger-specific fields
+  const [loggerSerial, setLoggerSerial] = useState('');
+  const [loggerNotes,  setLoggerNotes]  = useState(ex('logger_problem_notes')?.value_text ?? '');
+  const [battery,      setBattery]      = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
+  const [memory,       setMemory]       = useState(ex('memory_used_pct')?.value_numeric != null ? String(ex('memory_used_pct').value_numeric) : '');
+
+  // Raingauge-specific fields
+  const [rgSerial,    setRgSerial]    = useState('');
+  const [rgMmPerTip,  setRgMmPerTip]  = useState('');
+  const [rgCalSerial, setRgCalSerial] = useState('');
+  const [rgCalMm,     setRgCalMm]     = useState('');
+  const [rgNotes,     setRgNotes]     = useState(ex('raingauge_problem_notes')?.value_text ?? '');
+
+  // Gauge + site
   const [gaugeCondition, setGaugeCondition] = useState(ex('gauge_condition')?.value_text ?? null);
   const [gaugeReading,   setGaugeReading]   = useState(ex('gauge_reading')?.value_numeric != null ? String(ex('gauge_reading').value_numeric) : '');
-  const [lastEmptied,    setLastEmptied]    = useState(isoToLocalInput(ex('last_emptied')?.value_text));
-  const [battery,        setBattery]        = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
-  const [memory,         setMemory]         = useState(ex('memory_used_pct')?.value_numeric != null ? String(ex('memory_used_pct').value_numeric) : '');
-  const [siteCondition,  setSiteCondition]  = useState(ex('overall_site_condition')?.value_text ?? null);
-  const [saveState,      setSaveState]      = useState('idle');
+  const [lastEmptied,    setLastEmptied]     = useState(isoToLocalInput(ex('last_emptied')?.value_text));
+  const [didTip,         setDidTip]          = useState(() => { const r = ex('did_tip'); return r ? r.value_text === 'yes' : null; });
+  const [siteCondition,  setSiteCondition]   = useState(ex('overall_site_condition')?.value_text ?? null);
+  const [saveState,      setSaveState]       = useState('idle');
 
-  const isProblematic = PROBLEMATIC_EVENTS.has(eventType);
-  const isPseudo      = eventType === 'pseudo_events';
-
-  // event_type is handled by EventTypeField internally (auto-saves on select)
-  // this callback just keeps local state in sync
-  function handleEventTypeChange(val) {
-    setEventType(val);
+  function toggleAct(setFn, value) {
+    setFn(prev => {
+      const next = new Set(prev);
+      next.has(value) ? next.delete(value) : next.add(value);
+      return next;
+    });
   }
 
-  async function handleDidTip(val) {
-    if (val === didTip) return;
-    const prev = didTip;
-    setDidTip(val);
-    try {
-      await onSave({ reading_type: 'did_tip', value_text: val ? 'yes' : 'no', recorded_at: new Date().toISOString() });
-    } catch (_) {
-      setDidTip(prev); // revert on failure
-    }
-  }
+  const hasLoggerDeploy   = loggerActs.has('logger_deploy');
+  const hasLoggerProblem  = [...loggerActs].some(v => LOGGER_PROBLEM.has(v));
+  const hasRgDeploy       = rgActs.has('raingauge_deploy');
+  const hasRgCal          = rgActs.has('raingauge_calibrate') || rgActs.has('raingauge_calibration_check');
+  const hasRgProblem      = [...rgActs].some(v => RAINGAUGE_PROBLEM.has(v));
 
   async function handleSaveAll() {
     setSaveState('saving');
     const now = new Date().toISOString();
     const saves = [];
-    if (gaugeCondition)                    saves.push(onSave({ reading_type: 'gauge_condition',   value_text:    gaugeCondition,                        recorded_at: now }));
-    if (gaugeReading)                      saves.push(onSave({ reading_type: 'gauge_reading',     value_numeric: parseFloat(gaugeReading), unit: 'mm',   recorded_at: now }));
-    if (lastEmptied)                       saves.push(onSave({ reading_type: 'last_emptied',      value_text:    new Date(lastEmptied).toISOString(),    recorded_at: now }));
-    if (battery)                           saves.push(onSave({ reading_type: 'battery_voltage',   value_numeric: parseFloat(battery),      unit: '%',    recorded_at: now }));
-    if (memory)                            saves.push(onSave({ reading_type: 'memory_used_pct',   value_numeric: parseFloat(memory),       unit: '%',    recorded_at: now }));
-    if (isProblematic && problemNotes)     saves.push(onSave({ reading_type: 'event_problem_notes', value_text:  problemNotes, recorded_at: now }));
-    if (didTip !== null && !isPseudo)      saves.push(onSave({ reading_type: 'did_tip', value_text: didTip ? 'yes' : 'no', recorded_at: now }));
-    if (siteCondition)                     saves.push(onSave({ reading_type: 'overall_site_condition', value_text: siteCondition, recorded_at: now }));
+
+    // Activities as JSON arrays
+    if (loggerActs.size > 0)
+      saves.push(onSave({ reading_type: 'logger_activities', value_text: JSON.stringify([...loggerActs]), recorded_at: now }));
+    if (rgActs.size > 0)
+      saves.push(onSave({ reading_type: 'raingauge_activities', value_text: JSON.stringify([...rgActs]), recorded_at: now }));
+
+    // Logger deploy → instrument_history
+    if (hasLoggerDeploy && loggerSerial.trim())
+      saves.push(createInstrumentRecord(stationId, {
+        instrument_type: 'datalogger', serial_no: loggerSerial.trim(),
+        mm_per_tip: null, visit_id: visitId,
+        notes: 'Recorded on-site by technician during visit',
+      }));
+
+    if (hasLoggerProblem && loggerNotes.trim())
+      saves.push(onSave({ reading_type: 'logger_problem_notes', value_text: loggerNotes, recorded_at: now }));
+    if (battery)
+      saves.push(onSave({ reading_type: 'battery_voltage', value_numeric: parseFloat(battery), unit: '%', recorded_at: now }));
+    if (memory)
+      saves.push(onSave({ reading_type: 'memory_used_pct', value_numeric: parseFloat(memory), unit: '%', recorded_at: now }));
+
+    // Raingauge deploy → instrument_history
+    if (hasRgDeploy && rgSerial.trim())
+      saves.push(createInstrumentRecord(stationId, {
+        instrument_type: 'raingauge', serial_no: rgSerial.trim(),
+        mm_per_tip: rgMmPerTip ? parseFloat(rgMmPerTip) : 0.254,
+        visit_id: visitId,
+        notes: 'Recorded on-site by technician during visit',
+      }));
+
+    // Raingauge calibration → instrument_history (requires both serial and mm/tip)
+    if (hasRgCal && rgCalSerial.trim() && rgCalMm)
+      saves.push(createInstrumentRecord(stationId, {
+        instrument_type: 'raingauge', serial_no: rgCalSerial.trim(),
+        mm_per_tip: parseFloat(rgCalMm), visit_id: visitId,
+        notes: rgActs.has('raingauge_calibrate') ? 'Calibration recorded on-site' : 'Calibration check — factor confirmed',
+      }));
+
+    if (hasRgProblem && rgNotes.trim())
+      saves.push(onSave({ reading_type: 'raingauge_problem_notes', value_text: rgNotes, recorded_at: now }));
+    if (gaugeCondition)
+      saves.push(onSave({ reading_type: 'gauge_condition', value_text: gaugeCondition, recorded_at: now }));
+    if (gaugeReading)
+      saves.push(onSave({ reading_type: 'gauge_reading', value_numeric: parseFloat(gaugeReading), unit: 'mm', recorded_at: now }));
+    if (lastEmptied)
+      saves.push(onSave({ reading_type: 'last_emptied', value_text: new Date(lastEmptied).toISOString(), recorded_at: now }));
+    if (didTip !== null)
+      saves.push(onSave({ reading_type: 'did_tip', value_text: didTip ? 'yes' : 'no', recorded_at: now }));
+    if (siteCondition)
+      saves.push(onSave({ reading_type: 'overall_site_condition', value_text: siteCondition, recorded_at: now }));
+
     try {
       await Promise.all(saves);
       setSaveState('idle');
@@ -550,42 +523,148 @@ function RainfallForm({ saved, onSave, onDelete }) {
     }
   }
 
-  const canSave = !!eventType && (isPseudo || didTip !== null) && !!gaugeCondition && !!siteCondition;
+  const canSave = loggerActs.size > 0 && rgActs.size > 0 && !!gaugeCondition && !!siteCondition;
 
   return (
     <>
-      {/* Event type — auto-saves on select */}
-      <EventTypeField
-        existingReading={ex('event_type')}
-        onSave={onSave}
-        onEventTypeChange={handleEventTypeChange}
-      />
+      {/* ── LOGGER ──────────────────────────────────────────────── */}
+      <SectionDivider label="Logger" />
 
-      {/* Did you tip the bucket? */}
-      {eventType && !isPseudo && (
-        <div className="form-card">
-          <div className="text-[12px] font-semibold text-text-dark mb-2">
-            Did you tip the bucket manually?
-            {didTip === null && <span style={{ color: 'var(--color-error)', marginLeft: 4 }}>*</span>}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="note-chip" data-selected={didTip === true  ? 'true' : undefined} onClick={() => handleDidTip(true)}  style={{ flex: 1 }}>Yes</button>
-            <button className="note-chip" data-selected={didTip === false ? 'true' : undefined} onClick={() => handleDidTip(false)} style={{ flex: 1 }}>No</button>
-          </div>
+      <div className="form-card">
+        <div className="text-[12px] font-semibold text-text-dark mb-2">
+          What happened with the logger? <span className="text-warning text-[11px]">*</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {LOGGER_ACTS.map(opt => (
+            <button key={opt.value}
+              data-selected={loggerActs.has(opt.value) ? 'true' : undefined}
+              onClick={() => toggleAct(setLoggerActs, opt.value)}
+              className="note-chip">
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {hasLoggerDeploy && (
+        <div className="form-card" style={{ borderColor: '#BBF7D0' }}>
+          <div className="text-[12px] font-semibold text-text-dark mb-2">New logger serial no.</div>
+          <input type="text" value={loggerSerial} onChange={e => setLoggerSerial(e.target.value)}
+            placeholder="From instrument label"
+            className={`field-input w-full ${loggerSerial ? 'field-input--active' : ''}`}
+            style={{ height: 36 }} />
         </div>
       )}
 
-      {/* Problem notes */}
-      {isProblematic && !isPseudo && (
+      {hasLoggerProblem && (
         <div className="form-card" style={{ borderColor: '#FDE68A' }}>
-          <div className="text-[12px] font-semibold text-text-dark mb-1">Describe what you found <span className="text-warning text-[11px]">*</span></div>
-          <textarea value={problemNotes} onChange={e => { setProblemNotes(e.target.value); }}
-            placeholder="e.g. Logger was missing from mount — bracket broken." rows={3}
-            className="notes-textarea w-full" />
+          <div className="text-[12px] font-semibold text-text-dark mb-1">
+            Describe what you found <span className="text-warning text-[11px]">*</span>
+          </div>
+          <textarea value={loggerNotes} onChange={e => setLoggerNotes(e.target.value)}
+            placeholder="e.g. Logger was missing from mount — bracket broken. No data since last visit."
+            rows={3} className="notes-textarea w-full" />
         </div>
       )}
 
-      {/* Gauge condition */}
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-1.5">
+          <div className="text-[12px] font-semibold text-text-dark">Logger battery</div>
+          <span className="text-[10px] text-text-light">From HOBO display (Optional)</span>
+        </div>
+        <div className="relative">
+          <input type="number" step="1" value={battery} onChange={e => setBattery(e.target.value)}
+            placeholder="e.g. 87"
+            className={`field-input w-full ${battery ? 'field-input--active' : ''}`}
+            style={{ height: '38px', paddingRight: '44px' }} />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">%</span>
+        </div>
+      </div>
+
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-1.5">
+          <div className="text-[12px] font-semibold text-text-dark">Logger memory used</div>
+          <span className="text-[10px] text-text-light">From HOBO display (Optional)</span>
+        </div>
+        <div className="relative">
+          <input type="number" step="1" value={memory} onChange={e => setMemory(e.target.value)}
+            placeholder="e.g. 45"
+            className={`field-input w-full ${memory ? 'field-input--active' : ''}`}
+            style={{ height: '38px', paddingRight: '44px' }} />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">%</span>
+        </div>
+      </div>
+
+      {/* ── RAINGAUGE ────────────────────────────────────────────── */}
+      <SectionDivider label="Raingauge" />
+
+      <div className="form-card">
+        <div className="text-[12px] font-semibold text-text-dark mb-2">
+          What happened with the raingauge? <span className="text-warning text-[11px]">*</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {RAINGAUGE_ACTS.map(opt => (
+            <button key={opt.value}
+              data-selected={rgActs.has(opt.value) ? 'true' : undefined}
+              onClick={() => toggleAct(setRgActs, opt.value)}
+              className="note-chip">
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {hasRgDeploy && (
+        <div className="form-card" style={{ borderColor: '#BBF7D0' }}>
+          <div className="text-[12px] font-semibold text-text-dark mb-2">New raingauge</div>
+          <div className="flex flex-col gap-2">
+            <input type="text" value={rgSerial} onChange={e => setRgSerial(e.target.value)}
+              placeholder="New serial no. (from instrument label)"
+              className={`field-input w-full ${rgSerial ? 'field-input--active' : ''}`}
+              style={{ height: 36 }} />
+            <div className="relative">
+              <input type="number" step="0.001" value={rgMmPerTip} onChange={e => setRgMmPerTip(e.target.value)}
+                placeholder="mm per tip — leave blank for 0.254 default"
+                className={`field-input w-full ${rgMmPerTip ? 'field-input--active' : ''}`}
+                style={{ height: 36, paddingRight: 60 }} />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">mm/tip</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hasRgCal && (
+        <div className="form-card" style={{ borderColor: '#DBEAFE' }}>
+          <div className="text-[12px] font-semibold text-text-dark mb-2">
+            {rgActs.has('raingauge_calibrate') ? 'Calibration details' : 'Calibration check'}
+          </div>
+          <div className="flex flex-col gap-2">
+            <input type="text" value={rgCalSerial} onChange={e => setRgCalSerial(e.target.value)}
+              placeholder="Current gauge serial no."
+              className={`field-input w-full ${rgCalSerial ? 'field-input--active' : ''}`}
+              style={{ height: 36 }} />
+            <div className="relative">
+              <input type="number" step="0.001" value={rgCalMm} onChange={e => setRgCalMm(e.target.value)}
+                placeholder="Confirmed mm per tip (e.g. 0.254)"
+                className={`field-input w-full ${rgCalMm ? 'field-input--active' : ''}`}
+                style={{ height: 36, paddingRight: 60 }} />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">mm/tip</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hasRgProblem && (
+        <div className="form-card" style={{ borderColor: '#FDE68A' }}>
+          <div className="text-[12px] font-semibold text-text-dark mb-1">
+            Describe what you found <span className="text-warning text-[11px]">*</span>
+          </div>
+          <textarea value={rgNotes} onChange={e => setRgNotes(e.target.value)}
+            placeholder="e.g. Raingauge was missing — mounting bracket removed."
+            rows={3} className="notes-textarea w-full" />
+        </div>
+      )}
+
       <div className="form-card">
         <div className="flex items-baseline justify-between mb-2">
           <div className="text-[12px] font-semibold text-text-dark">Raingauge condition <span className="text-warning text-[11px]">*</span></div>
@@ -594,62 +673,52 @@ function RainfallForm({ saved, onSave, onDelete }) {
         <div className="flex flex-wrap gap-1.5">
           {[{ value: 'good', label: 'Good' }, { value: 'debris', label: 'Debris inside' }, { value: 'damaged', label: 'Damaged' }, { value: 'submerged', label: 'Submerged' }, { value: 'missing', label: 'Missing' }].map(opt => (
             <button key={opt.value} data-selected={gaugeCondition === opt.value ? 'true' : undefined}
-              onClick={() => { setGaugeCondition(v => v === opt.value ? null : opt.value); }}
+              onClick={() => setGaugeCondition(v => v === opt.value ? null : opt.value)}
               className="note-chip">{opt.label}</button>
           ))}
         </div>
       </div>
 
-      {/* Gauge reading */}
       <div className="form-card">
         <div className="flex items-baseline justify-between mb-1.5">
           <div className="text-[12px] font-semibold text-text-dark">Rainfall accumulated in gauge</div>
           <span className="text-[10px] text-text-light">Optional</span>
         </div>
         <div className="relative">
-          <input type="number" step="0.01" value={gaugeReading} onChange={e => { setGaugeReading(e.target.value); }}
-            placeholder="0.0" className={`field-input w-full ${gaugeReading ? 'field-input--active' : ''}`} style={{ height: '38px', paddingRight: '44px' }} />
+          <input type="number" step="0.01" value={gaugeReading} onChange={e => setGaugeReading(e.target.value)}
+            placeholder="0.0"
+            className={`field-input w-full ${gaugeReading ? 'field-input--active' : ''}`}
+            style={{ height: '38px', paddingRight: '44px' }} />
           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">mm</span>
         </div>
       </div>
 
-      {/* Gauge last checked */}
       <div className="form-card">
         <div className="flex items-baseline justify-between mb-1.5">
           <div className="text-[12px] font-semibold text-text-dark">When did you last check the gauge?</div>
           <span className="text-[10px] text-text-light">Optional</span>
         </div>
-        <input type="datetime-local" value={lastEmptied} onChange={e => { setLastEmptied(e.target.value); }}
-          className={`field-input w-full ${lastEmptied ? 'field-input--active' : ''}`} style={{ height: '38px' }} />
+        <input type="datetime-local" value={lastEmptied} onChange={e => setLastEmptied(e.target.value)}
+          className={`field-input w-full ${lastEmptied ? 'field-input--active' : ''}`}
+          style={{ height: '38px' }} />
       </div>
 
-      {/* Battery */}
       <div className="form-card">
-        <div className="flex items-baseline justify-between mb-1.5">
-          <div className="text-[12px] font-semibold text-text-dark">Logger battery</div>
-          <span className="text-[10px] text-text-light">From HOBO display (Optional)</span>
+        <div className="text-[12px] font-semibold text-text-dark mb-2">
+          Did you tip the bucket manually?
+          {didTip === null && <span style={{ color: 'var(--color-error)', marginLeft: 4 }}>*</span>}
         </div>
-        <div className="relative">
-          <input type="number" step="1" value={battery} onChange={e => { setBattery(e.target.value); }}
-            placeholder="e.g. 87" className={`field-input w-full ${battery ? 'field-input--active' : ''}`} style={{ height: '38px', paddingRight: '44px' }} />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">%</span>
-        </div>
-      </div>
-
-      {/* Memory */}
-      <div className="form-card">
-        <div className="flex items-baseline justify-between mb-1.5">
-          <div className="text-[12px] font-semibold text-text-dark">Logger memory used</div>
-          <span className="text-[10px] text-text-light">From HOBO display (Optional)</span>
-        </div>
-        <div className="relative">
-          <input type="number" step="1" value={memory} onChange={e => { setMemory(e.target.value); }}
-            placeholder="e.g. 45" className={`field-input w-full ${memory ? 'field-input--active' : ''}`} style={{ height: '38px', paddingRight: '44px' }} />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">%</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="note-chip" data-selected={didTip === true  ? 'true' : undefined}
+            onClick={() => setDidTip(v => v === true  ? null : true)}  style={{ flex: 1 }}>Yes</button>
+          <button className="note-chip" data-selected={didTip === false ? 'true' : undefined}
+            onClick={() => setDidTip(v => v === false ? null : false)} style={{ flex: 1 }}>No</button>
         </div>
       </div>
 
-      {/* Overall site condition */}
+      {/* ── SITE ─────────────────────────────────────────────────── */}
+      <SectionDivider label="Site" />
+
       <div className="form-card">
         <div className="text-[13px] font-bold text-text-dark mb-3">
           Overall site condition <span className="text-warning text-[11px]">*</span>
@@ -661,20 +730,17 @@ function RainfallForm({ saved, onSave, onDelete }) {
             { value: 'poor',     label: 'Poor',     danger: true },
             { value: 'critical', label: 'Critical', danger: true },
           ].map(opt => (
-            <button
-              key={opt.value}
+            <button key={opt.value}
               data-selected={siteCondition === opt.value ? 'true' : undefined}
               data-danger={opt.danger ? 'true' : undefined}
               onClick={() => setSiteCondition(v => v === opt.value ? null : opt.value)}
-              className="note-chip"
-            >
+              className="note-chip">
               {opt.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Save button */}
       {saveState === 'error' && (
         <div className="text-[12px] text-error text-center mb-2">Save failed — check connection and try again.</div>
       )}
@@ -750,7 +816,7 @@ function MetForm({ saved, onSave }) {
 
 const FAMILY_LABEL = { rainfall: 'Rainfall', groundwater: 'Groundwater', met: 'Meteorological' };
 
-export default function ManualReadings({ visitId, dataFamily, onReadingsSaved }) {
+export default function ManualReadings({ visitId, stationId, dataFamily, onReadingsSaved }) {
   const [saved,    setSaved]    = useState([]);
   const [loaded,   setLoaded]   = useState(false);
   const [formKey,  setFormKey]  = useState(0);   // increment to remount fields after queue flush
@@ -864,7 +930,7 @@ export default function ManualReadings({ visitId, dataFamily, onReadingsSaved })
 
         {/* Family-specific fields + shared section — keyed so they remount after queue flush */}
         <div key={formKey}>
-          {dataFamily === 'rainfall'    && <RainfallForm    saved={saved} onSave={handleSave} onDelete={handleDelete} />}
+          {dataFamily === 'rainfall'    && <RainfallForm    saved={saved} onSave={handleSave} visitId={visitId} stationId={stationId} />}
           {dataFamily === 'groundwater' && <GroundwaterForm saved={saved} onSave={handleSave} />}
           {dataFamily === 'met'         && <MetForm         saved={saved} onSave={handleSave} />}
 

@@ -570,6 +570,7 @@ export function FieldApp({ onExit, embedded = false }) {
                 {visitSection === 'readings' && (
                   <ManualReadings
                     visitId={draftVisit.visitId}
+                    stationId={draftVisit.station.id}
                     dataFamily={draftVisit.station.data_family}
                     onReadingsSaved={() => setReadingsDone(true)}
                   />

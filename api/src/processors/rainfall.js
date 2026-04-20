@@ -1,9 +1,18 @@
 const db = require('../db/queries');
 const { log } = require('../middleware/logger');
 
-const RAIN_MM_PER_TIP      = 0.254;
+const DEFAULT_MM_PER_TIP   = 0.254; // fallback when no instrument_history exists
 const INTERFERE_WINDOW_MS  = 600_000;
 const ANOMALY_THRESHOLD_MM = 10;
+
+function getMmPerTip(periods, measuredAt) {
+  const ts = new Date(measuredAt).getTime();
+  let mm = DEFAULT_MM_PER_TIP;
+  for (const p of periods) {
+    if (new Date(p.effective_from).getTime() <= ts) mm = parseFloat(p.mm_per_tip);
+  }
+  return mm;
+}
 
 function to5MinBucket(date) {
   const d = new Date(date);
@@ -55,10 +64,11 @@ function classifyTips(tips, visitTimes, pseudoWindows) {
 }
 
 async function processRainfall(stationId) {
-  const [tips, visitTimes, rawPseudoWindows] = await Promise.all([
+  const [tips, visitTimes, rawPseudoWindows, calibrationPeriods] = await Promise.all([
     db.getRawTipsForStation(stationId),
     db.getVisitTimestampsForStation(stationId),
     db.getPseudoEventWindows(stationId),
+    db.getCalibrationPeriodsForStation(stationId),
   ]);
 
   // Discard inverted windows (start >= end) — data entry error
@@ -95,22 +105,24 @@ async function processRainfall(stationId) {
     const { flag, reason } = flagMap.get(tip.id);
     const bucket = to5MinBucket(tip.measured_at);
     const key    = `${tip.stream_id}|${bucket.toISOString()}`;
-    if (!buckets.has(key)) buckets.set(key, { streamId: tip.stream_id, bucket, all: 0, valid: 0, double_tip: 0, interfere: 0, pseudo_event: 0, manual_tip: 0, non_rainfall: 0 });
+    if (!buckets.has(key)) buckets.set(key, { streamId: tip.stream_id, bucket, rain_mm: 0, all: 0, valid: 0, double_tip: 0, interfere: 0, pseudo_event: 0, manual_tip: 0, non_rainfall: 0 });
     const b = buckets.get(key);
     b.all++;
-    if (flag === null)              b.valid++;
-    else if (flag === 'double_tip') b.double_tip++;
+    if (flag === null) {
+      b.valid++;
+      b.rain_mm += getMmPerTip(calibrationPeriods, tip.measured_at);
+    } else if (flag === 'double_tip') b.double_tip++;
     else if (flag === 'interfere')  b.interfere++;
     else if (flag === 'pseudo_event') {
       b.pseudo_event++;
-      if (reason === 'manual_tip')         b.manual_tip++;
+      if (reason === 'manual_tip')              b.manual_tip++;
       else if (reason === 'non_rainfall_entry') b.non_rainfall++;
     }
   }
 
   const rows = [];
   for (const [, b] of buckets) {
-    const rainMm = b.valid * RAIN_MM_PER_TIP;
+    const rainMm = b.rain_mm;
     rows.push({
       stationId,
       streamId:         b.streamId,

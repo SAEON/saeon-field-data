@@ -152,6 +152,28 @@ async function parseInBackground(fileRecord, visitId) {
       ms:         Date.now() - parseStart,
     });
 
+    // ── Serial mismatch detection ──────────────────────────────────────────
+    if (meta.serial) {
+      const station = await db.getStationById(visit.station_id);
+      if (station?.serial_no && station.serial_no !== meta.serial) {
+        log.warn('[parse] Datalogger serial mismatch', {
+          file_id:           fileRecord.id,
+          station_id:        visit.station_id,
+          registered_serial: station.serial_no,
+          file_serial:       meta.serial,
+        });
+        await db.createManualReading({
+          visitId:      fileRecord.visit_id,
+          readingType:  'serial_mismatch_detected',
+          valueText:    meta.serial,
+          valueNumeric: null,
+          unit:         null,
+          recordedAt:   new Date().toISOString(),
+          notes:        `File serial ${meta.serial} does not match registered ${station.serial_no}`,
+        });
+      }
+    }
+
     // ── Gap detection ──────────────────────────────────────────────────────
     const GAP_TOLERANCE_S = 21_600; // 6 hours — R spec rain_g_gaps.r default (6 * 60 * 60)
     if (resolvedStart) {
