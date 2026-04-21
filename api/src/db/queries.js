@@ -484,7 +484,11 @@ async function bulkInsertMeasurements(fileId, measurements) {
        $1::int[], $2::int[], $3::int[], $4::timestamptz[],
        $5::numeric[], $6::text[], $7::bool[]
      )
-     ON CONFLICT (stream_id, phenomenon_id, measured_at) DO NOTHING`,
+     ON CONFLICT (stream_id, phenomenon_id, measured_at) DO UPDATE SET
+       file_id        = EXCLUDED.file_id,
+       value_numeric  = EXCLUDED.value_numeric,
+       value_text     = EXCLUDED.value_text,
+       is_interference = EXCLUDED.is_interference`,
     [fileIds, streamIds, phenIds, timestamps, numerics, texts, interfs]
   );
 }

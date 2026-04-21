@@ -22,6 +22,8 @@ CREATE INDEX idx_visits_status       ON field_visits(status);
 CREATE INDEX idx_files_visit         ON uploaded_files(visit_id);
 CREATE INDEX idx_files_parse_status  ON uploaded_files(parse_status);
 CREATE INDEX idx_files_date_range    ON uploaded_files(date_range_start, date_range_end);
+CREATE INDEX idx_files_logger_label  ON uploaded_files(logger_label);
+CREATE INDEX idx_files_logger_serial ON uploaded_files(logger_serial);
 
 -- manual_readings
 CREATE INDEX idx_readings_visit      ON manual_readings(visit_id);
@@ -32,3 +34,4 @@ CREATE INDEX idx_meas_stream_time    ON raw_measurements(stream_id, measured_at 
 CREATE INDEX idx_meas_file           ON raw_measurements(file_id);
 CREATE INDEX idx_meas_phenomenon     ON raw_measurements(phenomenon_id);
 CREATE INDEX idx_meas_interference   ON raw_measurements(is_interference) WHERE is_interference = true;
+CREATE INDEX idx_meas_qa_flag        ON raw_measurements(stream_id, qa_flag) WHERE qa_flag IS NOT NULL;

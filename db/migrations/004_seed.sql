@@ -1,7 +1,10 @@
 -- =============================================================
 -- 004_seed.sql
 -- Run fourth. Inserts baseline reference data.
--- Edit the users block to match your actual staff before running.
+--
+-- Phenomena are required for the app to function — parsers and
+-- the rainfall processor look up phenomenon IDs by name.
+-- Users and stations are managed through the app (Keycloak + API).
 -- =============================================================
 
 
@@ -14,6 +17,7 @@ INSERT INTO phenomena (name, display_name, data_family, unit, measure, var_type)
 
   -- Rainfall
   ('rainfall_tot',        'Rainfall (total)',                   'rainfall',    'mm',    'total',   'numeric'),
+  ('rain_tip',            'Rainfall Tip Event',                 'rainfall',    'mm',    'sample',  'numeric'),
   ('logger_interference', 'Logger Interference Event',          'all',         '',      'sample',  'text'),
 
   -- Groundwater
@@ -31,13 +35,3 @@ INSERT INTO phenomena (name, display_name, data_family, unit, measure, var_type)
   ('solar_rad_avg',       'Solar Radiation (average)',          'met',         'W/m2',  'average', 'numeric'),
   ('atm_pressure_avg',    'Atmospheric Pressure (average)',     'met',         'hPa',   'average', 'numeric'),
   ('rain_tot',            'Rainfall Total (met station)',       'met',         'mm',    'total',   'numeric');
-
-
--- -------------------------------------------------------------
--- USERS
--- Replace / extend with your actual staff before running.
--- Passwords are handled by your auth layer — not stored here.
--- -------------------------------------------------------------
-INSERT INTO users (email, full_name, role) VALUES
-  ('jiyanes@saeon.ac.za',  'Samkelo',    'manager'),
-  ('marc@saeon.ac.za',     'Marc',       'technician');

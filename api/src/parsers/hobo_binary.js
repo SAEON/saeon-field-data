@@ -1,53 +1,39 @@
 'use strict';
 
-// HOBO UA-003-64 binary (.hobo) parser
-//
-// Binary format (reverse-engineered from 1C_latest.hobo + 1C.csv ground truth):
+// HOBO UA-003-64 Pendant Temp/Event binary (.hobo) parser
 //
 // FILE LAYOUT
 //   [4 bytes]  Magic "HOBO"
 //   [N bytes]  Header — TLV records:  0x88 | tag | length | data[length]
-//   [3 bytes]  End-of-header sentinel: 0xFF 0xFF 0xFF
-//   [M bytes]  Data section — nibble-aligned event records
+//   [1–4 bytes] End-of-header sentinel: one or more 0xFF bytes
+//   [M bytes]  Data section — 1-byte event records
 //
 // HEADER TAGS (key ones)
 //   0x05  model string
 //   0x06  serial number string
 //   0x07  launch timestamp [century*100+year, month, day, hour, min, sec, 0, 0]
-//          = when the logger was deployed in the field (anchor for forward time deltas)
-//          NOTE: stored in local time (CAT = UTC+2 for South African stations)
+//          stored in LOCAL time (CAT = UTC+2 for South African stations)
 //   0x0a  station label string
-//   0x14  timezone string (e.g. "Central African Time")
-//   0x18  channel name ("Rainfall")
+//   0x14  timezone string
+//   0x18  channel name
 //   0x19  mm per tip — big-endian float32 (e.g. 0.254)
-//   0x21  units string ("mm")
+//   0x21  units string
 //
-// DATA SECTION — NIBBLE-ALIGNED RECORDS
-//   Each record = 2 type nibbles + <lo> delta nibbles
-//     type_hi  = category (7 = sensor event / rainfall tip)
-//     type_lo  = number of subsequent nibbles encoding the time delta
-//     delta    = big-endian value assembled from type_lo nibbles (in seconds)
-//   Timestamps go FORWARD from the download timestamp.
-//   Only events with type_hi == 7 (0x7x) are rainfall tip events.
-//   Non-7x events (0x0x, 0x6x, etc.) are host/status events — ignored.
-//   Parsing stops when a delta exceeds MAX_DELTA_S (corruption guard).
+// DATA SECTION — 1-byte event records
+//   Each byte = [event_type: 4 bits (high) | delta_minutes: 4 bits (low)]
+//   Cursor advances by delta_minutes for every byte, starting from launch time.
+//   event_type == 7  → rainfall tip at current cursor time
+//   event_type == 1  → Host Connected (technician plugged in download cable)
 
-const MAX_DELTA_S = 86400 * 400; // 400 days — sanity cap
-
-// CAT (Central African Time) = UTC+2 offset in seconds.
-// All SAEON stations are in South Africa so this is always correct.
-const CAT_OFFSET_S = 2 * 3600;
+const CAT_OFFSET_S = 2 * 3600; // UTC+2
 
 function decodeTimestamp(b) {
-  // b[0]*100 + b[1] = full year (e.g. 20*100+25 = 2025)
-  // Bytes store LOCAL time; convert to UTC by subtracting CAT offset.
   const year  = b[0] * 100 + b[1];
-  const month = b[2] - 1; // 0-indexed for Date.UTC
+  const month = b[2] - 1;
   const localMs = Date.UTC(year, month, b[3], b[4], b[5], b[6]);
   return new Date(localMs - CAT_OFFSET_S * 1000);
 }
 
-// limit = byte offset where header TLV records end (first non-0x88 byte)
 function parseHeader(buf, limit) {
   const meta = {};
   let i = 4;
@@ -56,14 +42,14 @@ function parseHeader(buf, limit) {
     const len = buf[i + 2];
     const val = buf.slice(i + 3, i + 3 + len);
     switch (tag) {
-      case 0x05: meta.model     = val.toString(); break;
-      case 0x06: meta.serial    = val.toString(); break;
-      case 0x07: meta.downloaded = decodeTimestamp(val); break;
-      case 0x0a: meta.label     = val.toString(); break;
-      case 0x14: meta.timezone  = val.toString(); break;
-      case 0x18: meta.channel   = val.toString(); break;
-      case 0x19: meta.mmPerTip  = val.readFloatBE(0); break;
-      case 0x21: meta.units     = val.toString(); break;
+      case 0x05: meta.model    = val.toString(); break;
+      case 0x06: meta.serial   = val.toString(); break;
+      case 0x07: meta.launched = decodeTimestamp(val); break;
+      case 0x0a: meta.label    = val.toString(); break;
+      case 0x14: meta.timezone = val.toString(); break;
+      case 0x18: meta.channel  = val.toString(); break;
+      case 0x19: meta.mmPerTip = val.readFloatBE(0); break;
+      case 0x21: meta.units    = val.toString(); break;
     }
     i += 3 + len;
   }
@@ -75,7 +61,6 @@ async function parseHoboBinary(buf) {
     throw new Error('Not a HOBO binary file (missing HOBO magic)');
   }
 
-  // Find where header TLV records end (first non-0x88 byte = the FF sentinel)
   let headerEnd = 4;
   while (headerEnd < buf.length - 2 && buf[headerEnd] === 0x88) {
     headerEnd += 3 + buf[headerEnd + 2];
@@ -83,56 +68,29 @@ async function parseHoboBinary(buf) {
 
   const meta = parseHeader(buf, headerEnd);
 
-  if (!meta.downloaded) {
-    throw new Error('HOBO file missing download timestamp (tag 0x07)');
+  if (!meta.launched) {
+    throw new Error('HOBO file missing launch timestamp (tag 0x07)');
   }
   if (!meta.mmPerTip || meta.mmPerTip <= 0) {
     throw new Error('HOBO file missing or invalid mm-per-tip (tag 0x19)');
   }
 
-  // Skip the end-of-header sentinel (one or more 0xFF bytes)
   let dataStart = headerEnd;
   while (dataStart < buf.length && buf[dataStart] === 0xFF) dataStart++;
   if (dataStart >= buf.length) throw new Error('HOBO file: data section not found after header');
-  const dataSection = buf.slice(dataStart);
 
-  // Build nibble array
-  const nibbles = new Uint8Array(dataSection.length * 2);
-  for (let i = 0; i < dataSection.length; i++) {
-    nibbles[i * 2]     = dataSection[i] >> 4;
-    nibbles[i * 2 + 1] = dataSection[i] & 0xF;
-  }
-
-  // Parse nibble-aligned records, accumulate time forward from launch timestamp
-  let cursorMs = meta.downloaded.getTime();
   const tips          = [];
-  const connectEvents = []; // typeHi=0x1 = Host Connected (technician plugged cable in)
-  let npos = 0;
+  const connectEvents = [];
+  let cursorMs = meta.launched.getTime();
 
-  while (npos + 2 <= nibbles.length) {
-    const typeHi = nibbles[npos];
-    const typeLo = nibbles[npos + 1];
-    npos += 2;
-
-    if (npos + typeLo > nibbles.length) break;
-
-    let delta = 0;
-    for (let k = 0; k < typeLo; k++) {
-      delta = delta * 16 + nibbles[npos + k];
-    }
-    npos += typeLo;
-
-    if (delta > MAX_DELTA_S) break; // corrupted record — stop
-
-    cursorMs += delta * 1000;
+  for (let i = dataStart; i < buf.length; i++) {
+    const typeHi   = buf[i] >> 4;
+    const deltaMin = buf[i] & 0xF;
+    cursorMs += deltaMin * 60000;
 
     if (typeHi === 7) {
-      // Rainfall tip event
       tips.push(new Date(cursorMs));
     } else if (typeHi === 0x1) {
-      // Host Connected — the exact moment the technician plugged in the cable.
-      // Emitted as is_interference so the rainfall processor can anchor the
-      // ±10 min interfere window on the true visit time rather than date_range_end.
       connectEvents.push(new Date(cursorMs));
     }
   }
@@ -158,12 +116,12 @@ async function parseHoboBinary(buf) {
     streamName: 'raw_rainfall',
     measurements,
     metadata: {
-      label:            meta.label      || null,
-      serial:           meta.serial     || null,
-      model:            meta.model      || null,
-      timezone:         meta.timezone   || null,
-      mmPerTip:         meta.mmPerTip,
-      logger_launched_at:  meta.downloaded ? meta.downloaded.toISOString() : null,
+      label:               meta.label    || null,
+      serial:              meta.serial   || null,
+      model:               meta.model    || null,
+      timezone:            meta.timezone || null,
+      mmPerTip:            meta.mmPerTip,
+      logger_launched_at:  meta.launched.toISOString(),
       logger_downloaded_at: connectEvents.length
         ? connectEvents[connectEvents.length - 1].toISOString()
         : null,
