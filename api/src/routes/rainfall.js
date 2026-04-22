@@ -46,6 +46,17 @@ router.get('/:id/rainfall/summary', async (req, res, next) => {
   }
 });
 
+// GET /api/stations/:id/gaps
+router.get('/:id/gaps', async (req, res, next) => {
+  try {
+    const stationId = parseInt(req.params.id, 10);
+    const gaps = await db.getStationGaps(stationId);
+    res.json({ station_id: stationId, count: gaps.length, gaps });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/stations/:id/rainfall/process
 router.post('/:id/rainfall/process', requireRole('technician_lead'), async (req, res, next) => {
   try {

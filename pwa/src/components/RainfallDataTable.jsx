@@ -4,7 +4,7 @@
 // Reprocess button only renders when canReprocess === true.
 
 import { useState, useEffect, useRef } from 'react';
-import { getStationRainfall, processStationRainfall } from '../services/api.js';
+import { getStationRainfall, processStationRainfall, getStationGaps } from '../services/api.js';
 import RainfallTipChart from './RainfallTipChart.jsx';
 
 const RESOLUTIONS = [
@@ -68,7 +68,13 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
   const [reprocessing, setReprocessing] = useState(false);
   const [page,         setPage]         = useState(1);
   const [pageSize,     setPageSize]     = useState(50);
+  const [gaps,         setGaps]         = useState([]);
   const debounceRef = useRef(null);
+
+  useEffect(() => {
+    if (!stationId) { setGaps([]); return; }
+    getStationGaps(stationId).then(r => setGaps(r.gaps || [])).catch(() => {});
+  }, [stationId]);
 
   useEffect(() => {
     if (!stationId) { setData([]); return; }
@@ -267,6 +273,56 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
             {PAGE_SIZES.map(n => <option key={n} value={n}>{n} / page</option>)}
           </select>
         </div>
+      )}
+
+      {/* ── Data gaps ──────────────────────────────────────────── */}
+      {gaps.length > 0 && (
+        <>
+          <div style={{ height: 8, background: 'var(--color-surface-dark)' }} />
+          <div style={{ padding: '10px 16px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-text-light)', marginBottom: 8 }}>
+              Data gaps
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {gaps.map(g => {
+                const start    = new Date(g.gap_start).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
+                const end      = new Date(g.gap_end).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
+                const isManual = g.gap_type === 'documented';
+                return (
+                  <div key={g.id} style={{
+                    padding: '7px 10px', borderRadius: 8,
+                    background: g.is_problem ? '#FFF3E0' : 'var(--color-surface)',
+                    border: `1px solid ${g.is_problem ? '#E6510033' : 'var(--color-border)'}`,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 12, color: g.is_problem ? '#E65100' : 'var(--color-text-med)' }}>
+                          {start} — {end}
+                        </span>
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                          background: isManual ? '#E8F5E9' : 'var(--color-surface-dark)',
+                          color: isManual ? '#2E7D32' : 'var(--color-text-light)',
+                          border: `1px solid ${isManual ? '#2E7D3233' : 'var(--color-border)'}`,
+                        }}>
+                          {isManual ? 'Documented' : 'Missing data'}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: g.is_problem ? '#E65100' : 'var(--color-text-light)', whiteSpace: 'nowrap', marginLeft: 12 }}>
+                        {g.gap_days} day{g.gap_days !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    {g.notes && (
+                      <div style={{ fontSize: 11, color: '#795548', marginTop: 3 }}>
+                        {g.notes}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
       )}
     </>
   );

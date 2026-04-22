@@ -276,7 +276,8 @@ export function FieldApp({ onExit, embedded = false }) {
   const [abandoning,   setAbandoning]   = useState(false);
   const [showSubmit,   setShowSubmit]   = useState(false);
   const [submitting,   setSubmitting]   = useState(false);
-  const [readingsDone, setReadingsDone] = useState(false);
+  const [readingsDone,      setReadingsDone]      = useState(false);
+  const [loggerUnavailable, setLoggerUnavailable] = useState(false);
   const [detailsAllDone, setDetailsAllDone] = useState(false);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [installDismissed, setInstallDismissed] = useState(false);
@@ -456,7 +457,7 @@ export function FieldApp({ onExit, embedded = false }) {
 
   // Section completion
   const detailsDone = detailsAllDone;
-  const filesDone   = hasFiles;
+  const filesDone   = hasFiles || loggerUnavailable;
   const completionMap = { details: detailsDone, files: filesDone, readings: readingsDone };
 
   const canSubmit = draftVisit && detailsDone && filesDone && readingsDone;
@@ -573,6 +574,7 @@ export function FieldApp({ onExit, embedded = false }) {
                     stationId={draftVisit.station.id}
                     dataFamily={draftVisit.station.data_family}
                     onReadingsSaved={() => setReadingsDone(true)}
+                    onLoggerUnavailable={v => setLoggerUnavailable(v)}
                   />
                 )}
                 {visitSection === 'files' && (
@@ -582,6 +584,7 @@ export function FieldApp({ onExit, embedded = false }) {
                     files={visitFiles}
                     setFiles={setVisitFiles}
                     dataFamily={draftVisit.station.data_family}
+                    loggerUnavailable={loggerUnavailable}
                   />
                 )}
               </main>
@@ -596,7 +599,7 @@ export function FieldApp({ onExit, embedded = false }) {
                   {canSubmit ? 'Review & submit visit →'
                     : !detailsDone   ? 'Complete site notes to continue'
                     : !readingsDone  ? 'Complete manual readings to continue'
-                    : 'Upload a logger file to continue'}
+                    : 'Upload a logger file to continue'  /* only shown when !loggerUnavailable */}
                 </button>
               </div>
             </>

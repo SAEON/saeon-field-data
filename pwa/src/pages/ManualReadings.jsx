@@ -32,8 +32,11 @@ const RAINGAUGE_ACTS = [
   { value: 'pseudo_events',               label: 'Water entry' },
 ];
 
-const LOGGER_PROBLEM    = new Set(['logger_maintenance', 'logger_missing', 'logger_stopped', 'logger_decommission']);
-const RAINGAUGE_PROBLEM = new Set(['raingauge_maintenance', 'raingauge_missing', 'raingauge_decommission']);
+const RG_MAINT_CHECKS     = ['Interior clear', 'Funnel clear', 'Orifice cleared', 'Obstruction removed', 'Debris cleared', 'Bucket cleaned', 'Gauge levelled', 'Bracket secure', 'Brush cleared', 'Bucket test done'];
+const LOGGER_MAINT_CHECKS = ['Display checked', 'Battery changed', 'Cable intact', 'Connections checked', 'Memory full — reset', 'Memory reset', 'Logger relaunched', 'Mount secure', 'Enclosure inspected'];
+
+const LOGGER_PROBLEM    = new Set(['logger_missing', 'logger_stopped', 'logger_decommission']);
+const RAINGAUGE_PROBLEM = new Set(['raingauge_missing', 'raingauge_decommission']);
 
 
 // ── Save button ───────────────────────────────────────────────────────────────
@@ -425,20 +428,22 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
   const [rgActs,     setRgActs]     = useState(() => parseActs(ex('raingauge_activities')));
 
   // Logger-specific fields
-  const [loggerSerial, setLoggerSerial] = useState('');
-  const [loggerNotes,  setLoggerNotes]  = useState(ex('logger_problem_notes')?.value_text ?? '');
+  const [loggerSerial,      setLoggerSerial]      = useState('');
+  const [loggerNotes,       setLoggerNotes]        = useState(ex('logger_problem_notes')?.value_text ?? '');
+  const [loggerMaintChecks, setLoggerMaintChecks]  = useState(() => parseActs(ex('logger_maintenance_checks')));
   const [battery,      setBattery]      = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
   const [memory,       setMemory]       = useState(ex('memory_used_pct')?.value_numeric != null ? String(ex('memory_used_pct').value_numeric) : '');
 
   // Raingauge-specific fields
-  const [rgSerial,    setRgSerial]    = useState('');
-  const [rgMmPerTip,  setRgMmPerTip]  = useState('');
-  const [rgCalSerial, setRgCalSerial] = useState('');
-  const [rgCalMm,     setRgCalMm]     = useState('');
-  const [rgNotes,     setRgNotes]     = useState(ex('raingauge_problem_notes')?.value_text ?? '');
+  const [rgSerial,      setRgSerial]      = useState('');
+  const [rgMmPerTip,    setRgMmPerTip]    = useState('');
+  const [rgCalSerial,   setRgCalSerial]   = useState('');
+  const [rgCalMm,       setRgCalMm]       = useState('');
+  const [rgNotes,       setRgNotes]       = useState(ex('raingauge_problem_notes')?.value_text ?? '');
+  const [rgMaintChecks, setRgMaintChecks] = useState(() => parseActs(ex('raingauge_maintenance_checks')));
 
   // Gauge + site
-  const [gaugeCondition, setGaugeCondition] = useState(ex('gauge_condition')?.value_text ?? null);
+  const [gaugeCondition, setGaugeCondition] = useState(() => parseActs(ex('gauge_condition')));
   const [gaugeReading,   setGaugeReading]   = useState(ex('gauge_reading')?.value_numeric != null ? String(ex('gauge_reading').value_numeric) : '');
   const [lastEmptied,    setLastEmptied]     = useState(isoToLocalInput(ex('last_emptied')?.value_text));
   const [didTip,         setDidTip]          = useState(() => { const r = ex('did_tip'); return r ? r.value_text === 'yes' : null; });
@@ -453,11 +458,13 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
     });
   }
 
-  const hasLoggerDeploy   = loggerActs.has('logger_deploy');
-  const hasLoggerProblem  = [...loggerActs].some(v => LOGGER_PROBLEM.has(v));
+  const hasLoggerDeploy       = loggerActs.has('logger_deploy');
+  const hasLoggerMaintenance  = loggerActs.has('logger_maintenance') || loggerActs.has('logger_download');
+  const hasLoggerProblem      = [...loggerActs].some(v => LOGGER_PROBLEM.has(v));
   const hasRgDeploy       = rgActs.has('raingauge_deploy');
   const hasRgCal          = rgActs.has('raingauge_calibrate') || rgActs.has('raingauge_calibration_check');
   const hasRgProblem      = [...rgActs].some(v => RAINGAUGE_PROBLEM.has(v));
+  const hasMaintenance    = rgActs.has('raingauge_maintenance');
 
   async function handleSaveAll() {
     setSaveState('saving');
@@ -478,6 +485,8 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
         notes: 'Recorded on-site by technician during visit',
       }));
 
+    if (hasLoggerMaintenance && loggerMaintChecks.size > 0)
+      saves.push(onSave({ reading_type: 'logger_maintenance_checks', value_text: JSON.stringify([...loggerMaintChecks]), recorded_at: now }));
     if (hasLoggerProblem && loggerNotes.trim())
       saves.push(onSave({ reading_type: 'logger_problem_notes', value_text: loggerNotes, recorded_at: now }));
     if (battery)
@@ -502,10 +511,12 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
         notes: rgActs.has('raingauge_calibrate') ? 'Calibration recorded on-site' : 'Calibration check — factor confirmed',
       }));
 
+    if (hasMaintenance && rgMaintChecks.size > 0)
+      saves.push(onSave({ reading_type: 'raingauge_maintenance_checks', value_text: JSON.stringify([...rgMaintChecks]), recorded_at: now }));
     if (hasRgProblem && rgNotes.trim())
       saves.push(onSave({ reading_type: 'raingauge_problem_notes', value_text: rgNotes, recorded_at: now }));
-    if (gaugeCondition)
-      saves.push(onSave({ reading_type: 'gauge_condition', value_text: gaugeCondition, recorded_at: now }));
+    if (gaugeCondition.size > 0)
+      saves.push(onSave({ reading_type: 'gauge_condition', value_text: JSON.stringify([...gaugeCondition]), recorded_at: now }));
     if (gaugeReading)
       saves.push(onSave({ reading_type: 'gauge_reading', value_numeric: parseFloat(gaugeReading), unit: 'mm', recorded_at: now }));
     if (lastEmptied)
@@ -523,78 +534,11 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
     }
   }
 
-  const canSave = loggerActs.size > 0 && rgActs.size > 0 && !!gaugeCondition && !!siteCondition;
+  const canSave = loggerActs.size > 0 && rgActs.size > 0 && gaugeCondition.size > 0 && !!siteCondition
+    && (hasRgProblem || didTip !== null);
 
   return (
     <>
-      {/* ── LOGGER ──────────────────────────────────────────────── */}
-      <SectionDivider label="Logger" />
-
-      <div className="form-card">
-        <div className="text-[12px] font-semibold text-text-dark mb-2">
-          What happened with the logger? <span className="text-warning text-[11px]">*</span>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {LOGGER_ACTS.map(opt => (
-            <button key={opt.value}
-              data-selected={loggerActs.has(opt.value) ? 'true' : undefined}
-              onClick={() => toggleAct(setLoggerActs, opt.value)}
-              className="note-chip">
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {hasLoggerDeploy && (
-        <div className="form-card" style={{ borderColor: '#BBF7D0' }}>
-          <div className="text-[12px] font-semibold text-text-dark mb-2">New logger serial no.</div>
-          <input type="text" value={loggerSerial} onChange={e => setLoggerSerial(e.target.value)}
-            placeholder="From instrument label"
-            className={`field-input w-full ${loggerSerial ? 'field-input--active' : ''}`}
-            style={{ height: 36 }} />
-        </div>
-      )}
-
-      {hasLoggerProblem && (
-        <div className="form-card" style={{ borderColor: '#FDE68A' }}>
-          <div className="text-[12px] font-semibold text-text-dark mb-1">
-            Describe what you found <span className="text-warning text-[11px]">*</span>
-          </div>
-          <textarea value={loggerNotes} onChange={e => setLoggerNotes(e.target.value)}
-            placeholder="e.g. Logger was missing from mount — bracket broken. No data since last visit."
-            rows={3} className="notes-textarea w-full" />
-        </div>
-      )}
-
-      <div className="form-card">
-        <div className="flex items-baseline justify-between mb-1.5">
-          <div className="text-[12px] font-semibold text-text-dark">Logger battery</div>
-          <span className="text-[10px] text-text-light">From HOBO display (Optional)</span>
-        </div>
-        <div className="relative">
-          <input type="number" step="1" value={battery} onChange={e => setBattery(e.target.value)}
-            placeholder="e.g. 87"
-            className={`field-input w-full ${battery ? 'field-input--active' : ''}`}
-            style={{ height: '38px', paddingRight: '44px' }} />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">%</span>
-        </div>
-      </div>
-
-      <div className="form-card">
-        <div className="flex items-baseline justify-between mb-1.5">
-          <div className="text-[12px] font-semibold text-text-dark">Logger memory used</div>
-          <span className="text-[10px] text-text-light">From HOBO display (Optional)</span>
-        </div>
-        <div className="relative">
-          <input type="number" step="1" value={memory} onChange={e => setMemory(e.target.value)}
-            placeholder="e.g. 45"
-            className={`field-input w-full ${memory ? 'field-input--active' : ''}`}
-            style={{ height: '38px', paddingRight: '44px' }} />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">%</span>
-        </div>
-      </div>
-
       {/* ── RAINGAUGE ────────────────────────────────────────────── */}
       <SectionDivider label="Raingauge" />
 
@@ -654,10 +598,41 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
         </div>
       )}
 
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-2">
+          <div className="text-[12px] font-semibold text-text-dark">Raingauge condition <span className="text-warning text-[11px]">*</span></div>
+          <span className="text-[10px] text-text-light">How did you find the gauge?</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {[{ value: 'good', label: 'Good' }, { value: 'blocked', label: 'Blocked' }, { value: 'bucket_obstructed', label: 'Bucket obstructed' }, { value: 'orifice_missing', label: 'Orifice missing' }, { value: 'debris', label: 'Debris inside' }, { value: 'damaged', label: 'Damaged' }, { value: 'submerged', label: 'Submerged' }].map(opt => (
+            <button key={opt.value} data-selected={gaugeCondition.has(opt.value) ? 'true' : undefined}
+              onClick={() => toggleAct(setGaugeCondition, opt.value)}
+              className="note-chip">{opt.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {hasMaintenance && (
+        <div className="form-card">
+          <div className="text-[12px] font-semibold text-text-dark mb-1.5">Raingauge checks</div>
+          <div className="text-[11px] text-text-light mb-2.5">Select all that apply.</div>
+          <div className="flex flex-wrap gap-1.5">
+            {RG_MAINT_CHECKS.map(opt => (
+              <button key={opt}
+                data-selected={rgMaintChecks.has(opt) ? 'true' : undefined}
+                onClick={() => toggleAct(setRgMaintChecks, opt)}
+                className="note-chip">
+                {opt}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {hasRgProblem && (
         <div className="form-card" style={{ borderColor: '#FDE68A' }}>
           <div className="text-[12px] font-semibold text-text-dark mb-1">
-            Describe what you found <span className="text-warning text-[11px]">*</span>
+            Notes <span className="text-warning text-[11px]">*</span>
           </div>
           <textarea value={rgNotes} onChange={e => setRgNotes(e.target.value)}
             placeholder="e.g. Raingauge was missing — mounting bracket removed."
@@ -665,56 +640,147 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
         </div>
       )}
 
+      {!hasRgProblem && (
+        <>
+          <div className="form-card">
+            <div className="flex items-baseline justify-between mb-1.5">
+              <div className="text-[12px] font-semibold text-text-dark">Rainfall accumulated in gauge</div>
+              <span className="text-[10px] text-text-light">Optional</span>
+            </div>
+            <div className="relative" style={{ display: 'inline-block' }}>
+              <input type="number" step="0.01" value={gaugeReading} onChange={e => setGaugeReading(e.target.value)}
+                placeholder="0.0"
+                className={`field-input ${gaugeReading ? 'field-input--active' : ''}`}
+                style={{ height: '36px', width: 120, paddingRight: '34px' }} />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">mm</span>
+            </div>
+          </div>
+
+          <div className="form-card">
+            <div className="flex items-baseline justify-between mb-1.5">
+              <div className="text-[12px] font-semibold text-text-dark">When did you last check the gauge?</div>
+              <span className="text-[10px] text-text-light">Optional</span>
+            </div>
+            <div className="flex gap-2.5">
+              <div className="flex-1">
+                <div className="text-[11px] text-text-light font-medium mb-1">Date</div>
+                <input type="date"
+                  value={lastEmptied ? lastEmptied.slice(0, 10) : ''}
+                  onChange={e => setLastEmptied(e.target.value + 'T' + (lastEmptied ? lastEmptied.slice(11) : '00:00'))}
+                  className={`field-input ${lastEmptied ? 'field-input--active' : ''}`} />
+              </div>
+              <div className="flex-1">
+                <div className="text-[11px] text-text-light font-medium mb-1">Time</div>
+                <input type="time"
+                  value={lastEmptied ? lastEmptied.slice(11) : ''}
+                  onChange={e => setLastEmptied((lastEmptied ? lastEmptied.slice(0, 10) : new Date().toISOString().slice(0, 10)) + 'T' + e.target.value)}
+                  className={`field-input ${lastEmptied ? 'field-input--active' : ''}`} />
+              </div>
+            </div>
+          </div>
+
+          <div className="form-card">
+            <div className="text-[12px] font-semibold text-text-dark mb-2">
+              Did you tip the bucket manually?
+              {didTip === null && <span style={{ color: 'var(--color-error)', marginLeft: 4 }}>*</span>}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <button className="note-chip" data-selected={didTip === true  ? 'true' : undefined}
+                onClick={() => setDidTip(v => v === true  ? null : true)}>Yes</button>
+              <button className="note-chip" data-selected={didTip === false ? 'true' : undefined}
+                onClick={() => setDidTip(v => v === false ? null : false)}>No</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── LOGGER ──────────────────────────────────────────────── */}
+      <SectionDivider label="Logger" />
+
       <div className="form-card">
-        <div className="flex items-baseline justify-between mb-2">
-          <div className="text-[12px] font-semibold text-text-dark">Raingauge condition <span className="text-warning text-[11px]">*</span></div>
-          <span className="text-[10px] text-text-light">How did you find the gauge?</span>
+        <div className="text-[12px] font-semibold text-text-dark mb-2">
+          What happened with the logger? <span className="text-warning text-[11px]">*</span>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {[{ value: 'good', label: 'Good' }, { value: 'debris', label: 'Debris inside' }, { value: 'damaged', label: 'Damaged' }, { value: 'submerged', label: 'Submerged' }, { value: 'missing', label: 'Missing' }].map(opt => (
-            <button key={opt.value} data-selected={gaugeCondition === opt.value ? 'true' : undefined}
-              onClick={() => setGaugeCondition(v => v === opt.value ? null : opt.value)}
-              className="note-chip">{opt.label}</button>
+          {LOGGER_ACTS.map(opt => (
+            <button key={opt.value}
+              data-selected={loggerActs.has(opt.value) ? 'true' : undefined}
+              onClick={() => toggleAct(setLoggerActs, opt.value)}
+              className="note-chip">
+              {opt.label}
+            </button>
           ))}
         </div>
       </div>
 
-      <div className="form-card">
-        <div className="flex items-baseline justify-between mb-1.5">
-          <div className="text-[12px] font-semibold text-text-dark">Rainfall accumulated in gauge</div>
-          <span className="text-[10px] text-text-light">Optional</span>
+      {hasLoggerDeploy && (
+        <div className="form-card" style={{ borderColor: '#BBF7D0' }}>
+          <div className="text-[12px] font-semibold text-text-dark mb-2">New logger serial no.</div>
+          <input type="text" value={loggerSerial} onChange={e => setLoggerSerial(e.target.value)}
+            placeholder="From instrument label"
+            className={`field-input w-full ${loggerSerial ? 'field-input--active' : ''}`}
+            style={{ height: 36 }} />
         </div>
-        <div className="relative">
-          <input type="number" step="0.01" value={gaugeReading} onChange={e => setGaugeReading(e.target.value)}
-            placeholder="0.0"
-            className={`field-input w-full ${gaugeReading ? 'field-input--active' : ''}`}
-            style={{ height: '38px', paddingRight: '44px' }} />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-text-light pointer-events-none">mm</span>
-        </div>
-      </div>
+      )}
 
-      <div className="form-card">
-        <div className="flex items-baseline justify-between mb-1.5">
-          <div className="text-[12px] font-semibold text-text-dark">When did you last check the gauge?</div>
-          <span className="text-[10px] text-text-light">Optional</span>
+      {!hasLoggerProblem && (
+        <div className="form-card">
+          <div className="flex items-baseline justify-between mb-2">
+            <div className="text-[12px] font-semibold text-text-dark">Logger readings</div>
+            <span className="text-[10px] text-text-light">From HOBO display (Optional)</span>
+          </div>
+          <div className="flex gap-8">
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-text-light font-medium">Battery</span>
+              <div className="relative">
+                <input type="number" step="1" min="0" max="100" value={battery} onChange={e => setBattery(e.target.value)}
+                  placeholder="—"
+                  className={`field-input ${battery ? 'field-input--active' : ''}`}
+                  style={{ height: '36px', width: 120, paddingRight: '28px' }} />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">%</span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-text-light font-medium">Memory used</span>
+              <div className="relative">
+                <input type="number" step="1" min="0" max="100" value={memory} onChange={e => setMemory(e.target.value)}
+                  placeholder="—"
+                  className={`field-input ${memory ? 'field-input--active' : ''}`}
+                  style={{ height: '36px', width: 120, paddingRight: '28px' }} />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">%</span>
+              </div>
+            </div>
+          </div>
         </div>
-        <input type="datetime-local" value={lastEmptied} onChange={e => setLastEmptied(e.target.value)}
-          className={`field-input w-full ${lastEmptied ? 'field-input--active' : ''}`}
-          style={{ height: '38px' }} />
-      </div>
+      )}
 
-      <div className="form-card">
-        <div className="text-[12px] font-semibold text-text-dark mb-2">
-          Did you tip the bucket manually?
-          {didTip === null && <span style={{ color: 'var(--color-error)', marginLeft: 4 }}>*</span>}
+      {hasLoggerMaintenance && (
+        <div className="form-card">
+          <div className="text-[12px] font-semibold text-text-dark mb-1.5">Logger checks</div>
+          <div className="text-[11px] text-text-light mb-2.5">Select all that apply.</div>
+          <div className="flex flex-wrap gap-1.5">
+            {LOGGER_MAINT_CHECKS.map(opt => (
+              <button key={opt}
+                data-selected={loggerMaintChecks.has(opt) ? 'true' : undefined}
+                onClick={() => toggleAct(setLoggerMaintChecks, opt)}
+                className="note-chip">
+                {opt}
+              </button>
+            ))}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="note-chip" data-selected={didTip === true  ? 'true' : undefined}
-            onClick={() => setDidTip(v => v === true  ? null : true)}  style={{ flex: 1 }}>Yes</button>
-          <button className="note-chip" data-selected={didTip === false ? 'true' : undefined}
-            onClick={() => setDidTip(v => v === false ? null : false)} style={{ flex: 1 }}>No</button>
+      )}
+
+      {hasLoggerProblem && (
+        <div className="form-card" style={{ borderColor: '#FDE68A' }}>
+          <div className="text-[12px] font-semibold text-text-dark mb-1">
+            Notes <span className="text-warning text-[11px]">*</span>
+          </div>
+          <textarea value={loggerNotes} onChange={e => setLoggerNotes(e.target.value)}
+            placeholder="e.g. Logger was missing from mount — bracket broken. No data since last visit."
+            rows={3} className="notes-textarea w-full" />
         </div>
-      </div>
+      )}
 
       {/* ── SITE ─────────────────────────────────────────────────── */}
       <SectionDivider label="Site" />
@@ -816,7 +882,7 @@ function MetForm({ saved, onSave }) {
 
 const FAMILY_LABEL = { rainfall: 'Rainfall', groundwater: 'Groundwater', met: 'Meteorological' };
 
-export default function ManualReadings({ visitId, stationId, dataFamily, onReadingsSaved }) {
+export default function ManualReadings({ visitId, stationId, dataFamily, onReadingsSaved, onLoggerUnavailable }) {
   const [saved,    setSaved]    = useState([]);
   const [loaded,   setLoaded]   = useState(false);
   const [formKey,  setFormKey]  = useState(0);   // increment to remount fields after queue flush
@@ -835,6 +901,17 @@ export default function ManualReadings({ visitId, stationId, dataFamily, onReadi
 
   // Signal completion once all required readings are saved
   useEffect(() => {
+    // Detect logger unavailable — notify parent so upload step can be skipped (or re-enabled)
+    const loggerActsReading = saved.find(r => r.reading_type === 'logger_activities');
+    let isUnavailable = false;
+    if (loggerActsReading?.value_text) {
+      try {
+        const acts = JSON.parse(loggerActsReading.value_text);
+        isUnavailable = acts.some(a => LOGGER_PROBLEM.has(a));
+      } catch {}
+    }
+    onLoggerUnavailable?.(isUnavailable);
+
     if (calledDone.current) return;
     const required = REQUIRED_TYPES[dataFamily] || [];
     if (required.length === 0) return;
@@ -843,7 +920,7 @@ export default function ManualReadings({ visitId, stationId, dataFamily, onReadi
       calledDone.current = true;
       onReadingsSaved?.();
     }
-  }, [saved, dataFamily, onReadingsSaved]);
+  }, [saved, dataFamily, onReadingsSaved]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Flush queued readings when reconnected (2.5s debounce for network stabilisation)
   useEffect(() => {

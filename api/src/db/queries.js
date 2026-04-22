@@ -323,16 +323,17 @@ async function updateFileParseError(id, errorMessage) {
   return result.rows[0] || null;
 }
 
-async function getPriorCoverageEnd(stationId, streamName, excludeFileId) {
+async function getPriorCoverageEnd(stationId, streamName, excludeFileId, beforeDate) {
   const result = await pool.query(
     `SELECT MAX(uf.date_range_end) AS prior_end
      FROM   uploaded_files uf
      JOIN   field_visits   fv ON fv.id = uf.visit_id
-     WHERE  fv.station_id   = $1
-       AND  uf.stream_name  = $2
-       AND  uf.parse_status = 'parsed'
-       AND  uf.id          != $3`,
-    [stationId, streamName, excludeFileId]
+     WHERE  fv.station_id      = $1
+       AND  uf.stream_name     = $2
+       AND  uf.parse_status    = 'parsed'
+       AND  uf.id             != $3
+       AND  uf.date_range_end <= $4`,
+    [stationId, streamName, excludeFileId, beforeDate]
   );
   return result.rows[0]?.prior_end ?? null;
 }
@@ -369,6 +370,87 @@ async function getFilesWithGaps() {
      JOIN   users           u  ON u.id  = fv.technician_id
      WHERE  uf.has_gap = true
      ORDER  BY uf.gap_days DESC NULLS LAST, uf.uploaded_at DESC`
+  );
+  return result.rows;
+}
+
+// ── Station gaps ─────────────────────────────────────────────────────────────
+
+async function getFilesForGapProcessing(stationId) {
+  const result = await pool.query(
+    `SELECT uf.id, uf.date_range_start, uf.date_range_end, sds.id AS stream_id
+     FROM   uploaded_files uf
+     JOIN   field_visits   fv  ON fv.id  = uf.visit_id
+     JOIN   station_data_streams sds ON sds.station_id = fv.station_id
+                                    AND sds.stream_name = uf.stream_name
+     WHERE  fv.station_id      = $1
+       AND  uf.parse_status    = 'parsed'
+       AND  uf.date_range_start IS NOT NULL
+       AND  uf.date_range_end   IS NOT NULL
+     ORDER  BY uf.date_range_start ASC`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+async function getVisitNotesInGap(stationId, gapStart, gapEnd) {
+  const result = await pool.query(
+    `SELECT fv.id AS visit_id, fv.visited_at,
+            la.value_text AS logger_activities,
+            pn.value_text AS problem_notes
+     FROM   field_visits fv
+     JOIN   manual_readings la ON la.visit_id = fv.id AND la.reading_type = 'logger_activities'
+     LEFT JOIN manual_readings pn ON pn.visit_id = fv.id AND pn.reading_type = 'logger_problem_notes'
+     WHERE  fv.station_id = $1
+       AND  fv.visited_at >= $2
+       AND  fv.visited_at <= $3`,
+    [stationId, gapStart, gapEnd]
+  );
+  return result.rows;
+}
+
+async function upsertStationGaps(gaps) {
+  if (!gaps.length) return;
+  for (const g of gaps) {
+    await pool.query(
+      `INSERT INTO station_gaps (station_id, stream_id, gap_start, gap_end, gap_seconds, gap_days, is_problem, gap_type, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (stream_id, gap_start) DO UPDATE SET
+         gap_end     = EXCLUDED.gap_end,
+         gap_seconds = EXCLUDED.gap_seconds,
+         gap_days    = EXCLUDED.gap_days,
+         is_problem  = EXCLUDED.is_problem,
+         gap_type    = EXCLUDED.gap_type,
+         notes       = EXCLUDED.notes`,
+      [g.stationId, g.streamId, g.gapStart, g.gapEnd, g.gapSeconds, g.gapDays, g.isProblem, g.gapType, g.notes ?? null]
+    );
+  }
+}
+
+async function deleteStaleGaps(stationId, streamId, keepGapStarts) {
+  if (keepGapStarts.length === 0) {
+    await pool.query(
+      `DELETE FROM station_gaps WHERE station_id = $1 AND stream_id = $2`,
+      [stationId, streamId]
+    );
+  } else {
+    await pool.query(
+      `DELETE FROM station_gaps
+       WHERE station_id = $1
+         AND stream_id  = $2
+         AND gap_start  != ALL($3::timestamptz[])`,
+      [stationId, streamId, keepGapStarts]
+    );
+  }
+}
+
+async function getStationGaps(stationId) {
+  const result = await pool.query(
+    `SELECT id, gap_start, gap_end, gap_seconds, gap_days, is_problem, gap_type, notes
+     FROM   station_gaps
+     WHERE  station_id = $1
+     ORDER  BY gap_start ASC`,
+    [stationId]
   );
   return result.rows;
 }
@@ -1111,4 +1193,10 @@ module.exports = {
   getGroundwaterStationsMissingDipper,
   getFilesWithParseErrors,
   getStationDataCoverage,
+  // Gaps
+  getFilesForGapProcessing,
+  getVisitNotesInGap,
+  upsertStationGaps,
+  deleteStaleGaps,
+  getStationGaps,
 };

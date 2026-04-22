@@ -36,7 +36,7 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-export default function UploadFiles({ visitId, stationId, files, setFiles, dataFamily }) {
+export default function UploadFiles({ visitId, stationId, files, setFiles, dataFamily, loggerUnavailable = false }) {
   const acceptedFormats = Object.entries(FORMAT_MAP)
     .filter(([, v]) => !dataFamily || v.families.includes(dataFamily))
     .reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {});
@@ -250,41 +250,77 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
           </div>
         )}
 
-        {/* ── Drop zone ──────────────────────────────────────────── */}
-        <div
-          data-dragging={dragging ? 'true' : undefined}
-          onDragOver={e => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
-          onClick={() => fileInputRef.current.click()}
-          className="drop-zone"
-        >
-          <div className="text-[36px] mb-2.5">▢</div>
-          <div className="text-[14px] font-semibold text-text-dark mb-1">
-            {dragging ? 'Drop files here' : 'Tap to select logger files'}
+        {/* ── Logger unavailable notice / Drop zone ──────────────── */}
+        {loggerUnavailable ? (
+          <div
+            className="rounded-xl px-4 py-5 mb-4 flex flex-col gap-2"
+            style={{ background: '#FFF8E1', border: '1.5px solid #FFD54F' }}
+          >
+            <div className="text-[14px] font-bold" style={{ color: '#E65100' }}>
+              No file expected for this visit
+            </div>
+            <div className="text-[12px] leading-relaxed" style={{ color: '#795548' }}>
+              The logger was recorded as missing, stopped, or decommissioned. No download was possible — this visit can be submitted without a file.
+            </div>
+            <div className="text-[11px] font-semibold mt-1" style={{ color: '#9E9E9E' }}>
+              If you did manage to download data, you can still add a file below.
+            </div>
+            <div
+              className="drop-zone mt-2"
+              data-dragging={dragging ? 'true' : undefined}
+              onDragOver={e => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+              onClick={() => fileInputRef.current.click()}
+              style={{ marginBottom: 0 }}
+            >
+              <div className="text-[12px] text-text-light">Tap to add a file anyway</div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={acceptAttr}
+                onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
+                className="hidden"
+              />
+            </div>
           </div>
-          <div className="text-[12px] text-text-light mb-3 leading-relaxed">
-            or drag and drop from your device
-          </div>
+        ) : (
+          <div
+            data-dragging={dragging ? 'true' : undefined}
+            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+            onClick={() => fileInputRef.current.click()}
+            className="drop-zone"
+          >
+            <div className="text-[36px] mb-2.5">▢</div>
+            <div className="text-[14px] font-semibold text-text-dark mb-1">
+              {dragging ? 'Drop files here' : 'Tap to select logger files'}
+            </div>
+            <div className="text-[12px] text-text-light mb-3 leading-relaxed">
+              or drag and drop from your device
+            </div>
 
-          {/* Accepted format badges — filtered by station family */}
-          <div className="flex justify-center flex-wrap gap-1.5">
-            {Object.entries(acceptedFormats).map(([ext, fmt]) => (
-              <div key={ext} data-format={ext} className="format-badge">
-                {fmt.icon} .{ext}
-              </div>
-            ))}
-          </div>
+            {/* Accepted format badges — filtered by station family */}
+            <div className="flex justify-center flex-wrap gap-1.5">
+              {Object.entries(acceptedFormats).map(([ext, fmt]) => (
+                <div key={ext} data-format={ext} className="format-badge">
+                  {fmt.icon} .{ext}
+                </div>
+              ))}
+            </div>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={acceptAttr}
-            onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
-            className="hidden"
-          />
-        </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={acceptAttr}
+              onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
+              className="hidden"
+            />
+          </div>
+        )}
 
         {/* ── File list ──────────────────────────────────────────── */}
         {hasFiles && (
@@ -429,7 +465,7 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
           </div>
         )}
 
-        {!hasFiles && (
+        {!hasFiles && !loggerUnavailable && (
           <div className="text-center py-4 text-[12px] text-text-light">
             No files selected yet — tap the area above to browse.
           </div>

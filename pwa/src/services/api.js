@@ -240,6 +240,10 @@ export function processStationRainfall(stationId) {
   return request(`/api/stations/${stationId}/rainfall/process`, { method: 'POST' });
 }
 
+export function getStationGaps(stationId) {
+  return request(`/api/stations/${stationId}/gaps`);
+}
+
 // ── Readings ───────────────────────────────────────────────────────────────
 
 export function createReading(visitId, { reading_type, value_numeric, value_text, unit, recorded_at, notes }) {

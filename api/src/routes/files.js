@@ -10,6 +10,7 @@ router.use(requireAuth);
 const path    = require('path');
 const db      = require('../db/queries');
 const { processRainfall } = require('../processors/rainfall');
+const { processGaps }    = require('../processors/gaps');
 
 // Multer — store in memory so we can hash before writing to disk
 const upload = multer({ storage: multer.memoryStorage() });
@@ -182,35 +183,12 @@ async function parseInBackground(fileRecord, visitId) {
       }
     }
 
-    // ── Gap detection ──────────────────────────────────────────────────────
-    const GAP_TOLERANCE_S = 21_600; // 6 hours — R spec rain_g_gaps.r default (6 * 60 * 60)
-    if (resolvedStart) {
-      await db.clearFileGap(fileRecord.id); // reset in case of reparse
-      const priorEnd = await db.getPriorCoverageEnd(
-        visit.station_id,
-        result.streamName,
-        fileRecord.id
-      );
-      if (priorEnd !== null) {
-        const gapSeconds = (new Date(resolvedStart).getTime() - new Date(priorEnd).getTime()) / 1000;
-        if (gapSeconds > GAP_TOLERANCE_S) {
-          const gapDays = Math.ceil(gapSeconds / 86400);
-          await db.markFileGap(fileRecord.id, gapDays);
-          await db.updateVisitStatus(visit.id, 'flagged');
-          log.warn('[parse] Gap detected — visit flagged', {
-            file_id:    fileRecord.id,
-            station_id: visit.station_id,
-            gap_days:   gapDays,
-            prior_end:  priorEnd,
-            file_start: resolvedStart,
-          });
-        }
-      }
-    }
-    // ── End gap detection ──────────────────────────────────────────────────
-
-    // Trigger rainfall processing for rainfall stations after a successful parse
+    // Trigger gap and rainfall processing after a successful parse
     if (visit?.data_family === 'rainfall') {
+      processGaps(visit.station_id)
+        .then(() => log.info('[gaps] Complete', { station_id: visit.station_id }))
+        .catch(e  => log.error('[gaps] Processing failed', { station_id: visit.station_id, error: e.message }));
+
       log.info('[rainfall] Processing triggered', { station_id: visit.station_id, file_id: fileRecord.id });
       processRainfall(visit.station_id)
         .then(r => log.info('[rainfall] Complete', { station_id: visit.station_id, ...r }))

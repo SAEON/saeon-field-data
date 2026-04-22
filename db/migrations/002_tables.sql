@@ -165,6 +165,27 @@ CREATE TABLE phenomena (
 
 
 -- -------------------------------------------------------------
+-- STATION GAPS
+-- Records periods between consecutive logger deployments where no
+-- data was recorded. Recomputed in full after every file parse.
+-- -------------------------------------------------------------
+CREATE TABLE station_gaps (
+  id          BIGSERIAL PRIMARY KEY,
+  station_id  INTEGER NOT NULL REFERENCES stations(id),
+  stream_id   INTEGER NOT NULL REFERENCES station_data_streams(id),
+  gap_start   TIMESTAMPTZ NOT NULL,
+  gap_end     TIMESTAMPTZ NOT NULL,
+  gap_seconds INTEGER NOT NULL,
+  gap_days    NUMERIC(6,1) NOT NULL,
+  is_problem  BOOLEAN NOT NULL DEFAULT true,
+  gap_type    TEXT NOT NULL DEFAULT 'missing' CHECK (gap_type IN ('missing', 'documented')),
+  notes       TEXT,
+  UNIQUE (stream_id, gap_start)
+);
+CREATE INDEX ON station_gaps (station_id, gap_start DESC);
+
+
+-- -------------------------------------------------------------
 -- RAW MEASUREMENTS
 -- -------------------------------------------------------------
 CREATE TABLE raw_measurements (
