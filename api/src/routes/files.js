@@ -320,10 +320,6 @@ router.post('/:id/reparse', requireRole('technician_lead'), async (req, res, nex
     const fileRecord = await db.getFileById(parseInt(req.params.id, 10));
     if (!fileRecord) return res.status(404).json({ error: 'File not found' });
 
-    if (fileRecord.parse_status === 'parsed') {
-      return res.status(409).json({ error: 'File already parsed. Delete raw_measurements first if you need to reparse.' });
-    }
-
     if (!fs.existsSync(fileRecord.storage_path)) {
       return res.status(404).json({ error: 'File not found on disk — cannot reparse' });
     }

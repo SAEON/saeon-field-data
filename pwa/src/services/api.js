@@ -134,6 +134,10 @@ export function uploadFile(visitId, file, signal) {
   });
 }
 
+export function getVisitDetail(visitId) {
+  return request(`/api/visits/${visitId}`);
+}
+
 export function reparseFile(fileId) {
   return request(`/api/files/${fileId}/reparse`, { method: 'POST' });
 }

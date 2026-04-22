@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getVisits, getStations, getUsers, assignVisit, getOverdueStations, updateStation } from '../services/api.js';
+import { getVisits, getStations, getUsers, assignVisit, getOverdueStations, updateStation, getVisitDetail, reparseFile } from '../services/api.js';
 
 function AppBar({ title }) {
   return (
@@ -274,6 +274,44 @@ export default function VisitOversight() {
   const [loading,         setLoading]         = useState(true);
   const [error,           setError]           = useState(null);
   const [assignTarget,    setAssignTarget]    = useState(null);
+  const [expandedVisit,   setExpandedVisit]   = useState(null);
+  const [visitDetails,    setVisitDetails]    = useState({});   // visitId -> { files, loading, reparsing: Set }
+
+  function handleExpandVisit(visitId) {
+    if (expandedVisit === visitId) { setExpandedVisit(null); return; }
+    setExpandedVisit(visitId);
+    if (!visitDetails[visitId]) {
+      setVisitDetails(prev => ({ ...prev, [visitId]: { files: [], loading: true, reparsing: new Set() } }));
+      getVisitDetail(visitId)
+        .then(d => setVisitDetails(prev => ({ ...prev, [visitId]: { files: d.files || [], loading: false, reparsing: new Set() } })))
+        .catch(() => setVisitDetails(prev => ({ ...prev, [visitId]: { files: [], loading: false, reparsing: new Set() } })));
+    }
+  }
+
+  async function handleReparseFile(visitId, fileId) {
+    setVisitDetails(prev => {
+      const vd = prev[visitId];
+      const reparsing = new Set(vd.reparsing);
+      reparsing.add(fileId);
+      return { ...prev, [visitId]: { ...vd, reparsing } };
+    });
+    try {
+      await reparseFile(fileId);
+      // Refresh files after a short delay to show updated parse_status
+      setTimeout(() => {
+        getVisitDetail(visitId)
+          .then(d => setVisitDetails(prev => ({ ...prev, [visitId]: { files: d.files || [], loading: false, reparsing: new Set() } })))
+          .catch(() => {});
+      }, 2000);
+    } catch {
+      setVisitDetails(prev => {
+        const vd = prev[visitId];
+        const reparsing = new Set(vd.reparsing);
+        reparsing.delete(fileId);
+        return { ...prev, [visitId]: { ...vd, reparsing } };
+      });
+    }
+  }
 
   // Filters
   const [filterStatus,      setFilterStatus]      = useState('');
@@ -460,54 +498,109 @@ export default function VisitOversight() {
             </div>
           ) : (
             <div className="flex flex-col gap-1.5 p-3">
-              {filteredVisits.map(visit => (
+              {filteredVisits.map(visit => {
+                const isExp = expandedVisit === visit.id;
+                const vd    = visitDetails[visit.id];
+                return (
                 <div
                   key={visit.id}
-                  className="bg-white rounded-xl px-3 py-2"
+                  className="bg-white rounded-xl overflow-hidden"
                   style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}
                 >
-                  <div className="flex items-center justify-between gap-2 mb-0.5">
-                    <div className="text-[12px] font-bold text-text-dark truncate">
-                      {visit.station_display_name}
-                    </div>
-                    <StatusBadge status={visit.status} />
-                  </div>
-
-                  <div className="text-[11px] text-text-med mb-1">
-                    {visit.technician_name} · {formatDate(visit.visited_at)}
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="flex gap-2 text-[10px] text-text-light">
-                      <span>{visit.file_count} file{visit.file_count !== 1 ? 's' : ''}</span>
-                      {visit.file_error_count > 0 && (
-                        <span style={{ color: 'var(--color-error)' }}>
-                          {visit.file_error_count} error{visit.file_error_count !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                      {visit.file_gap_count > 0 && (
-                        <span style={{ color: '#E65100', fontWeight: 700 }}>
-                          {visit.file_gap_count} gap{visit.file_gap_count !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                      <span>{visit.reading_count} reading{visit.reading_count !== 1 ? 's' : ''}</span>
-                      {visit.site_condition && (
-                        <span className="italic">· {visit.site_condition}</span>
-                      )}
+                  {/* Card header — tap to expand */}
+                  <div
+                    className="px-3 py-2 cursor-pointer"
+                    onClick={() => handleExpandVisit(visit.id)}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-0.5">
+                      <div className="text-[12px] font-bold text-text-dark truncate">
+                        {visit.station_display_name}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <StatusBadge status={visit.status} />
+                        <span style={{ fontSize: 16, color: 'var(--color-border)', transition: 'transform 0.2s', display: 'inline-block', transform: isExp ? 'rotate(90deg)' : 'none' }}>›</span>
+                      </div>
                     </div>
 
-                    {visit.status === 'draft' && (
-                      <button
-                        onClick={() => setAssignTarget({ type: 'visit', data: visit })}
-                        className="h-6 px-1.5 rounded text-[9px] font-semibold border-none shrink-0"
-                        style={{ background: '#EAF0FB', color: 'var(--color-navy)' }}
-                      >
-                        {visit.assigned_technician_id ? 'Reassign' : 'Assign'}
-                      </button>
-                    )}
+                    <div className="text-[11px] text-text-med mb-1">
+                      {visit.technician_name} · {formatDate(visit.visited_at)}
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex gap-2 text-[10px] text-text-light">
+                        <span>{visit.file_count} file{visit.file_count !== 1 ? 's' : ''}</span>
+                        {visit.file_error_count > 0 && (
+                          <span style={{ color: 'var(--color-error)' }}>
+                            {visit.file_error_count} error{visit.file_error_count !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {visit.file_gap_count > 0 && (
+                          <span style={{ color: '#E65100', fontWeight: 700 }}>
+                            {visit.file_gap_count} gap{visit.file_gap_count !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                        <span>{visit.reading_count} reading{visit.reading_count !== 1 ? 's' : ''}</span>
+                        {visit.site_condition && (
+                          <span className="italic">· {visit.site_condition}</span>
+                        )}
+                      </div>
+
+                      {visit.status === 'draft' && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setAssignTarget({ type: 'visit', data: visit }); }}
+                          className="h-6 px-1.5 rounded text-[9px] font-semibold border-none shrink-0"
+                          style={{ background: '#EAF0FB', color: 'var(--color-navy)' }}
+                        >
+                          {visit.assigned_technician_id ? 'Reassign' : 'Assign'}
+                        </button>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Expanded file list */}
+                  {isExp && (
+                    <div style={{ borderTop: '1px solid var(--color-surface-dark)', padding: '8px 12px 10px' }}>
+                      {vd?.loading ? (
+                        <div className="text-[11px] text-text-light">Loading files…</div>
+                      ) : vd?.files?.length ? (
+                        <div className="flex flex-col gap-1.5">
+                          {vd.files.map(f => {
+                            const isReparsing = vd.reparsing.has(f.id);
+                            const statusColor = f.parse_status === 'parsed' ? '#2E7D32' : f.parse_status === 'error' ? '#C62828' : '#757575';
+                            return (
+                              <div key={f.id} className="flex items-center justify-between gap-2"
+                                style={{ background: 'var(--color-surface)', borderRadius: 6, padding: '5px 8px' }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div className="text-[11px] font-semibold text-text-dark truncate">{f.original_name}</div>
+                                  <div className="text-[10px]" style={{ color: statusColor }}>
+                                    {f.parse_status}
+                                    {f.record_count != null && ` · ${f.record_count} records`}
+                                    {f.date_range_start && ` · ${new Date(f.date_range_start).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' })}`}
+                                  </div>
+                                  {f.parse_error && <div className="text-[10px] text-error mt-0.5">{f.parse_error}</div>}
+                                </div>
+                                <button
+                                  disabled={isReparsing}
+                                  onClick={() => handleReparseFile(visit.id, f.id)}
+                                  style={{ fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 5,
+                                    border: '1.5px solid var(--color-border)', background: 'white',
+                                    color: 'var(--color-text-dark)', cursor: isReparsing ? 'default' : 'pointer',
+                                    opacity: isReparsing ? 0.5 : 1, whiteSpace: 'nowrap' }}
+                                >
+                                  {isReparsing ? '…' : '↺ Reparse'}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-text-light">No files</div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )
         )}

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getStations, getStationRainfall, getStationRainfallSummary, processStationRainfall } from '../services/api.js';
-import RainfallTipChart from '../components/RainfallTipChart.jsx';
+import { getStations, getStationRainfallSummary } from '../services/api.js';
+import RainfallDataTable from '../components/RainfallDataTable.jsx';
 import VisitOversight  from './VisitOversight.jsx';
 import StationRegistry from './StationRegistry.jsx';
 import UserManagement  from './UserManagement.jsx';
@@ -16,57 +16,12 @@ const TABS = [
   { id: 'field',    label: 'Field',    icon: '⊕' },
 ];
 
-// ── SVG bar chart ─────────────────────────────────────────────────────────────
-
-function RainfallBarChart({ data }) {
-  if (!data.length) return null;
-  const maxMm  = Math.max(...data.map(r => parseFloat(r.rain_mm)), 1);
-  const W = 400, H = 72, barArea = 56, labelY = H - 1;
-  const gap  = W / data.length;
-  const barW = Math.max(Math.min(gap - 0.5, 4), 1.5);
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', overflow: 'visible' }}>
-      {data.map((r, i) => {
-        const mm        = parseFloat(r.rain_mm);
-        const h         = (mm / maxMm) * barArea;
-        const x         = i * gap + gap / 2 - barW / 2;
-        const y         = barArea - h;
-        const d         = new Date(r.period_start);
-        const showLabel = d.getDate() === 1 || (data.length <= 31 && d.getDay() === 1);
-        return (
-          <g key={r.period_start}>
-            {mm > 0 && (
-              <rect x={x} y={y} width={barW} height={h}
-                fill={r.has_anomaly ? '#F59E0B' : '#3B7DD8'} rx={0.5} />
-            )}
-            {showLabel && (
-              <text x={x + barW / 2} y={labelY}
-                fontSize="6" fill="#9CA3AF" textAnchor="middle">
-                {d.toLocaleDateString('en-ZA', { day: '2-digit', month: 'short' })}
-              </text>
-            )}
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
 // ── Rainfall overview tab ─────────────────────────────────────────────────────
 
-const PERIODS = [
-  { label: '30 d',   days: 30  },
-  { label: '90 d',   days: 90  },
-  { label: '12 mo',  days: 365 },
-];
-
 function RainfallOverview() {
-  const [stations,     setStations]     = useState([]);
-  const [stationData,  setStationData]  = useState({});
-  const [expanded,     setExpanded]     = useState(null);
-  const [reprocessing, setReprocessing] = useState(null);
-  const [period,       setPeriod]       = useState(1); // index into PERIODS
+  const [stations,    setStations]    = useState([]);
+  const [stationData, setStationData] = useState({});
+  const [expanded,    setExpanded]    = useState(null);
 
   useEffect(() => {
     getStations()
@@ -87,29 +42,7 @@ function RainfallOverview() {
   }, []);
 
   function handleExpand(stationId) {
-    if (expanded === stationId) { setExpanded(null); return; }
-    setExpanded(stationId);
-    loadChart(stationId, period);
-  }
-
-  function loadChart(stationId, periodIdx) {
-    const from = new Date(Date.now() - PERIODS[periodIdx].days * 24 * 60 * 60 * 1000).toISOString();
-    getStationRainfall(stationId, { resolution: 'daily', from })
-      .then(res => setStationData(prev => ({
-        ...prev,
-        [stationId]: { ...prev[stationId], chartData: res.data || [], chartPeriod: periodIdx },
-      })))
-      .catch(() => {});
-  }
-
-  function handlePeriod(idx) {
-    setPeriod(idx);
-    if (expanded) loadChart(expanded, idx);
-  }
-
-  function handleReprocess(stationId) {
-    setReprocessing(stationId);
-    processStationRainfall(stationId).finally(() => setReprocessing(null));
+    setExpanded(prev => prev === stationId ? null : stationId);
   }
 
   return (
@@ -130,7 +63,6 @@ function RainfallOverview() {
         ) : stations.map(s => {
           const sd    = stationData[s.id];
           const isExp = expanded === s.id;
-          const isProc = reprocessing === s.id;
           return (
             <div key={s.id} style={{ background: 'white', borderRadius: 10, border: '1px solid var(--color-border)', marginBottom: 8, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px' }}>
@@ -142,19 +74,12 @@ function RainfallOverview() {
                   <div style={{ fontSize: 10, color: 'var(--color-text-light)', marginTop: 1 }}>
                     {sd?.summary
                       ? (() => {
-                          const s = sd.summary;
-                          const flagged = (s.double_tip_count || 0) + (s.interfere_count || 0) + (s.pseudo_event_count || 0);
-                          return <>{parseFloat(s.total_mm || 0).toFixed(1)} mm · {flagged > 0 ? <span style={{ color: '#E65100' }}>{flagged} flagged tip{flagged !== 1 ? 's' : ''}</span> : '0 flagged tips'}</>;
+                          const sum = sd.summary;
+                          const flagged = (sum.double_tip_count || 0) + (sum.interfere_count || 0) + (sum.pseudo_event_count || 0);
+                          return <>{parseFloat(sum.total_mm || 0).toFixed(1)} mm · {flagged > 0 ? <span style={{ color: '#E65100' }}>{flagged} flagged tip{flagged !== 1 ? 's' : ''}</span> : '0 flagged tips'}</>;
                         })()
                       : 'Loading…'}
                   </div>
-                </button>
-                <button
-                  onClick={() => handleReprocess(s.id)}
-                  disabled={isProc}
-                  style={{ fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text-dark)', cursor: isProc ? 'default' : 'pointer', opacity: isProc ? 0.5 : 1 }}
-                >
-                  {isProc ? '…' : 'Reprocess'}
                 </button>
                 <span
                   onClick={() => handleExpand(s.id)}
@@ -163,31 +88,8 @@ function RainfallOverview() {
               </div>
 
               {isExp && (
-                <div style={{ padding: '0 14px 14px', borderTop: '1px solid var(--color-surface-dark)' }}>
-                  <div style={{ display: 'flex', gap: 4, paddingTop: 8, marginBottom: 6 }}>
-                    {PERIODS.map((p, i) => (
-                      <button key={p.label} onClick={() => handlePeriod(i)}
-                        style={{ fontSize: 10, fontWeight: period === i ? 700 : 500, padding: '2px 8px', borderRadius: 10,
-                          border: `1.5px solid ${period === i ? '#1565C0' : 'var(--color-border)'}`,
-                          background: period === i ? '#EBF2FB' : 'transparent',
-                          color: period === i ? '#1565C0' : 'var(--color-text-light)', cursor: 'pointer' }}>
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
-                  {sd?.chartData ? (
-                    sd.chartData.length > 0
-                      ? (
-                        <>
-                          <RainfallBarChart data={sd.chartData} />
-                          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '8px 0 2px' }}>Tip counts</div>
-                          <RainfallTipChart data={sd.chartData} resolution="daily" />
-                        </>
-                      )
-                      : <div style={{ fontSize: 12, color: 'var(--color-text-light)', textAlign: 'center', padding: '12px 0' }}>No data for this period</div>
-                  ) : (
-                    <div style={{ fontSize: 12, color: 'var(--color-text-light)', textAlign: 'center', padding: '12px 0' }}>Loading…</div>
-                  )}
+                <div style={{ borderTop: '1px solid var(--color-surface-dark)' }}>
+                  <RainfallDataTable stationId={s.id} canReprocess={true} />
                 </div>
               )}
             </div>
