@@ -103,13 +103,13 @@ async function parseHoboBinary(buf) {
       value_text:      null,
       is_interference: false,
     })),
-    ...connectEvents.map(ts => ({
+    ...(connectEvents.length ? [{
       phenomenon_name: 'logger_interference',
-      measured_at:     ts.toISOString(),
+      measured_at:     connectEvents[connectEvents.length - 1].toISOString(),
       value_numeric:   null,
       value_text:      'Host Connected',
       is_interference: true,
-    })),
+    }] : []),
   ];
 
   return {
