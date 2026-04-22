@@ -4,7 +4,7 @@
 // Reprocess button only renders when canReprocess === true.
 
 import { useState, useEffect, useRef } from 'react';
-import { getStationRainfall, processStationRainfall } from '../services/api.js';
+import { getStationRainfall, processStationRainfall, getStationGaps } from '../services/api.js';
 import RainfallTipChart from './RainfallTipChart.jsx';
 
 const RESOLUTIONS = [
@@ -68,6 +68,7 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
   const [reprocessing, setReprocessing] = useState(false);
   const [page,         setPage]         = useState(1);
   const [pageSize,     setPageSize]     = useState(50);
+  const [gaps,         setGaps]         = useState([]);
   const debounceRef = useRef(null);
 
   useEffect(() => {
@@ -87,6 +88,13 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
     }, 400);
     return () => clearTimeout(debounceRef.current);
   }, [stationId, from, to, resolution]);
+
+  useEffect(() => {
+    if (!stationId) { setGaps([]); return; }
+    getStationGaps(stationId)
+      .then(res => setGaps(res.gaps || []))
+      .catch(() => setGaps([]));
+  }, [stationId]);
 
   function handleReprocess() {
     if (!stationId) return;
@@ -152,14 +160,17 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
       <div style={{ height: 8, background: 'var(--color-surface-dark)' }} />
 
       {/* Summary strip + (optional) reprocess */}
-      {data.length > 0 && (
+      {(data.length > 0 || canReprocess) && (
         <div style={{ padding: '6px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--color-surface)' }}>
-          <span style={{ fontSize: 12, color: 'var(--color-text-med)' }}>
-            <span style={{ fontWeight: 700, color: '#1565C0' }}>{totalMm.toFixed(1)} mm</span>
-            {' · '}{data.length} periods
-            {totalFlagged > 0 && <span style={{ color: '#E65100', fontWeight: 600 }}> · {totalFlagged} flagged</span>}
-            {flagFilter && <span style={{ color: 'var(--color-text-light)' }}> (showing {filtered.length})</span>}
-          </span>
+          {data.length > 0
+            ? <span style={{ fontSize: 12, color: 'var(--color-text-med)' }}>
+                <span style={{ fontWeight: 700, color: '#1565C0' }}>{totalMm.toFixed(1)} mm</span>
+                {' · '}{data.length} periods
+                {totalFlagged > 0 && <span style={{ color: '#E65100', fontWeight: 600 }}> · {totalFlagged} flagged</span>}
+                {flagFilter && <span style={{ color: 'var(--color-text-light)' }}> (showing {filtered.length})</span>}
+              </span>
+            : <span style={{ fontSize: 12, color: 'var(--color-text-light)' }}>No processed data</span>
+          }
           {canReprocess && (
             <button onClick={handleReprocess} disabled={reprocessing || !stationId}
               style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 8, border: '1.5px solid #BDBDBD', background: '#E0E0E0', color: '#555', cursor: reprocessing ? 'default' : 'pointer', opacity: reprocessing ? 0.5 : 1 }}>
@@ -228,6 +239,29 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
               </table>
             </div>
           )
+      )}
+
+      {/* ── Data gaps ── */}
+      {gaps.length > 0 && (
+        <>
+          <div style={{ height: 8, background: 'var(--color-surface-dark)' }} />
+          <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--color-border)' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-light)', marginBottom: 8 }}>
+              Data gaps
+            </div>
+            {gaps.map(g => {
+              const start = new Date(g.gap_start).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
+              const end   = new Date(g.gap_end  ).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
+              return (
+                <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', borderBottom: '1px solid var(--color-surface-dark)', fontSize: 12 }}>
+                  <span style={{ flex: 1, color: 'var(--color-text-dark)', whiteSpace: 'nowrap' }}>{start} → {end}</span>
+                  <span style={{ color: g.is_problem ? '#E65100' : 'var(--color-text-light)', fontWeight: g.is_problem ? 700 : 400, whiteSpace: 'nowrap' }}>{g.gap_days} days{g.is_problem ? ' !' : ''}</span>
+                  {g.notes && <span style={{ fontSize: 11, color: 'var(--color-text-light)', fontStyle: 'italic' }}>{g.notes}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {/* Pagination bar */}
