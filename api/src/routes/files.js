@@ -80,6 +80,14 @@ async function parseInBackground(fileRecord, visitId) {
 
     const streamId = await db.getOrCreateStream(visit.station_id, result.streamName);
 
+    // Clear any previous parse of this file (handles reparse), then clear any
+    // overlapping measurements from other files so new data wins on re-upload.
+    await db.deleteMeasurementsByFile(fileRecord.id);
+    const preMeta = result._metadata || {};
+    if (preMeta.date_range_start && preMeta.date_range_end) {
+      await db.deleteMeasurementsInRange(streamId, preMeta.date_range_start, preMeta.date_range_end, fileRecord.id);
+    }
+
     // Insert in 20K-row chunks, up to 4 chunks concurrently.
     const CHUNK_SIZE  = 20000;
     const CONCURRENCY = 4;

@@ -483,13 +483,18 @@ async function bulkInsertMeasurements(fileId, measurements) {
      SELECT * FROM unnest(
        $1::int[], $2::int[], $3::int[], $4::timestamptz[],
        $5::numeric[], $6::text[], $7::bool[]
-     )
-     ON CONFLICT (stream_id, phenomenon_id, measured_at) DO UPDATE SET
-       file_id        = EXCLUDED.file_id,
-       value_numeric  = EXCLUDED.value_numeric,
-       value_text     = EXCLUDED.value_text,
-       is_interference = EXCLUDED.is_interference`,
+     )`,
     [fileIds, streamIds, phenIds, timestamps, numerics, texts, interfs]
+  );
+}
+
+async function deleteMeasurementsInRange(streamId, from, to, excludeFileId) {
+  await pool.query(
+    `DELETE FROM raw_measurements
+     WHERE stream_id = $1
+       AND measured_at BETWEEN $2 AND $3
+       AND file_id != $4`,
+    [streamId, from, to, excludeFileId]
   );
 }
 
@@ -1081,6 +1086,7 @@ module.exports = {
   getRainfallSummary,
   // Measurements
   bulkInsertMeasurements,
+  deleteMeasurementsInRange,
   getMeasurementsByStream,
   getMeasurementCount,
   // Lookups

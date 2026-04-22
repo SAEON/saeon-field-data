@@ -179,6 +179,9 @@ CREATE TABLE raw_measurements (
   qa_flag         TEXT
     CHECK (qa_flag IN ('interfere', 'pseudo_event', 'double_tip')),
   flag_reason     TEXT
-    CHECK (flag_reason IN ('1s_bounce', 'visit_proximity', 'manual_tip', 'non_rainfall_entry')),
-  UNIQUE (stream_id, phenomenon_id, measured_at)
+    CHECK (flag_reason IN ('1s_bounce', 'visit_proximity', 'manual_tip', 'non_rainfall_entry'))
+  -- No UNIQUE constraint on (stream_id, phenomenon_id, measured_at): HOBO binary loggers
+  -- record time at 1-minute resolution, so two genuine tips in the same minute produce
+  -- identical timestamps. Uniqueness across re-uploads is enforced by delete-then-insert
+  -- (see routes/files.js parseInBackground).
 );
