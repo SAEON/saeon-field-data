@@ -11,7 +11,7 @@ import QueueTab       from './pages/QueueTab.jsx';
 import HistoryTab     from './pages/HistoryTab.jsx';
 import TechnicianDataTab from './pages/TechnicianDataTab.jsx';
 import LeadDashboard    from './pages/LeadDashboard.jsx';
-import ManagerDashboard from './pages/ManagerDashboard.jsx';
+import ManagerDashboard, { ErrorsTab } from './pages/ManagerDashboard.jsx';
 
 function isStandaloneDisplayMode() {
   return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
@@ -24,6 +24,7 @@ const TABS = [
   { id: 'queue',    icon: '▤', label: 'Queue'    },
   { id: 'history',  icon: '≡', label: 'History'  },
   { id: 'data',     icon: '≀', label: 'Data'     },
+  { id: 'errors',   icon: '⚠', label: 'Errors'   },
 ];
 
 function BottomNav({ activeTab, setActiveTab, visitBadge, queueBadge, queueErrors, tabs = TABS }) {
@@ -470,7 +471,7 @@ export function FieldApp({ onExit, embedded = false }) {
     );
   }
 
-  const visibleTabs = embedded ? TABS.filter(t => t.id !== 'data') : TABS;
+  const visibleTabs = embedded ? TABS.filter(t => t.id !== 'data' && t.id !== 'errors') : TABS;
 
   return (
     <div className={embedded ? 'flex flex-col flex-1 overflow-hidden' : 'flex flex-col min-h-dvh app-layout'}>
@@ -646,6 +647,9 @@ export function FieldApp({ onExit, embedded = false }) {
 
       {/* ── Data tab (read-only rainfall + parse errors for own stations) ─ */}
       {activeTab === 'data' && <TechnicianDataTab />}
+
+      {/* ── Errors tab (own stations only, no delete) ───────────────── */}
+      {activeTab === 'errors' && <ErrorsTab canDelete={false} />}
 
       {/* ── Bottom nav (always visible) ─────────────────────────────── */}
       <BottomNav

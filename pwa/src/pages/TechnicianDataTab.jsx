@@ -28,7 +28,7 @@ function ErrorBanner({ errors, onToggle, expanded }) {
           fontSize: 12, fontWeight: 600, color: '#E65100',
         }}
       >
-        <span>⚠ {errors.length} parse error{errors.length !== 1 ? 's' : ''} on this station</span>
+        <span>⚠ {errors.length} error{errors.length !== 1 ? 's' : ''} on this station</span>
         <span style={{ fontSize: 14 }}>{expanded ? '▾' : '▸'}</span>
       </button>
       {expanded && (
@@ -43,13 +43,16 @@ function ErrorBanner({ errors, onToggle, expanded }) {
             }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-dark)' }}>{file.original_name}</div>
               <div style={{ fontSize: 10, color: 'var(--color-text-light)' }}>{formatDateTime(file.uploaded_at)}</div>
+              <div style={{ fontSize: 10, color: 'var(--color-text-light)', marginTop: 1 }}>
+                {file.error_type === 'rainfall' ? 'Rainfall error' : 'Parse error'}
+              </div>
               <div style={{
                 fontSize: 10, fontFamily: 'monospace', color: '#E65100',
                 marginTop: 4, padding: '4px 6px', borderRadius: 4, background: '#FFF8E1',
                 wordBreak: 'break-word',
               }}>
-                {(file.parse_error || 'Unknown error').slice(0, 160)}
-                {(file.parse_error || '').length > 160 && '…'}
+                {((file.error_type === 'rainfall' ? file.rainfall_error : file.parse_error) || 'Unknown error').slice(0, 160)}
+                {((file.error_type === 'rainfall' ? file.rainfall_error : file.parse_error) || '').length > 160 && '…'}
               </div>
             </div>
           ))}

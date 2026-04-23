@@ -6,12 +6,14 @@ import RainfallDataTable from '../components/RainfallDataTable.jsx';
 import VisitOversight  from './VisitOversight.jsx';
 import StationRegistry from './StationRegistry.jsx';
 import UserManagement  from './UserManagement.jsx';
+import { ErrorsTab }   from './ManagerDashboard.jsx';
 import { FieldApp } from '../App.jsx';
 
 const TABS = [
   { id: 'visits',   label: 'Visits',   icon: '☑' },
   { id: 'stations', label: 'Stations', icon: '◉' },
   { id: 'rainfall', label: 'Rainfall', icon: '≀' },
+  { id: 'errors',   label: 'Errors',   icon: '⚠' },
   { id: 'users',    label: 'Users',    icon: '◎' },
   { id: 'field',    label: 'Field',    icon: '⊕' },
 ];
@@ -152,6 +154,7 @@ export default function LeadDashboard() {
       {activeTab === 'visits'   && <VisitOversight />}
       {activeTab === 'stations' && <StationRegistry />}
       {activeTab === 'rainfall' && <RainfallOverview />}
+      {activeTab === 'errors'   && <ErrorsTab />}
       {activeTab === 'users'    && <UserManagement />}
       {activeTab === 'field'    && <FieldApp embedded={true} />}
       <LeadNav activeTab={activeTab} setActiveTab={setActiveTab} />

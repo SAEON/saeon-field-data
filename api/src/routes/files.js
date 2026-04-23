@@ -190,9 +190,16 @@ async function parseInBackground(fileRecord, visitId) {
         .catch(e  => log.error('[gaps] Processing failed', { station_id: visit.station_id, error: e.message }));
 
       log.info('[rainfall] Processing triggered', { station_id: visit.station_id, file_id: fileRecord.id });
+      db.setRainfallStatusForStation(visit.station_id, 'pending').catch(() => {});
       processRainfall(visit.station_id)
-        .then(r => log.info('[rainfall] Complete', { station_id: visit.station_id, ...r }))
-        .catch(e => log.error('[rainfall] Processing failed', { station_id: visit.station_id, error: e.message }));
+        .then(r => {
+          log.info('[rainfall] Complete', { station_id: visit.station_id, ...r });
+          db.setRainfallStatusForStation(visit.station_id, 'done').catch(() => {});
+        })
+        .catch(e => {
+          log.error('[rainfall] Processing failed', { station_id: visit.station_id, error: e.message });
+          db.setRainfallStatusForStation(visit.station_id, 'error', e.message).catch(() => {});
+        });
     }
   } catch (err) {
     log.error('[parse] Failed', { file_id: fileRecord.id, error: err.message, stack: err.stack?.split('\n')[1]?.trim() });

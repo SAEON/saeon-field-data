@@ -225,9 +225,10 @@ async function getVisitById(id) {
 
 async function getVisitFiles(visitId) {
   const result = await pool.query(
-    `SELECT id, original_name, file_format, parse_status,
+    `SELECT id, original_name, file_format, parse_status, parse_error,
             date_range_start, date_range_end, record_count,
-            has_gap, gap_days, stream_name, uploaded_at
+            has_gap, gap_days, stream_name, uploaded_at,
+            rainfall_status, rainfall_error
      FROM   uploaded_files
      WHERE  visit_id = $1
      ORDER  BY uploaded_at`,
@@ -613,7 +614,7 @@ async function getMeasurementCount(fileId) {
 // Raw rainfall tips for a station — sorted by time, with current flag
 async function getRawTipsForStation(stationId) {
   const result = await pool.query(
-    `SELECT rm.id, rm.stream_id, rm.measured_at, rm.qa_flag, rm.flag_reason
+    `SELECT rm.id, rm.stream_id, rm.measured_at, rm.value_numeric, rm.qa_flag, rm.flag_reason
      FROM   raw_measurements rm
      JOIN   station_data_streams sds ON sds.id = rm.stream_id
      JOIN   phenomena p ON p.id = rm.phenomenon_id
@@ -1035,16 +1036,17 @@ async function getFilesWithParseErrors({ technicianId } = {}) {
   // When technicianId is supplied, scope to files belonging to stations
   // assigned to that technician — used for the technician's own error feed.
   const params = [];
-  let where = `WHERE uf.parse_status = 'error'`;
+  let where = `WHERE (uf.parse_status = 'error' OR uf.rainfall_status = 'error')`;
   if (technicianId != null) {
     params.push(technicianId);
     where += ` AND s.assigned_technician_id = $${params.length}`;
   }
   const result = await pool.query(
-    `SELECT uf.id, uf.original_name, uf.parse_error, uf.uploaded_at,
+    `SELECT uf.id, uf.original_name, uf.parse_error, uf.rainfall_error, uf.uploaded_at,
             s.id           AS station_id,
             s.display_name AS station_name,
-            u.full_name    AS technician_name
+            u.full_name    AS technician_name,
+            CASE WHEN uf.parse_status = 'error' THEN 'parse' ELSE 'rainfall' END AS error_type
      FROM   uploaded_files uf
      JOIN   field_visits fv ON fv.id = uf.visit_id
      JOIN   stations     s  ON s.id  = fv.station_id
@@ -1108,6 +1110,17 @@ async function getCalibrationPeriodsForStation(stationId) {
   return result.rows;
 }
 
+async function setRainfallStatusForStation(stationId, status, error = null) {
+  await pool.query(
+    `UPDATE uploaded_files
+     SET    rainfall_status = $2,
+            rainfall_error  = $3
+     WHERE  visit_id IN (SELECT id FROM field_visits WHERE station_id = $1)
+       AND  parse_status = 'parsed'`,
+    [stationId, status, error]
+  );
+}
+
 async function createInstrumentRecord({ stationId, instrumentType, serialNo, mmPerTip, visitId, effectiveFrom, recordedBy, notes }) {
   const result = await pool.query(
     `INSERT INTO instrument_history
@@ -1159,6 +1172,7 @@ module.exports = {
   deleteReadingByType,
   getReadingsByVisit,
   // Rainfall processing
+  setRainfallStatusForStation,
   getRawTipsForStation,
   getVisitTimestampsForStation,
   getPseudoEventWindows,

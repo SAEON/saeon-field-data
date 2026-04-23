@@ -201,7 +201,7 @@ function ConfirmDeleteSheet({ file, onClose, onDeleted }) {
   );
 }
 
-function ErrorsTab() {
+export function ErrorsTab({ canDelete = true }) {
   const [files,       setFiles]       = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState(null);
@@ -228,7 +228,7 @@ function ErrorsTab() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <AppBar
-        title="Parse Errors"
+        title="Errors"
         subtitle={files.length ? `${files.length} file${files.length !== 1 ? 's' : ''} with errors` : undefined}
       />
 
@@ -242,23 +242,33 @@ function ErrorsTab() {
         {!loading && !error && files.length === 0 && (
           <div className="flex flex-col items-center justify-center h-60 gap-3 text-center px-8">
             <div className="text-4xl">✓</div>
-            <div className="text-[15px] font-semibold text-text-dark">No parse errors</div>
-            <div className="text-[13px] text-text-light">All uploaded files have been parsed successfully.</div>
+            <div className="text-[15px] font-semibold text-text-dark">No errors</div>
+            <div className="text-[13px] text-text-light">All uploaded files have been parsed and processed successfully.</div>
           </div>
         )}
         {!loading && !error && files.length > 0 && (
           <div className="flex flex-col gap-2 p-4">
-            {files.map(file => (
+            {files.map(file => {
+              const isRainfall = file.error_type === 'rainfall';
+              const errorMsg   = isRainfall ? (file.rainfall_error ?? 'Unknown error') : (file.parse_error ?? 'Unknown error');
+              return (
               <div key={file.id} className="bg-white rounded-2xl px-4 py-3"
                 style={{ border: '1px solid #FFCDD2', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <div className="min-w-0">
-                    <div className="text-[13px] font-bold text-text-dark truncate">{file.original_name}</div>
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <div className="text-[13px] font-bold text-text-dark truncate">{file.original_name}</div>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0"
+                        style={{ background: isRainfall ? '#E3F2FD' : '#FFEBEE', color: isRainfall ? '#1565C0' : '#C62828' }}>
+                        {isRainfall ? 'Rainfall' : 'Parse'}
+                      </span>
+                    </div>
                     <div className="text-[11px] text-text-light">
                       {file.station_name} · {file.technician_name}
                     </div>
                     <div className="text-[11px] text-text-light">{formatDateTime(file.uploaded_at)}</div>
                   </div>
+                  {canDelete && (
                   <button
                     onClick={() => setDeleteTarget(file)}
                     className="h-7 px-2.5 rounded-lg text-[11px] font-semibold border-none shrink-0"
@@ -266,14 +276,16 @@ function ErrorsTab() {
                   >
                     Delete
                   </button>
+                  )}
                 </div>
                 <div className="text-[11px] font-mono text-warning leading-relaxed mt-1 p-2 rounded-lg"
                   style={{ background: '#FFF8E1' }}>
-                  {(file.parse_error ?? 'Unknown error').slice(0, 120)}
-                  {(file.parse_error ?? '').length > 120 && '…'}
+                  {errorMsg.slice(0, 120)}
+                  {errorMsg.length > 120 && '…'}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </main>

@@ -126,6 +126,8 @@ CREATE TABLE uploaded_files (
   logger_serial        TEXT,
   logger_launched_at   TIMESTAMPTZ,
   logger_downloaded_at TIMESTAMPTZ,
+  rainfall_status      TEXT CHECK (rainfall_status IN ('pending', 'done', 'error')),
+  rainfall_error       TEXT,
   uploaded_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (visit_id, file_hash)
 );

@@ -578,6 +578,14 @@ export default function VisitOversight() {
                                     {f.date_range_start && ` · ${new Date(f.date_range_start).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' })}`}
                                   </div>
                                   {f.parse_error && <div className="text-[10px] text-error mt-0.5">{f.parse_error}</div>}
+                                  {f.rainfall_status && (
+                                    <div className="text-[10px] mt-0.5" style={{
+                                      color: f.rainfall_status === 'done' ? '#2E7D32' : f.rainfall_status === 'error' ? '#C62828' : '#757575'
+                                    }}>
+                                      rainfall: {f.rainfall_status}
+                                      {f.rainfall_error && ` — ${f.rainfall_error}`}
+                                    </div>
+                                  )}
                                 </div>
                                 <button
                                   disabled={isReparsing}

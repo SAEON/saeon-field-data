@@ -5,9 +5,10 @@ const DEFAULT_MM_PER_TIP   = 0.254; // fallback when no instrument_history exist
 const INTERFERE_WINDOW_MS  = 600_000;
 const ANOMALY_THRESHOLD_MM = 10;
 
-function getMmPerTip(periods, measuredAt) {
+function getMmPerTip(periods, measuredAt, rawMmPerTip) {
   const ts = new Date(measuredAt).getTime();
-  let mm = DEFAULT_MM_PER_TIP;
+  const raw = rawMmPerTip ? parseFloat(rawMmPerTip) : 0;
+  let mm = raw > 0 ? raw : DEFAULT_MM_PER_TIP;
   for (const p of periods) {
     if (new Date(p.effective_from).getTime() <= ts) mm = parseFloat(p.mm_per_tip);
   }
@@ -110,7 +111,7 @@ async function processRainfall(stationId) {
     b.all++;
     if (flag === null) {
       b.valid++;
-      b.rain_mm += getMmPerTip(calibrationPeriods, tip.measured_at);
+      b.rain_mm += getMmPerTip(calibrationPeriods, tip.measured_at, tip.value_numeric);
     } else if (flag === 'double_tip') b.double_tip++;
     else if (flag === 'interfere')  b.interfere++;
     else if (flag === 'pseudo_event') {
