@@ -229,7 +229,6 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
               <div style={{ padding: '6px 16px', background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', fontSize: 12, color: 'var(--color-text-med)' }}>
                 <span style={{ fontWeight: 700, color: '#1565C0' }}>{rawTips.length.toLocaleString()} tips</span>
                 {' · '}{rawTips.reduce((s, t) => s + parseFloat(t.value_numeric || 0), 0).toFixed(3)} mm total
-                <span style={{ color: 'var(--color-text-light)', marginLeft: 8, fontStyle: 'italic' }}>Individual logger events — timestamps include seconds for HOBOware comparison</span>
               </div>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
