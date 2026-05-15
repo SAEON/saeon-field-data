@@ -6,11 +6,13 @@ import RainfallDataTable from '../components/RainfallDataTable.jsx';
 import VisitOversight  from './VisitOversight.jsx';
 import StationRegistry from './StationRegistry.jsx';
 import UserManagement  from './UserManagement.jsx';
+import HistoryTab      from './HistoryTab.jsx';
 import { ErrorsTab }   from './ManagerDashboard.jsx';
 import { FieldApp } from '../App.jsx';
 
 const TABS = [
   { id: 'visits',   label: 'Visits',   icon: '☑' },
+  { id: 'history',  label: 'History',  icon: '≡' },
   { id: 'stations', label: 'Stations', icon: '◉' },
   { id: 'rainfall', label: 'Rainfall', icon: '≀' },
   { id: 'errors',   label: 'Errors',   icon: '⚠' },
@@ -152,6 +154,18 @@ export default function LeadDashboard() {
   return (
     <div className="flex flex-col min-h-dvh app-layout">
       {activeTab === 'visits'   && <VisitOversight />}
+      {activeTab === 'history'  && (
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <header className="bg-navy h-14 flex items-center px-4 shrink-0">
+            <div className="flex-1 text-center">
+              <div className="text-white text-[17px] font-bold">History</div>
+            </div>
+          </header>
+          <div className="flex-1 flex flex-col overflow-hidden w-full max-w-[var(--max-width)] mx-auto">
+            <HistoryTab />
+          </div>
+        </div>
+      )}
       {activeTab === 'stations' && <StationRegistry />}
       {activeTab === 'rainfall' && <RainfallOverview />}
       {activeTab === 'errors'   && <ErrorsTab />}

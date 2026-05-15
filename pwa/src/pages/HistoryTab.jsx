@@ -2,6 +2,7 @@
 // and a detail sheet showing site condition, files, and split readings.
 import { useState, useEffect, useRef } from 'react';
 import { getVisits, getVisit, uploadFile, getStationRainfall } from '../services/api.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 const ADD_FILE_WINDOW_DAYS = 7;
 
@@ -81,11 +82,22 @@ function readingValue(r) {
     const unit = r.unit || meta?.unit || '';
     return unit ? `${r.value_numeric} ${unit}` : String(r.value_numeric);
   }
-  if (r.reading_type === 'raining') return r.value_text === 'true' ? 'Yes' : 'No';
+  const text = r.value_text ?? '';
+  // Multi-select fields are stored as JSON arrays: '["a","b"]'
+  if (text.startsWith('[')) {
+    try {
+      const arr = JSON.parse(text);
+      if (Array.isArray(arr)) {
+        const isActivity = r.reading_type === 'logger_activities' || r.reading_type === 'raingauge_activities';
+        return arr.map(v => isActivity ? (EVENT_TYPE_LABELS[v] || v) : v).join(', ') || '—';
+      }
+    } catch {}
+  }
+  if (r.reading_type === 'raining') return text === 'true' ? 'Yes' : 'No';
   if (r.reading_type === 'no_rainfall_confirmed') return 'Confirmed';
-  if (r.reading_type === 'event_type') return EVENT_TYPE_LABELS[r.value_text] || r.value_text;
-  if (r.reading_type === 'did_tip') return r.value_text === 'yes' ? 'Yes' : 'No';
-  return r.value_text || '—';
+  if (r.reading_type === 'event_type') return EVENT_TYPE_LABELS[text] || text;
+  if (r.reading_type === 'did_tip') return text === 'yes' ? 'Yes' : 'No';
+  return text || '—';
 }
 
 // ── Add-file sheet (nested inside detail sheet) ───────────────────────────────
@@ -412,17 +424,19 @@ function VisitDetailSheet({ visitId, onClose }) {
 // ── History Tab ───────────────────────────────────────────────────────────────
 
 export default function HistoryTab() {
+  const user = useAuth();
   const [visits,     setVisits]     = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [selectedId, setSelectedId] = useState(null);
   const [filter,     setFilter]     = useState('all');
 
   useEffect(() => {
-    getVisits({ status: 'submitted' })
+    if (!user?.id) return;
+    getVisits({ status: 'submitted', technician_id: user.id })
       .then(rows => setVisits(rows || []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [user?.id]);
 
   const filtered = filter === 'all' ? visits : visits.filter(v => v.data_family === filter);
 

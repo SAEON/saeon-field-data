@@ -34,14 +34,24 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-// GET /api/visits?station_id=&status=
-// Managers/leads see all visits; technicians see only their own
+// GET /api/visits?station_id=&status=&technician_id=
+// Technicians always see only their own visits.
+// Leads/managers see all visits by default; passing technician_id filters to that person
+// (used by HistoryTab so leads see only their own submitted visits, not all).
 router.get('/', async (req, res, next) => {
   try {
-    const stationId = req.query.station_id ? parseInt(req.query.station_id, 10) : undefined;
-    const status    = req.query.status || undefined;
-    const callerLevel  = ROLE_HIERARCHY[req.user.roles[0]] ?? 0;
-    const technicianId = callerLevel >= ROLE_HIERARCHY['technician_lead'] ? undefined : req.user.id;
+    const stationId   = req.query.station_id   ? parseInt(req.query.station_id,   10) : undefined;
+    const status      = req.query.status       || undefined;
+    const callerLevel = ROLE_HIERARCHY[req.user.roles[0]] ?? 0;
+    const isPriv      = callerLevel >= ROLE_HIERARCHY['technician_lead'];
+
+    let technicianId;
+    if (!isPriv) {
+      technicianId = req.user.id;                             // technicians: always own
+    } else if (req.query.technician_id) {
+      technicianId = parseInt(req.query.technician_id, 10);  // leads/managers: opt-in filter
+    }
+
     const visits = await db.getAllVisits({ stationId, status, technicianId });
     res.json(visits);
   } catch (err) {
