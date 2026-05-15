@@ -4,7 +4,7 @@
 // Reprocess button only renders when canReprocess === true.
 
 import { useState, useEffect, useRef } from 'react';
-import { getStationRainfall, processStationRainfall, getStationGaps } from '../services/api.js';
+import { getStationRainfall, processStationRainfall, getStationGaps, getStationRawTips } from '../services/api.js';
 import RainfallTipChart from './RainfallTipChart.jsx';
 
 const RESOLUTIONS = [
@@ -30,7 +30,7 @@ function isoDate(d) { return d.toISOString().slice(0, 10); }
 function fmtPeriod(iso, resolution) {
   const d = new Date(iso);
   if (resolution === '5min' || resolution === 'hourly') {
-    return d.toLocaleString('en-ZA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+    return d.toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   }
   if (resolution === 'monthly') return d.toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' });
   if (resolution === 'yearly')  return d.toLocaleDateString('en-ZA', { year: 'numeric' });
@@ -58,11 +58,13 @@ function pillBtn(active, onClick, label) {
 const PAGE_SIZES = [25, 50, 100];
 
 export default function RainfallDataTable({ stationId, canReprocess = false }) {
+  const [view,         setView]         = useState('processed'); // 'processed' | 'raw'
   const [from,         setFrom]         = useState(isoDate(new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)));
   const [to,           setTo]           = useState(isoDate(new Date()));
   const [resolution,   setResolution]   = useState('daily');
   const [flagFilter,   setFlagFilter]   = useState('');
   const [data,         setData]         = useState([]);
+  const [rawTips,      setRawTips]      = useState([]);
   const [fetching,     setFetching]     = useState(false);
   const [fetchErr,     setFetchErr]     = useState(null);
   const [reprocessing, setReprocessing] = useState(false);
@@ -77,17 +79,18 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
   }, [stationId]);
 
   useEffect(() => {
-    if (!stationId) { setData([]); return; }
+    if (!stationId) { setData([]); setRawTips([]); return; }
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setFetching(true);
       setFetchErr(null);
-      getStationRainfall(stationId, {
-        resolution,
-        from: new Date(from).toISOString(),
-        to:   new Date(to + 'T23:59:59').toISOString(),
-      })
-        .then(res => setData(res.data || []))
+      const fromIso = new Date(from).toISOString();
+      const toIso   = new Date(to + 'T23:59:59').toISOString();
+      Promise.all([
+        getStationRainfall(stationId, { resolution, from: fromIso, to: toIso }),
+        getStationRawTips(stationId,  { from: fromIso, to: toIso }),
+      ])
+        .then(([agg, raw]) => { setData(agg.data || []); setRawTips(raw.tips || []); })
         .catch(e => setFetchErr(e.message))
         .finally(() => setFetching(false));
     }, 400);
@@ -115,13 +118,14 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
   });
 
   // Reset to page 1 when data or filter changes
-  useEffect(() => { setPage(1); }, [stationId, from, to, resolution, flagFilter]);
+  useEffect(() => { setPage(1); }, [stationId, from, to, resolution, flagFilter, view]);
 
   // Pagination
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const safePage   = Math.min(page, totalPages);
-  const pageStart  = (safePage - 1) * pageSize;
-  const paginated  = filtered.slice(pageStart, pageStart + pageSize);
+  const activeCount = view === 'raw' ? rawTips.length : filtered.length;
+  const totalPages  = Math.max(1, Math.ceil(activeCount / pageSize));
+  const safePage    = Math.min(page, totalPages);
+  const pageStart   = (safePage - 1) * pageSize;
+  const paginated   = filtered.slice(pageStart, pageStart + pageSize);
 
   // Summary derived from full data
   const totalMm      = data.reduce((s, r) => s + parseFloat(r.rain_mm || 0), 0);
@@ -138,21 +142,44 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
           style={{ flex: 1, fontSize: 12, padding: '6px 8px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'white' }} />
       </div>
 
-      {/* ── Section gap ── */}
-      <div style={{ height: 8, background: 'var(--color-surface-dark)' }} />
-
-      {/* Resolution pills (aggregation) */}
-      <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', gap: 6, overflowX: 'auto' }}>
-        {RESOLUTIONS.map(r => pillBtn(resolution === r.value, () => setResolution(r.value), r.label))}
+      {/* ── View toggle ── */}
+      <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', gap: 0 }}>
+        {[
+          { id: 'processed', label: 'Processed' },
+          { id: 'raw',       label: 'Raw tips'  },
+        ].map(v => (
+          <button key={v.id} onClick={() => { setView(v.id); setPage(1); }} style={{
+            flex: 1, padding: '6px 8px', border: '1.5px solid var(--color-border)',
+            borderRight: v.id === 'processed' ? 'none' : undefined,
+            borderRadius: v.id === 'processed' ? '8px 0 0 8px' : '0 8px 8px 0',
+            background: view === v.id ? 'var(--color-navy)' : 'white',
+            color: view === v.id ? 'white' : 'var(--color-text-med)',
+            cursor: 'pointer', textAlign: 'center', fontSize: 12, fontWeight: 700,
+          }}>
+            {v.label}
+          </button>
+        ))}
       </div>
 
       {/* ── Section gap ── */}
       <div style={{ height: 8, background: 'var(--color-surface-dark)' }} />
 
-      {/* Flag filter pills (tip types) */}
-      <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', gap: 6, overflowX: 'auto' }}>
-        {FLAG_FILTERS.map(f => pillBtn(flagFilter === f.value, () => setFlagFilter(f.value), f.label))}
-      </div>
+      {/* Resolution pills — processed view only */}
+      {view === 'processed' && (
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', gap: 6, overflowX: 'auto' }}>
+          {RESOLUTIONS.map(r => pillBtn(resolution === r.value, () => setResolution(r.value), r.label))}
+        </div>
+      )}
+
+      {/* ── Section gap ── */}
+      {view === 'processed' && <div style={{ height: 8, background: 'var(--color-surface-dark)' }} />}
+
+      {/* Flag filter pills — processed view only */}
+      {view === 'processed' && (
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', gap: 6, overflowX: 'auto' }}>
+          {FLAG_FILTERS.map(f => pillBtn(flagFilter === f.value, () => setFlagFilter(f.value), f.label))}
+        </div>
+      )}
 
       {/* ── Section gap ── */}
       <div style={{ height: 8, background: 'var(--color-surface-dark)' }} />
@@ -193,8 +220,46 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
       {fetching && <div style={{ textAlign: 'center', padding: 32, fontSize: 13, color: 'var(--color-text-light)' }}>Loading…</div>}
       {!fetching && fetchErr && <div style={{ margin: 16, padding: '12px 16px', borderRadius: 12, background: '#FFF3E0', fontSize: 12, color: '#E65100' }}>{fetchErr}</div>}
 
-      {/* Data table */}
-      {!fetching && !fetchErr && (
+      {/* ── Raw tips table ── */}
+      {!fetching && !fetchErr && view === 'raw' && (
+        rawTips.length === 0
+          ? <div style={{ textAlign: 'center', padding: '32px 0', fontSize: 13, color: 'var(--color-text-light)' }}>No raw tip data for this period</div>
+          : (
+            <>
+              <div style={{ padding: '6px 16px', background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', fontSize: 12, color: 'var(--color-text-med)' }}>
+                <span style={{ fontWeight: 700, color: '#1565C0' }}>{rawTips.length.toLocaleString()} tips</span>
+                {' · '}{rawTips.reduce((s, t) => s + parseFloat(t.value_numeric || 0), 0).toFixed(3)} mm total
+                <span style={{ color: 'var(--color-text-light)', marginLeft: 8, fontStyle: 'italic' }}>Individual logger events — timestamps include seconds for HOBOware comparison</span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: 'var(--color-surface)', borderBottom: '2px solid var(--color-border)' }}>
+                      {['Timestamp', 'mm / tip', 'QA flag', 'Flag reason'].map(h => (
+                        <th key={h} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 11, color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rawTips.slice((safePage - 1) * pageSize, safePage * pageSize).map((tip, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--color-surface-dark)', background: i % 2 === 0 ? 'white' : 'var(--color-surface)' }}>
+                        <td style={{ padding: '5px 10px', whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: 11 }}>
+                          {new Date(tip.measured_at).toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+                        </td>
+                        <td style={{ padding: '5px 10px', color: '#1565C0', fontWeight: 600 }}>{parseFloat(tip.value_numeric).toFixed(3)}</td>
+                        <td style={{ padding: '5px 10px' }}><FlagCell value={tip.qa_flag} /></td>
+                        <td style={{ padding: '5px 10px', color: 'var(--color-text-light)', fontSize: 11 }}>{tip.flag_reason || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )
+      )}
+
+      {/* ── Processed data table ── */}
+      {!fetching && !fetchErr && view === 'processed' && (
         filtered.length === 0
           ? <div style={{ textAlign: 'center', padding: '32px 0', fontSize: 13, color: 'var(--color-text-light)' }}>{data.length === 0 ? 'No processed data for this period' : 'No rows match this filter'}</div>
           : (
@@ -240,11 +305,11 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
       )}
 
       {/* Pagination bar */}
-      {!fetching && !fetchErr && filtered.length > pageSize && (
+      {!fetching && !fetchErr && (view === 'processed' ? filtered.length : rawTips.length) > pageSize && (
         <div style={{ padding: '8px 16px', borderTop: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'var(--color-surface)' }}>
           {/* Row range label */}
           <span style={{ fontSize: 11, color: 'var(--color-text-light)', whiteSpace: 'nowrap' }}>
-            {pageStart + 1}–{Math.min(pageStart + pageSize, filtered.length)} of {filtered.length}
+            {pageStart + 1}–{Math.min(pageStart + pageSize, activeCount)} of {activeCount}
           </span>
 
           {/* Prev / page indicator / Next */}

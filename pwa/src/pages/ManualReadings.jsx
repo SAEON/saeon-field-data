@@ -27,12 +27,12 @@ const RAINGAUGE_ACTS = [
   { value: 'raingauge_missing',           label: 'Missing' },
   { value: 'raingauge_deploy',            label: 'Deployed' },
   { value: 'raingauge_decommission',      label: 'Decommission' },
-  { value: 'raingauge_calibrate',         label: 'Calibrate' },
   { value: 'raingauge_calibration_check', label: 'Cal. check' },
-  { value: 'pseudo_events',               label: 'Water entry' },
+  { value: 'raingauge_calibrate',         label: 'Calibrate' },
+  { value: 'pseudo_events',               label: 'Mechanism washed' },
 ];
 
-const RG_MAINT_CHECKS     = ['Interior clear', 'Funnel clear', 'Orifice cleared', 'Obstruction removed', 'Debris cleared', 'Bucket cleaned', 'Gauge levelled', 'Bracket secure', 'Brush cleared', 'Bucket test done'];
+const RG_MAINT_CHECKS     = ['Funnel removed & inspected', 'Funnel clear of obstruction', 'Tipping mechanism checked', 'Tipping mechanism cleaned', 'Bubble level OK', 'Cable connection intact', 'Bracket secure', 'Bucket test done'];
 const LOGGER_MAINT_CHECKS = ['Display checked', 'Battery changed', 'Cable intact', 'Connections checked', 'Memory full — reset', 'Memory reset', 'Logger relaunched', 'Mount secure', 'Enclosure inspected'];
 
 const LOGGER_PROBLEM    = new Set(['logger_missing', 'logger_stopped', 'logger_decommission']);
@@ -437,8 +437,10 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
   // Raingauge-specific fields
   const [rgSerial,      setRgSerial]      = useState('');
   const [rgMmPerTip,    setRgMmPerTip]    = useState('');
-  const [rgCalSerial,   setRgCalSerial]   = useState('');
-  const [rgCalMm,       setRgCalMm]       = useState('');
+  const [rgCalSerial,       setRgCalSerial]       = useState('');
+  const [rgCalMm,           setRgCalMm]           = useState('');
+  const [rgCalExpectedTips, setRgCalExpectedTips] = useState('');
+  const [rgCalActualTips,   setRgCalActualTips]   = useState('');
   const [rgNotes,       setRgNotes]       = useState(ex('raingauge_problem_notes')?.value_text ?? '');
   const [rgMaintChecks, setRgMaintChecks] = useState(() => parseActs(ex('raingauge_maintenance_checks')));
 
@@ -454,6 +456,17 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
     setFn(prev => {
       const next = new Set(prev);
       next.has(value) ? next.delete(value) : next.add(value);
+      return next;
+    });
+  }
+
+  function toggleGaugeCondition(value) {
+    setGaugeCondition(prev => {
+      if (prev.has(value)) return new Set(); // deselect
+      if (value === 'good') return new Set(['good']); // Good clears all others
+      const next = new Set(prev);
+      next.delete('good'); // any problem option clears Good
+      next.add(value);
       return next;
     });
   }
@@ -510,6 +523,10 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
         mm_per_tip: parseFloat(rgCalMm), visit_id: visitId,
         notes: rgActs.has('raingauge_calibrate') ? 'Calibration recorded on-site' : 'Calibration check — factor confirmed',
       }));
+    if (rgActs.has('raingauge_calibration_check')) {
+      if (rgCalExpectedTips) saves.push(onSave({ reading_type: 'cal_check_expected_tips', value_numeric: parseFloat(rgCalExpectedTips), recorded_at: now }));
+      if (rgCalActualTips)   saves.push(onSave({ reading_type: 'cal_check_actual_tips',   value_numeric: parseFloat(rgCalActualTips),   recorded_at: now }));
+    }
 
     if (hasMaintenance && rgMaintChecks.size > 0)
       saves.push(onSave({ reading_type: 'raingauge_maintenance_checks', value_text: JSON.stringify([...rgMaintChecks]), recorded_at: now }));
@@ -544,7 +561,7 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
 
       <div className="form-card">
         <div className="text-[12px] font-semibold text-text-dark mb-2">
-          What happened with the raingauge? <span className="text-warning text-[11px]">*</span>
+          Purpose of visit? <span className="text-warning text-[11px]">*</span>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {RAINGAUGE_ACTS.map(opt => (
@@ -557,6 +574,17 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
           ))}
         </div>
       </div>
+
+      {hasRgProblem && (
+        <div className="form-card" style={{ borderColor: '#FDE68A' }}>
+          <div className="text-[12px] font-semibold text-text-dark mb-1">
+            Notes <span className="text-warning text-[11px]">*</span>
+          </div>
+          <textarea value={rgNotes} onChange={e => setRgNotes(e.target.value)}
+            placeholder="e.g. Raingauge was missing — mounting bracket removed."
+            rows={3} className="notes-textarea w-full" />
+        </div>
+      )}
 
       {hasRgDeploy && (
         <div className="form-card" style={{ borderColor: '#BBF7D0' }}>
@@ -584,7 +612,7 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
           </div>
           <div className="flex flex-col gap-2">
             <input type="text" value={rgCalSerial} onChange={e => setRgCalSerial(e.target.value)}
-              placeholder="Current gauge serial no."
+              placeholder="Gauge serial no."
               className={`field-input w-full ${rgCalSerial ? 'field-input--active' : ''}`}
               style={{ height: 36 }} />
             <div className="relative">
@@ -595,27 +623,52 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">mm/tip</span>
             </div>
           </div>
+          {rgActs.has('raingauge_calibration_check') && (
+            <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
+              <div className="text-[11px] text-text-light mb-2">
+                Pour a known volume through the gauge and record the tip counts.
+              </div>
+              <div className="flex gap-3">
+                <div className="flex flex-col gap-1 flex-1">
+                  <span className="text-[11px] text-text-light font-medium">Expected tips</span>
+                  <input type="number" step="1" min="0" value={rgCalExpectedTips} onChange={e => setRgCalExpectedTips(e.target.value)}
+                    placeholder="e.g. 100"
+                    className={`field-input w-full ${rgCalExpectedTips ? 'field-input--active' : ''}`}
+                    style={{ height: 36 }} />
+                </div>
+                <div className="flex flex-col gap-1 flex-1">
+                  <span className="text-[11px] text-text-light font-medium">Actual tips</span>
+                  <input type="number" step="1" min="0" value={rgCalActualTips} onChange={e => setRgCalActualTips(e.target.value)}
+                    placeholder="e.g. 97"
+                    className={`field-input w-full ${rgCalActualTips ? 'field-input--active' : ''}`}
+                    style={{ height: 36 }} />
+                </div>
+              </div>
+              {rgCalExpectedTips && rgCalActualTips && (() => {
+                const pct = ((parseFloat(rgCalActualTips) / parseFloat(rgCalExpectedTips)) * 100).toFixed(1);
+                const drift = Math.abs(100 - parseFloat(pct));
+                const pass = drift <= 3;
+                return (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-[11px] font-semibold" style={{ color: pass ? 'var(--color-success)' : 'var(--color-error)' }}>
+                      {pass ? '✓ Pass' : '⚠ Fail'}
+                    </span>
+                    <span className="text-[11px] text-text-light">
+                      {pct}% accuracy ({drift.toFixed(1)}% drift) —{' '}
+                      {pass ? 'proceed to calibration' : 'do not calibrate, flag for inspection'}
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
         </div>
       )}
 
-      <div className="form-card">
-        <div className="flex items-baseline justify-between mb-2">
-          <div className="text-[12px] font-semibold text-text-dark">Raingauge condition <span className="text-warning text-[11px]">*</span></div>
-          <span className="text-[10px] text-text-light">How did you find the gauge?</span>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {[{ value: 'good', label: 'Good' }, { value: 'blocked', label: 'Blocked' }, { value: 'bucket_obstructed', label: 'Bucket obstructed' }, { value: 'orifice_missing', label: 'Orifice missing' }, { value: 'debris', label: 'Debris inside' }, { value: 'damaged', label: 'Damaged' }, { value: 'submerged', label: 'Submerged' }].map(opt => (
-            <button key={opt.value} data-selected={gaugeCondition.has(opt.value) ? 'true' : undefined}
-              onClick={() => toggleAct(setGaugeCondition, opt.value)}
-              className="note-chip">{opt.label}</button>
-          ))}
-        </div>
-      </div>
-
       {hasMaintenance && (
         <div className="form-card">
-          <div className="text-[12px] font-semibold text-text-dark mb-1.5">Raingauge checks</div>
-          <div className="text-[11px] text-text-light mb-2.5">Select all that apply.</div>
+          <div className="text-[12px] font-semibold text-text-dark mb-1.5">Routine maintenance checks</div>
+          <div className="text-[11px] text-text-light mb-2.5">Select all completed.</div>
           <div className="flex flex-wrap gap-1.5">
             {RG_MAINT_CHECKS.map(opt => (
               <button key={opt}
@@ -626,17 +679,6 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
               </button>
             ))}
           </div>
-        </div>
-      )}
-
-      {hasRgProblem && (
-        <div className="form-card" style={{ borderColor: '#FDE68A' }}>
-          <div className="text-[12px] font-semibold text-text-dark mb-1">
-            Notes <span className="text-warning text-[11px]">*</span>
-          </div>
-          <textarea value={rgNotes} onChange={e => setRgNotes(e.target.value)}
-            placeholder="e.g. Raingauge was missing — mounting bracket removed."
-            rows={3} className="notes-textarea w-full" />
         </div>
       )}
 
@@ -694,12 +736,26 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
         </>
       )}
 
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-2">
+          <div className="text-[12px] font-semibold text-text-dark">Raingauge condition <span className="text-warning text-[11px]">*</span></div>
+          <span className="text-[10px] text-text-light">How did you find the gauge?</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {[{ value: 'good', label: 'Good' }, { value: 'blocked', label: 'Blocked' }, { value: 'bucket_obstructed', label: 'Bucket obstructed' }, { value: 'orifice_missing', label: 'Orifice missing' }, { value: 'debris', label: 'Debris inside' }, { value: 'damaged', label: 'Damaged' }, { value: 'submerged', label: 'Submerged' }].map(opt => (
+            <button key={opt.value} data-selected={gaugeCondition.has(opt.value) ? 'true' : undefined}
+              onClick={() => toggleGaugeCondition(opt.value)}
+              className="note-chip">{opt.label}</button>
+          ))}
+        </div>
+      </div>
+
       {/* ── LOGGER ──────────────────────────────────────────────── */}
       <SectionDivider label="Logger" />
 
       <div className="form-card">
         <div className="text-[12px] font-semibold text-text-dark mb-2">
-          What happened with the logger? <span className="text-warning text-[11px]">*</span>
+          Logger activity <span className="text-warning text-[11px]">*</span>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {LOGGER_ACTS.map(opt => (
@@ -712,6 +768,17 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
           ))}
         </div>
       </div>
+
+      {hasLoggerProblem && (
+        <div className="form-card" style={{ borderColor: '#FDE68A' }}>
+          <div className="text-[12px] font-semibold text-text-dark mb-1">
+            Notes <span className="text-warning text-[11px]">*</span>
+          </div>
+          <textarea value={loggerNotes} onChange={e => setLoggerNotes(e.target.value)}
+            placeholder="e.g. Logger was missing from mount — bracket broken. No data since last visit."
+            rows={3} className="notes-textarea w-full" />
+        </div>
+      )}
 
       {hasLoggerDeploy && (
         <div className="form-card" style={{ borderColor: '#BBF7D0' }}>
@@ -768,17 +835,6 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
               </button>
             ))}
           </div>
-        </div>
-      )}
-
-      {hasLoggerProblem && (
-        <div className="form-card" style={{ borderColor: '#FDE68A' }}>
-          <div className="text-[12px] font-semibold text-text-dark mb-1">
-            Notes <span className="text-warning text-[11px]">*</span>
-          </div>
-          <textarea value={loggerNotes} onChange={e => setLoggerNotes(e.target.value)}
-            placeholder="e.g. Logger was missing from mount — bracket broken. No data since last visit."
-            rows={3} className="notes-textarea w-full" />
         </div>
       )}
 

@@ -683,6 +683,23 @@ async function getRawTipsForStation(stationId) {
   return result.rows;
 }
 
+async function getRawTipsForStationFiltered(stationId, { from, to } = {}) {
+  const result = await pool.query(
+    `SELECT rm.measured_at, rm.value_numeric, rm.qa_flag, rm.flag_reason
+     FROM   raw_measurements rm
+     JOIN   station_data_streams sds ON sds.id = rm.stream_id
+     JOIN   phenomena p ON p.id = rm.phenomenon_id
+     WHERE  sds.station_id = $1
+       AND  p.name = 'rain_tip'
+       AND  rm.is_interference = false
+       AND  ($2::timestamptz IS NULL OR rm.measured_at >= $2)
+       AND  ($3::timestamptz IS NULL OR rm.measured_at <= $3)
+     ORDER  BY rm.measured_at`,
+    [stationId, from || null, to || null]
+  );
+  return result.rows;
+}
+
 // Interference event timestamps for a station — used for ±600s interfere window.
 //
 // Uses actual logger interference events (Coupler Detached / Host Connected)
@@ -1230,6 +1247,7 @@ module.exports = {
   // Rainfall processing
   setRainfallStatusForStation,
   getRawTipsForStation,
+  getRawTipsForStationFiltered,
   getVisitTimestampsForStation,
   getPseudoEventWindows,
   bulkUpdateFlags,

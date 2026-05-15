@@ -244,6 +244,13 @@ export function getStationGaps(stationId) {
   return request(`/api/stations/${stationId}/gaps`);
 }
 
+export function getStationRawTips(stationId, { from, to } = {}) {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to)   params.set('to',   to);
+  return request(`/api/stations/${stationId}/raw-tips?${params}`);
+}
+
 // ── Readings ───────────────────────────────────────────────────────────────
 
 export function createReading(visitId, { reading_type, value_numeric, value_text, unit, recorded_at, notes }) {

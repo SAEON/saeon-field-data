@@ -33,6 +33,19 @@ router.get('/logger-snapshots', async (req, res, next) => {
   }
 });
 
+// GET /api/stations/:id/raw-tips?from=&to=
+router.get('/:id/raw-tips', async (req, res, next) => {
+  try {
+    const id   = parseInt(req.params.id, 10);
+    const from = req.query.from || null;
+    const to   = req.query.to   || null;
+    const tips = await db.getRawTipsForStationFiltered(id, { from, to });
+    res.json({ tips });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/stations/:id
 router.get('/:id', async (req, res, next) => {
   try {
