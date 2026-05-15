@@ -178,4 +178,16 @@ router.delete('/:id', async (req, res, next) => {
   }
 });
 
+// GET /api/visits/:id/logger-snapshot
+// Returns the most recent temp and battery readings from parsed CSV data near
+// the visit date — used to pre-populate the manual readings form.
+router.get('/:id/logger-snapshot', async (req, res, next) => {
+  try {
+    const snapshot = await db.getLoggerSnapshotForVisit(parseInt(req.params.id, 10));
+    res.json(snapshot);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

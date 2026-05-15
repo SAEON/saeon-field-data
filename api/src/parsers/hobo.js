@@ -20,14 +20,14 @@
 const readline = require('readline');
 const fs       = require('fs');
 
-const INTERFERENCE_KEYWORDS = ['Coupler Detached', 'Host Connected', 'End Of File'];
+const INTERFERENCE_KEYWORDS = ['Coupler Attached', 'Coupler Detached', 'Host Connected', 'End Of File'];
 
-function splitCsvLine(line) {
+function splitCsvLine(line, sep = ',') {
   const fields = [];
   let cur = '', inQuote = false;
   for (const ch of line) {
     if (ch === '"') { inQuote = !inQuote; continue; }
-    if (ch === ',' && !inQuote) { fields.push(cur.trim()); cur = ''; continue; }
+    if (ch === sep && !inQuote) { fields.push(cur.trim()); cur = ''; continue; }
     cur += ch;
   }
   fields.push(cur.trim());
@@ -36,8 +36,9 @@ function splitCsvLine(line) {
 
 function cleanHeader(h) {
   return h
-    .replace(/\s+LGR\s+S\/N:.*$/i, '')
-    .replace(/\s+#\d+.*$/, '')
+    .replace(/\s*\(LGR\s+S\/N:.*?\)/gi, '') // "(LGR S/N: ..., SEN S/N: ..., LBL: ...)"
+    .replace(/\s+LGR\s+S\/N:.*$/i, '')       // "Rainfall LGR S/N: ..." (no parens)
+    .replace(/\s+#\d+.*$/, '')               // " #20102559"
     .replace(/^["']|["']$/g, '')
     .trim();
 }
@@ -50,35 +51,55 @@ function extractSerial(h) {
   return null;
 }
 
-function parseDateTime(dateStr, timeStr) {
+function parseDateTime(dateStr, timeStr, tzOffsetMs = 0) {
   const s = (timeStr ? `${dateStr.trim()} ${timeStr.trim()}` : dateStr.trim())
     .replace(/"/g, '').trim();
+
+  // MM/DD/YY(YY) HH:MM:SS [AM/PM]  — or YY/MM/DD HH:MM:SS (no AM/PM, first field > 12)
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?\s*(AM|PM)?$/i);
   if (m) {
     let [, mo, dy, yr, hr, mn, sc, period] = m;
+    // New HOBOware exports YY/MM/DD (no AM/PM). First field > 12 can't be a month.
+    if (!period && +mo > 12) [yr, mo, dy] = [mo, dy, yr];
     if (yr.length === 2) yr = '20' + yr;
     hr = parseInt(hr, 10);
     if (period) {
       if (period.toUpperCase() === 'PM' && hr !== 12) hr += 12;
       if (period.toUpperCase() === 'AM' && hr === 12) hr = 0;
     }
-    return new Date(Date.UTC(+yr, +mo - 1, +dy, hr, +mn, +sc));
+    return new Date(Date.UTC(+yr, +mo - 1, +dy, hr, +mn, +sc) - tzOffsetMs);
   }
+
+  // YYYY/MM/DD HH:MM:SS (24-hour, year-first — old HOBOware export format)
+  const m2 = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/);
+  if (m2) {
+    const [, yr, mo, dy, hr, mn, sc] = m2;
+    return new Date(Date.UTC(+yr, +mo - 1, +dy, +hr, +mn, +sc) - tzOffsetMs);
+  }
+
   throw new Error(`Unrecognised HOBO date: "${s}"`);
 }
 
 function classifyColumn(cleanedHeader) {
   for (const kw of INTERFERENCE_KEYWORDS) {
     if (cleanedHeader.includes(kw)) {
-      return { phenomenonName: 'logger_interference', isInterference: true };
+      return { phenomenonName: 'logger_interference', isInterference: true, isCumulative: false };
     }
   }
   const h = cleanedHeader.toLowerCase();
-  if (h.includes('rainfall') || h.includes('rain')) {
-    return { phenomenonName: 'rain_tip', isInterference: false };
+  // All HOBOware rainfall columns use cumulative totals regardless of column name variant:
+  // "Rainfall (mm)", "Rain (LGR S/N: ...)", "Event, mm (...)", "Event, units (...)"
+  if (h.includes('rainfall') || h.includes('rain') || h.includes('event')) {
+    return { phenomenonName: 'rain_tip', isInterference: false, isCumulative: true };
+  }
+  if (h.includes('temp')) {
+    return { phenomenonName: 'temp_c', isInterference: false, isCumulative: false };
+  }
+  if (h.includes('batt')) {
+    return { phenomenonName: 'batt_v', isInterference: false, isCumulative: false };
   }
   const slug = h.replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-  return { phenomenonName: slug || 'unknown', isInterference: false };
+  return { phenomenonName: slug || 'unknown', isInterference: false, isCumulative: false };
 }
 
 // Read the first N lines without loading the whole file
@@ -126,6 +147,14 @@ module.exports = async function parseHobo(filePath) {
   const hasIdCol  = headers[0].trim() === '#';
   const colOffset = hasIdCol ? 1 : 0;
 
+  // ── Extract timezone offset from date-time column header ────────────────────
+  // "Date Time, GMT+02:00" → tzOffsetMs = 7200000 (applied in parseDateTime to get UTC)
+  const dtHeader   = headers[colOffset] || '';
+  const tzMatch    = dtHeader.match(/GMT([+-]\d{1,2}):(\d{2})/i);
+  const tzOffsetMs = tzMatch
+    ? (parseInt(tzMatch[1]) * 60 + parseInt(tzMatch[2])) * 60000
+    : 0;
+
   // ── Detect separate vs combined datetime ────────────────────────────────────
   const dtH0 = (headers[colOffset]     || '').toLowerCase();
   const dtH1 = (headers[colOffset + 1] || '').toLowerCase();
@@ -146,8 +175,8 @@ module.exports = async function parseHobo(filePath) {
   for (let i = phenColStart; i < headers.length; i++) {
     const cleaned = cleanHeader(headers[i]);
     if (!cleaned) continue;
-    const { phenomenonName, isInterference } = classifyColumn(cleaned);
-    cols.push({ index: i, rawHeader: headers[i], cleaned, phenomenonName, isInterference });
+    const { phenomenonName, isInterference, isCumulative } = classifyColumn(cleaned);
+    cols.push({ index: i, rawHeader: headers[i], cleaned, phenomenonName, isInterference, isCumulative });
   }
 
   // ── Streaming data rows ─────────────────────────────────────────────────────
@@ -157,9 +186,19 @@ module.exports = async function parseHobo(filePath) {
       crlfDelay: Infinity,
     });
 
+    // Track last-seen cumulative value per column index for cumulative event cols.
+    const cumulativePrev = {};
+    for (const col of cols) {
+      if (col.isCumulative) cumulativePrev[col.index] = 0;
+    }
+
     let lineNum = 0; // 0-indexed
+    let dateParseFailures = 0;
+    let dateParseAttempts = 0;
+    let firstBadSample    = null;
+
     for await (const line of rl) {
-      if (lineNum <= dataStart) { lineNum++; continue; } // skip header row(s)
+      if (lineNum < dataStart) { lineNum++; continue; } // skip title + header rows
       lineNum++;
 
       const trimmed = line.trim();
@@ -170,13 +209,25 @@ module.exports = async function parseHobo(filePath) {
 
       let measuredAt;
       try {
+        dateParseAttempts++;
         if (separateDatetime) {
-          measuredAt = parseDateTime(fields[colOffset], fields[colOffset + 1]);
+          measuredAt = parseDateTime(fields[colOffset], fields[colOffset + 1], tzOffsetMs);
         } else {
-          measuredAt = parseDateTime(fields[colOffset]);
+          measuredAt = parseDateTime(fields[colOffset], undefined, tzOffsetMs);
         }
-        if (isNaN(measuredAt.getTime())) continue;
-      } catch (e) { continue; }
+        if (isNaN(measuredAt.getTime())) { dateParseFailures++; continue; }
+      } catch (e) {
+        dateParseFailures++;
+        if (!firstBadSample) firstBadSample = fields[colOffset];
+        // If every row so far has failed, the date format is unrecognised — fail fast.
+        if (dateParseAttempts >= 3 && dateParseFailures === dateParseAttempts) {
+          throw new Error(
+            `Unrecognised date format in HOBO CSV (sample: "${firstBadSample}"). ` +
+            `Expected MM/DD/YY HH:MM:SS AM/PM, YY/MM/DD HH:MM:SS, or YYYY/MM/DD HH:MM:SS.`
+          );
+        }
+        continue;
+      }
 
       const rowMeasurements = [];
       for (const col of cols) {
@@ -193,6 +244,23 @@ module.exports = async function parseHobo(filePath) {
             value_text:      eventName || col.cleaned,
             is_interference: true,
           });
+        } else if (col.isCumulative) {
+          // HOBOware stores a running cumulative total in "Event, mm" columns.
+          // Each non-empty row is one tip event; delta from previous = mm per tip.
+          const num = parseFloat(raw);
+          if (!isNaN(num)) {
+            const delta = num - cumulativePrev[col.index];
+            cumulativePrev[col.index] = num;
+            if (delta > 0) {
+              rowMeasurements.push({
+                phenomenon_name: 'rain_tip',
+                measured_at:     measuredAt,
+                value_numeric:   parseFloat(delta.toFixed(6)),
+                value_text:      null,
+                is_interference: false,
+              });
+            }
+          }
         } else {
           const num = parseFloat(raw);
           rowMeasurements.push({
@@ -208,7 +276,7 @@ module.exports = async function parseHobo(filePath) {
     }
   }
 
-  return { streamName: 'raw_rainfall', stream: stream() };
+  return { streamName: 'raw_rainfall', stream: stream(), _metadata: { serial: loggerSn || null } };
 };
 
 module.exports.streaming = true;

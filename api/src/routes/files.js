@@ -244,8 +244,8 @@ router.post('/:id/files', upload.single('file'), async (req, res, next) => {
 
     // Validate format against station family
     const fileFormat = detectFileFormat(req.file.originalname, req.file.buffer);
-    if (visit.data_family === 'rainfall' && fileFormat !== 'hobo_binary') {
-      return res.status(400).json({ error: 'Rainfall stations only accept HOBO binary (.hobo) files.' });
+    if (visit.data_family === 'rainfall' && fileFormat !== 'hobo_csv') {
+      return res.status(400).json({ error: 'Rainfall stations only accept HOBOware CSV (.csv) files.' });
     }
 
     // SHA-256 hash of file contents

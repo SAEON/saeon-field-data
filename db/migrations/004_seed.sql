@@ -19,6 +19,8 @@ INSERT INTO phenomena (name, display_name, data_family, unit, measure, var_type)
   ('rainfall_tot',        'Rainfall (total)',                   'rainfall',    'mm',    'total',   'numeric'),
   ('rain_tip',            'Rainfall Tip Event',                 'rainfall',    'mm',    'sample',  'numeric'),
   ('logger_interference', 'Logger Interference Event',          'all',         '',      'sample',  'text'),
+  ('temp_c',              'Logger Temperature',                 'all',         'degC',  'sample',  'numeric'),
+  ('batt_v',              'Logger Battery',                     'all',         'V',     'sample',  'numeric'),
 
   -- Groundwater
   ('water_level_smp',     'Water Level (sample)',               'groundwater', 'm',     'sample',  'numeric'),

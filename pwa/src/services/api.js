@@ -271,3 +271,11 @@ export function createInstrumentRecord(stationId, { instrument_type, serial_no, 
     body: JSON.stringify({ instrument_type, serial_no, mm_per_tip, visit_id, notes }),
   });
 }
+
+export function getLoggerSnapshot(visitId) {
+  return request(`/api/visits/${visitId}/logger-snapshot`);
+}
+
+export function getStationLoggerSnapshots() {
+  return request(`/api/stations/logger-snapshots`);
+}

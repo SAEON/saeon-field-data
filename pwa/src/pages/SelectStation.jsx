@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useStations } from '../hooks/useStations.js';
-import { getVisits } from '../services/api.js';
+import { getVisits, getStationLoggerSnapshots } from '../services/api.js';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 
 const OVERDUE_DAYS = 30; // stations not visited in 30+ days are overdue
@@ -44,14 +44,21 @@ const FAMILY_LABELS = {
 export default function SelectStation({ onStartVisit, hasDraft, draftStation, onResumeDraft }) {
   const { stations, loading, offline } = useStations();
 
-  const [query,      setQuery]      = useState('');
-  const [filter,     setFilter]     = useState('all');
-  const [selectedId, setSelectedId] = useState(null);
-  const [myVisits,   setMyVisits]   = useState(null);
+  const [query,           setQuery]           = useState('');
+  const [filter,          setFilter]          = useState('all');
+  const [selectedId,      setSelectedId]      = useState(null);
+  const [myVisits,        setMyVisits]        = useState(null);
+  const [loggerSnapshots, setLoggerSnapshots] = useState({});
 
   useEffect(() => {
     getVisits()
       .then(v => setMyVisits(v.length))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    getStationLoggerSnapshots()
+      .then(setLoggerSnapshots)
       .catch(() => {});
   }, []);
 
@@ -204,6 +211,23 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
                 {s.region && <span>·</span>}
                 <span>Last: {lastVisitLabel(s.last_visited_at)}</span>
               </div>
+              {loggerSnapshots[s.id] && (
+                <div className="mt-1">
+                  <div className="text-[10px] text-text-light mb-0.5">Last logger reading</div>
+                  <div className="flex items-center gap-2.5">
+                    {loggerSnapshots[s.id].last_temp_c != null && (
+                      <span className="text-[11px] text-text-light">
+                        🌡 <span className="font-medium text-text-dark">{loggerSnapshots[s.id].last_temp_c}°C</span>
+                      </span>
+                    )}
+                    {loggerSnapshots[s.id].last_batt_v != null && (
+                      <span className="text-[11px] text-text-light">
+                        🔋 <span className="font-medium text-text-dark">{loggerSnapshots[s.id].last_batt_v} V</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col items-center gap-1 shrink-0">

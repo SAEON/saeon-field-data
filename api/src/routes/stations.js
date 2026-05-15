@@ -22,6 +22,17 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// GET /api/stations/logger-snapshots
+// Returns the most recent temp_c and batt_v from raw_measurements per station —
+// used to surface logger conditions on the station list screen.
+router.get('/logger-snapshots', async (req, res, next) => {
+  try {
+    res.json(await db.getStationLoggerSnapshots());
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/stations/:id
 router.get('/:id', async (req, res, next) => {
   try {

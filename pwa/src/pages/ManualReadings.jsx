@@ -431,8 +431,8 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
   const [loggerSerial,      setLoggerSerial]      = useState('');
   const [loggerNotes,       setLoggerNotes]        = useState(ex('logger_problem_notes')?.value_text ?? '');
   const [loggerMaintChecks, setLoggerMaintChecks]  = useState(() => parseActs(ex('logger_maintenance_checks')));
-  const [battery,      setBattery]      = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
-  const [memory,       setMemory]       = useState(ex('memory_used_pct')?.value_numeric != null ? String(ex('memory_used_pct').value_numeric) : '');
+  const [battery, setBattery] = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
+  const [memory,  setMemory]  = useState(ex('memory_used_pct')?.value_numeric != null ? String(ex('memory_used_pct').value_numeric) : '');
 
   // Raingauge-specific fields
   const [rgSerial,      setRgSerial]      = useState('');

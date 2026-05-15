@@ -456,6 +456,62 @@ async function getStationGaps(stationId) {
   return result.rows;
 }
 
+// Returns the most recent temp_c and batt_v from raw_measurements for every
+// station in a single query — used to display logger conditions on station cards.
+async function getStationLoggerSnapshots() {
+  const result = await pool.query(
+    `WITH latest AS (
+       SELECT DISTINCT ON (sds.station_id, p.name)
+         sds.station_id,
+         p.name,
+         rm.value_numeric,
+         rm.measured_at
+       FROM raw_measurements rm
+       JOIN station_data_streams sds ON sds.id = rm.stream_id
+       JOIN phenomena p              ON p.id   = rm.phenomenon_id
+       WHERE p.name IN ('temp_c', 'batt_v')
+       ORDER BY sds.station_id, p.name, rm.measured_at DESC
+     )
+     SELECT
+       station_id,
+       MAX(CASE WHEN name = 'temp_c' THEN value_numeric END) AS last_temp_c,
+       MAX(CASE WHEN name = 'batt_v' THEN value_numeric END) AS last_batt_v,
+       MAX(measured_at) AS last_logger_at
+     FROM latest
+     GROUP BY station_id`
+  );
+  return Object.fromEntries(result.rows.map(r => [r.station_id, {
+    last_temp_c:    r.last_temp_c  != null ? parseFloat(parseFloat(r.last_temp_c).toFixed(1)) : null,
+    last_batt_v:    r.last_batt_v  != null ? parseFloat(parseFloat(r.last_batt_v).toFixed(2)) : null,
+    last_logger_at: r.last_logger_at || null,
+  }]));
+}
+
+// Returns the most recent temp_c and batt_v reading within ±24h of a visit —
+// used to pre-populate the manual readings form with logger conditions at download.
+async function getLoggerSnapshotForVisit(visitId) {
+  const result = await pool.query(
+    `SELECT p.name AS phenomenon, rm.value_numeric, rm.measured_at
+     FROM   field_visits fv
+     JOIN   station_data_streams sds ON sds.station_id = fv.station_id
+     JOIN   raw_measurements rm      ON rm.stream_id   = sds.id
+     JOIN   phenomena p              ON p.id           = rm.phenomenon_id
+     WHERE  fv.id  = $1
+       AND  p.name IN ('temp_c', 'batt_v')
+       AND  rm.measured_at BETWEEN fv.visited_at - INTERVAL '24 hours'
+                                AND fv.visited_at + INTERVAL '1 hour'
+     ORDER  BY rm.measured_at DESC`,
+    [visitId]
+  );
+  const snapshot = {};
+  for (const row of result.rows) {
+    if (!snapshot[row.phenomenon]) {
+      snapshot[row.phenomenon] = { value: parseFloat(row.value_numeric), measured_at: row.measured_at };
+    }
+  }
+  return snapshot;
+}
+
 async function resetFileToPending(id) {
   const result = await pool.query(
     `UPDATE uploaded_files
@@ -1213,4 +1269,6 @@ module.exports = {
   upsertStationGaps,
   deleteStaleGaps,
   getStationGaps,
+  getLoggerSnapshotForVisit,
+  getStationLoggerSnapshots,
 };

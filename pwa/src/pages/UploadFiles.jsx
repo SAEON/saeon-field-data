@@ -2,23 +2,258 @@ import { useState, useRef, useEffect } from 'react';
 import { uploadFile, reparseFile, deleteFile, getVisit, getStationCoverage } from '../services/api.js';
 
 const FORMAT_MAP = {
-  xle:  { label: 'Solonist XLE',  icon: '⊥', families: ['groundwater'] },
-  xml:  { label: 'Solonist XML',  icon: '⊥', families: ['groundwater'] },
-  dat:  { label: 'Campbell TOA5', icon: '△', families: ['met'] },
-  csv:  { label: 'HOBO / STOM',   icon: '≀', families: ['met'] },
-  hobo: { label: 'HOBO Binary',   icon: '≀', families: ['rainfall'] },
+  xle: { label: 'Solonist XLE',  icon: '⊥', families: ['groundwater'] },
+  xml: { label: 'Solonist XML',  icon: '⊥', families: ['groundwater'] },
+  dat: { label: 'Campbell TOA5', icon: '△', families: ['met'] },
+  csv: { label: 'HOBO / STOM',   icon: '≀', families: ['rainfall', 'met'] },
 };
 
 // Accepted extensions and MIME accept string per family
 const FAMILY_ACCEPT = {
   groundwater: '.xle,.xml',
-  rainfall:    '.hobo',
+  rainfall:    '.csv',
   met:         '.dat,.csv',
-  default:     '.csv,.dat,.xle,.xml,.hobo',
+  default:     '.csv,.dat,.xle,.xml',
 };
 
 // States where the file already exists on the server
 const ON_SERVER = new Set(['pending', 'parsed', 'error', 'retrying']);
+
+// ── Client-side CSV preview scanner ───────────────────────────────────────
+// Reads the file in the browser, scans headers + data rows, returns a summary.
+// Non-blocking: returns null on any parse error so the upload can still proceed.
+function splitCSVLine(line) {
+  const fields = [];
+  let cur = '', inQ = false;
+  for (const ch of line) {
+    if (ch === '"') { inQ = !inQ; continue; }
+    if (ch === ',' && !inQ) { fields.push(cur.trim()); cur = ''; continue; }
+    cur += ch;
+  }
+  fields.push(cur.trim());
+  return fields;
+}
+
+function fmtPreviewDate(raw) {
+  // Handles YY/MM/DD, YYYY/MM/DD, MM/DD/YY [AM/PM] — shows local date only
+  const s = raw.replace(/"/g, '').trim();
+  const m1 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (!m1) return raw;
+  let [, a, b, c] = m1;
+  let yr, mo, dy;
+  if (c.length === 4) { yr = +c; mo = +a; dy = +b; }  // MM/DD/YYYY
+  else if (+a > 12)   { yr = 2000 + +a; mo = +b; dy = +c; } // YY/MM/DD
+  else                { yr = 2000 + +c; mo = +a; dy = +b; } // MM/DD/YY
+  const d = new Date(yr, mo - 1, dy);
+  return d.toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function cleanColHeader(raw) {
+  return raw
+    .replace(/\s*\(LGR\s+S\/N:.*?\)/gi, '')
+    .replace(/\s+LGR\s+S\/N:.*$/i, '')
+    .replace(/\s+#\d+.*$/, '')
+    .replace(/^["']|["']$/g, '')
+    .trim();
+}
+
+async function previewHoboCSV(rawFile) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onerror = () => resolve(null);
+    reader.onload = e => {
+      try {
+        const lines = e.target.result.replace(/^﻿/, '').split(/\r?\n/);
+
+        // Locate header row (first row containing "date" or "time")
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(3, lines.length); i++) {
+          if (/date|time/i.test(lines[i])) { headerIdx = i; break; }
+        }
+        if (headerIdx === -1) return resolve(null);
+
+        const headers   = splitCSVLine(lines[headerIdx]);
+        const colOffset = headers[0].replace(/"/g, '').trim() === '#' ? 1 : 0;
+
+        // Table headers: skip the id (#) column, clean labels
+        const tableHeaders = headers.slice(colOffset).map(cleanColHeader);
+
+        // Identify column indices for rain, temp, batt; extract serial from headers
+        let rainIdx = -1, tempIdx = -1, battIdx = -1, serial = null;
+        for (let i = colOffset + 1; i < headers.length; i++) {
+          const raw = headers[i];
+          const h   = raw.toLowerCase().replace(/"/g, '');
+          if (!serial) {
+            const m = raw.match(/LGR\s+S\/N:\s*(\d+)/i) || raw.match(/#(\d+)/);
+            if (m) serial = m[1];
+          }
+          if (rainIdx < 0 && (h.includes('rain') || h.includes('event'))) rainIdx = i;
+          if (tempIdx < 0 && h.includes('temp')) tempIdx = i;
+          if (battIdx < 0 && h.includes('batt')) battIdx = i;
+        }
+
+        let tipCount = 0, totalMm = 0, prevRain = 0;
+        let firstTs = null, lastTs = null;
+        let tempMin = Infinity, tempMax = -Infinity, lastBatt = null;
+        const tableRows = [];
+
+        for (let i = headerIdx + 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          const f = splitCSVLine(line);
+          if (f.length < 2) continue;
+
+          const ts = (f[colOffset] || '').replace(/"/g, '').trim();
+          if (!ts) continue;
+
+          // Collect row for table (skip id col)
+          tableRows.push(f.slice(colOffset).map(v => v.replace(/^"|"$/g, '')));
+
+          if (rainIdx >= 0) {
+            const v = parseFloat(f[rainIdx]);
+            if (!isNaN(v)) {
+              const delta = v - prevRain;
+              if (delta > 0) {
+                tipCount++;
+                totalMm += delta;
+                if (!firstTs) firstTs = ts;
+                lastTs = ts;
+              }
+              prevRain = v;
+            }
+          }
+          if (tempIdx >= 0) {
+            const v = parseFloat(f[tempIdx]);
+            if (!isNaN(v)) { tempMin = Math.min(tempMin, v); tempMax = Math.max(tempMax, v); }
+          }
+          if (battIdx >= 0) {
+            const v = parseFloat(f[battIdx]);
+            if (!isNaN(v)) lastBatt = v;
+          }
+        }
+
+        resolve({
+          serial,
+          tipCount,
+          totalMm:      parseFloat(totalMm.toFixed(3)),
+          firstTs:      firstTs ? fmtPreviewDate(firstTs) : null,
+          lastTs:       lastTs  ? fmtPreviewDate(lastTs)  : null,
+          tempMin:      tempMin === Infinity  ? null : parseFloat(tempMin.toFixed(1)),
+          tempMax:      tempMax === -Infinity ? null : parseFloat(tempMax.toFixed(1)),
+          lastBatt:     lastBatt != null ? parseFloat(lastBatt.toFixed(2)) : null,
+          tableHeaders,
+          tableRows,
+        });
+      } catch { resolve(null); }
+    };
+    reader.readAsText(rawFile, 'utf-8');
+  });
+}
+
+const PAGE_SIZE = 20;
+
+function FilePreviewCard({ raw, preview }) {
+  const [page, setPage] = useState(0);
+  if (!preview) {
+    return (
+      <div className="rounded-xl p-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="text-[12px] font-semibold text-text-dark truncate mb-1">{raw.name}</div>
+        <div className="text-[11px] text-text-light">Preview not available — file will still upload normally.</div>
+      </div>
+    );
+  }
+
+  const totalPages = Math.ceil(preview.tableRows.length / PAGE_SIZE);
+  const pageRows   = preview.tableRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+      {/* Summary strip */}
+      <div className="px-3 py-2.5" style={{ background: 'var(--color-surface)' }}>
+        <div className="text-[12px] font-semibold text-text-dark truncate mb-2">{raw.name}</div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {preview.serial && (
+            <span className="text-[11px] text-text-light">Serial <span className="font-semibold text-text-dark">{preview.serial}</span></span>
+          )}
+          {preview.firstTs && preview.lastTs && (
+            <span className="text-[11px] text-text-light">
+              Period <span className="font-semibold text-text-dark">{preview.firstTs} – {preview.lastTs}</span>
+            </span>
+          )}
+          {preview.tipCount > 0 && (
+            <span className="text-[11px] text-text-light">
+              Tips <span className="font-semibold text-text-dark">{preview.tipCount.toLocaleString()} · {preview.totalMm.toFixed(1)} mm</span>
+            </span>
+          )}
+          {preview.tempMin != null && (
+            <span className="text-[11px] text-text-light">
+              Temp <span className="font-semibold text-text-dark">{preview.tempMin}–{preview.tempMax}°C</span>
+            </span>
+          )}
+          {preview.lastBatt != null && (
+            <span className="text-[11px] text-text-light">
+              Batt <span className="font-semibold text-text-dark">{preview.lastBatt} V</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Raw data table */}
+      <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 300, borderTop: '1px solid var(--color-border)' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, fontFamily: 'monospace' }}>
+          <thead>
+            <tr style={{ background: 'var(--color-surface-dark)' }}>
+              <th style={{ padding: '4px 6px', textAlign: 'right', color: 'var(--color-text-light)', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--color-border)' }}>#</th>
+              {preview.tableHeaders.map((h, i) => (
+                <th key={i} style={{ padding: '4px 8px', textAlign: 'left', color: 'var(--color-text-light)', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid var(--color-border)' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {pageRows.map((row, ri) => {
+              const absRow = page * PAGE_SIZE + ri + 1;
+              return (
+                <tr key={ri} style={{ background: ri % 2 === 0 ? 'white' : 'var(--color-surface)' }}>
+                  <td style={{ padding: '3px 6px', textAlign: 'right', color: 'var(--color-text-light)', borderBottom: '1px solid var(--color-surface-dark)' }}>{absRow}</td>
+                  {row.map((cell, ci) => (
+                    <td key={ci} style={{ padding: '3px 8px', whiteSpace: 'nowrap', color: cell ? 'var(--color-text-dark)' : 'var(--color-text-light)', borderBottom: '1px solid var(--color-surface-dark)' }}>
+                      {cell || '—'}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-3 py-2" style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+          <button
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="text-[10px] font-semibold px-2 py-1 rounded"
+            style={{ color: page === 0 ? 'var(--color-text-light)' : 'var(--color-blue)', background: 'none', border: 'none', cursor: page === 0 ? 'default' : 'pointer' }}
+          >
+            ← Prev
+          </button>
+          <span className="text-[11px] text-text-light">
+            Rows {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, preview.tableRows.length)} of {preview.tableRows.length.toLocaleString()}
+          </span>
+          <button
+            onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+            disabled={page === totalPages - 1}
+            className="text-[10px] font-semibold px-2 py-1 rounded"
+            style={{ color: page === totalPages - 1 ? 'var(--color-text-light)' : 'var(--color-blue)', background: 'none', border: 'none', cursor: page === totalPages - 1 ? 'default' : 'pointer' }}
+          >
+            Next →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function detectFormat(filename) {
   const ext = filename.split('.').pop().toLowerCase();
@@ -41,10 +276,11 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
     .filter(([, v]) => !dataFamily || v.families.includes(dataFamily))
     .reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {});
   const acceptAttr = FAMILY_ACCEPT[dataFamily] || FAMILY_ACCEPT.default;
-  const [dragging,      setDragging]      = useState(false);
-  const [pendingDelete, setPendingDelete] = useState(null); // localId awaiting delete confirm
-  const [deleting,      setDeleting]      = useState(false);
-  const [coverageEnd,   setCoverageEnd]   = useState(null);
+  const [dragging,        setDragging]        = useState(false);
+  const [pendingDelete,   setPendingDelete]   = useState(null); // localId awaiting delete confirm
+  const [deleting,        setDeleting]        = useState(false);
+  const [coverageEnd,     setCoverageEnd]     = useState(null);
+  const [pendingPreviews, setPendingPreviews] = useState(null); // [{ raw, preview }] awaiting confirm
   const fileInputRef   = useRef(null);
   const pollTimers     = useRef({});   // localId → timeout handle
   const onlineTimer    = useRef(null);
@@ -145,8 +381,20 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
     }
   }
 
-  function addFiles(fileList) {
-    const added = Array.from(fileList).map((raw, i) => {
+  async function addFiles(fileList) {
+    const rawFiles = Array.from(fileList);
+    // Scan each CSV for preview; non-CSV files get null preview (no gate)
+    const previews = await Promise.all(rawFiles.map(async raw => {
+      const ext = raw.name.split('.').pop().toLowerCase();
+      const preview = ext === 'csv' ? await previewHoboCSV(raw) : null;
+      return { raw, preview };
+    }));
+    setPendingPreviews(previews);
+  }
+
+  function confirmPreviews() {
+    if (!pendingPreviews) return;
+    const added = pendingPreviews.map(({ raw }, i) => {
       const abortController = new AbortController();
       return {
         localId:         `${Date.now()}-${i}`,
@@ -160,6 +408,7 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
         records:         null,
       };
     });
+    setPendingPreviews(null);
     setFiles(prev => [...prev, ...added]);
     added.forEach(f => doUpload(f.localId, f.raw, f.abortController));
   }
@@ -471,6 +720,47 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
           </div>
         )}
       </div>
+
+      {/* ── Upload preview sheet ────────────────────────────────── */}
+      {pendingPreviews && (
+        <div className="back-sheet-overlay">
+          <div className="back-sheet" style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: 0 }}>
+            {/* Header */}
+            <div className="px-4 pt-4 pb-3" style={{ borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
+              <div className="text-[15px] font-bold text-text-dark">
+                Preview{pendingPreviews.length > 1 ? ` — ${pendingPreviews.length} files` : ''}
+              </div>
+              <div className="text-[12px] text-text-light mt-0.5">
+                Review your data before uploading.
+              </div>
+            </div>
+
+            {/* Scrollable file cards */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
+              {pendingPreviews.map(({ raw, preview }, idx) => (
+                <FilePreviewCard key={idx} raw={raw} preview={preview} />
+              ))}
+            </div>
+
+            {/* Action buttons */}
+            <div className="px-4 py-3 flex gap-2.5" style={{ borderTop: '1px solid var(--color-border)', flexShrink: 0 }}>
+              <button
+                onClick={() => setPendingPreviews(null)}
+                className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmPreviews}
+                className="flex-1 h-12 border-none rounded-xl text-white text-sm font-semibold"
+                style={{ background: 'var(--color-blue)' }}
+              >
+                Upload
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Delete confirmation sheet ───────────────────────────── */}
       {pendingDeleteFile && (
