@@ -281,6 +281,7 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
   const [deleting,        setDeleting]        = useState(false);
   const [coverageEnd,     setCoverageEnd]     = useState(null);
   const [pendingPreviews, setPendingPreviews] = useState(null); // [{ raw, preview }] awaiting confirm
+  const [rejectedFiles,   setRejectedFiles]   = useState([]);   // file names blocked upfront
   const fileInputRef   = useRef(null);
   const pollTimers     = useRef({});   // localId → timeout handle
   const onlineTimer    = useRef(null);
@@ -382,9 +383,18 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
   }
 
   async function addFiles(fileList) {
-    const rawFiles = Array.from(fileList);
-    // Scan each CSV for preview; non-CSV files get null preview (no gate)
-    const previews = await Promise.all(rawFiles.map(async raw => {
+    const allowedExts = new Set(
+      acceptAttr.split(',').map(s => s.trim().replace(/^\./, '').toLowerCase())
+    );
+    const accepted = [];
+    const rejected = [];
+    for (const f of Array.from(fileList)) {
+      const ext = f.name.split('.').pop().toLowerCase();
+      (allowedExts.has(ext) ? accepted : rejected).push(f);
+    }
+    setRejectedFiles(rejected.map(f => f.name));
+    if (accepted.length === 0) return;
+    const previews = await Promise.all(accepted.map(async raw => {
       const ext = raw.name.split('.').pop().toLowerCase();
       const preview = ext === 'csv' ? await previewHoboCSV(raw) : null;
       return { raw, preview };
@@ -439,7 +449,7 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
       clearTimeout(pollTimers.current[localId]);
       delete pollTimers.current[localId];
       setFiles(prev => prev.filter(f => f.localId !== localId));
-    } else if (ON_SERVER.has(f.parseState)) {
+    } else if (ON_SERVER.has(f.parseState) && f.dbId) {
       // File landed on server — must confirm before DELETE /api/files/:id
       setPendingDelete(localId);
     } else {
@@ -568,6 +578,32 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
               onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
               className="hidden"
             />
+          </div>
+        )}
+
+        {/* ── Rejected file warning ──────────────────────────────── */}
+        {rejectedFiles.length > 0 && (
+          <div
+            className="rounded-xl px-3.5 py-2.5 mb-3 flex items-start justify-between gap-2"
+            style={{ background: '#FFF3E0', border: '1px solid #E6510033' }}
+          >
+            <div>
+              <div className="text-[12px] font-semibold" style={{ color: '#E65100' }}>
+                {rejectedFiles.length === 1
+                  ? `"${rejectedFiles[0]}" is not an accepted format`
+                  : `${rejectedFiles.length} files are not an accepted format`}
+              </div>
+              <div className="text-[11px] mt-0.5" style={{ color: '#795548' }}>
+                Only {acceptAttr.replace(/,/g, ', ')} files are accepted for this station.
+              </div>
+            </div>
+            <button
+              onClick={() => setRejectedFiles([])}
+              className="text-[14px] shrink-0 mt-0.5"
+              style={{ color: '#E65100', background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              ✕
+            </button>
           </div>
         )}
 
