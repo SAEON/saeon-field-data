@@ -39,6 +39,7 @@ CREATE TABLE users (
 
   display_name      TEXT,
   initials          VARCHAR(2),
+  department        TEXT,
   last_login        TIMESTAMPTZ,
   active            BOOLEAN NOT NULL DEFAULT true,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()

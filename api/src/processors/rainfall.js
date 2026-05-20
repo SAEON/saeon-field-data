@@ -1,7 +1,7 @@
 const db = require('../db/queries');
 const { log } = require('../middleware/logger');
 
-const DEFAULT_MM_PER_TIP   = 0.254; // fallback when no instrument_history exists
+const DEFAULT_MM_PER_TIP   = 0.254;
 const INTERFERE_WINDOW_MS  = 600_000;
 const ANOMALY_THRESHOLD_MM = 10;
 
@@ -17,8 +17,10 @@ function getMmPerTip(periods, measuredAt, rawMmPerTip) {
 
 function to5MinBucket(date) {
   const d = new Date(date);
+  const totalSec  = d.getUTCMinutes() * 60 + d.getUTCSeconds();
+  const bucketSec = Math.ceil(totalSec / 300) * 300;
   d.setUTCSeconds(0, 0);
-  d.setUTCMinutes(Math.floor(d.getUTCMinutes() / 5) * 5);
+  d.setUTCMinutes(bucketSec / 60);
   return d;
 }
 
@@ -30,9 +32,6 @@ function classifyTips(tips, visitTimes, pseudoWindows) {
     const tip = tips[i];
     const ts  = new Date(tip.measured_at).getTime();
 
-    // Only the LATER of a 1-second pair is the bounce — keep the earlier (real) tip.
-    // R spec: double_tips vector is prepended with FALSE so only tip[i] is marked
-    // when |date_time[i] − date_time[i−1]| == 1.
     const prevMs = i > 0 ? new Date(tips[i - 1].measured_at).getTime() : null;
     if (prevMs !== null && ts - prevMs === 1000) {
       result.set(tip.id, { flag: 'double_tip', reason: '1s_bounce' });
@@ -49,8 +48,6 @@ function classifyTips(tips, visitTimes, pseudoWindows) {
     if (entry.flag) { result.set(tip.id, entry); continue; }
 
     for (const vt of visitTimes) {
-      // R spec line 156: raining gates ALL false-tip types — if it was raining
-      // during this visit, tips near the download are real rainfall, not interfere.
       if (vt.raining) continue;
       if (Math.abs(ts - vt.time.getTime()) <= INTERFERE_WINDOW_MS) {
         entry = { flag: 'interfere', reason: 'visit_proximity' };

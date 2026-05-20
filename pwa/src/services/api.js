@@ -204,19 +204,19 @@ export function getUsers() {
   return request('/api/users');
 }
 
-export function createUser({ email, full_name, role }) {
+export function createUser({ email, full_name, role, department }) {
   return request('/api/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, full_name, role }),
+    body: JSON.stringify({ email, full_name, role, department }),
   });
 }
 
-export function updateUser(userId, { role, active }) {
+export function updateUser(userId, { role, active, department }) {
   return request(`/api/users/${userId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role, active }),
+    body: JSON.stringify({ role, active, department }),
   });
 }
 

@@ -28,6 +28,8 @@ function Fab({ label, onPress }) {
   );
 }
 
+const DEPARTMENTS = ['EFTEON', 'GFW', 'SMCRI'];
+
 function RoleBadge({ role }) {
   const MAP = {
     technician:      { label: 'Technician', bg: '#F5F5F5', color: '#616161' },
@@ -41,6 +43,18 @@ function RoleBadge({ role }) {
       borderRadius: 4, background: s.bg, color: s.color,
     }}>
       {s.label}
+    </span>
+  );
+}
+
+function DeptBadge({ department }) {
+  if (!department) return null;
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 700, padding: '2px 7px',
+      borderRadius: 4, background: '#F3E5F5', color: '#6A1B9A',
+    }}>
+      {department}
     </span>
   );
 }
@@ -67,6 +81,7 @@ function AddUserSheet({ isLead, onClose, onCreated }) {
   const [search,     setSearch]     = useState('');
   const [selected,   setSelected]   = useState(null); // { keycloak_id, email, full_name }
   const [role,       setRole]       = useState('technician');
+  const [department, setDepartment] = useState('');
   const [saving,     setSaving]     = useState(false);
 
   useEffect(() => {
@@ -82,14 +97,15 @@ function AddUserSheet({ isLead, onClose, onCreated }) {
   });
 
   async function handleAdd() {
-    if (!selected) return;
+    if (!selected || !department) return;
     setSaving(true);
     setError(null);
     try {
       const user = await createUser({
-        email:     selected.email,
-        full_name: selected.full_name,
+        email:      selected.email,
+        full_name:  selected.full_name,
         role,
+        department,
       });
       onCreated(user);
       onClose();
@@ -144,22 +160,32 @@ function AddUserSheet({ isLead, onClose, onCreated }) {
           ))}
         </div>
 
-        {/* Role picker — leads locked to technician */}
+        {/* Role + department pickers */}
         {selected && (
-          <div className="mb-3">
-            <div className={labelCls}>Role in FDS</div>
-            {isLead ? (
-              <div className="px-3 py-2 rounded-xl bg-surface text-[12px] text-text-light">
-                Role will be set to <strong>Technician</strong>. Only a Data Manager can assign elevated roles.
-              </div>
-            ) : (
-              <select className={inputCls} value={role} onChange={e => setRole(e.target.value)}>
-                <option value="technician">Technician</option>
-                <option value="technician_lead">Technician Lead</option>
-                <option value="data_manager">Data Manager</option>
+          <>
+            <div className="mb-3">
+              <div className={labelCls}>Role in FDS</div>
+              {isLead ? (
+                <div className="px-3 py-2 rounded-xl bg-surface text-[12px] text-text-light">
+                  Role will be set to <strong>Technician</strong>. Only a Data Manager can assign elevated roles.
+                </div>
+              ) : (
+                <select className={inputCls} value={role} onChange={e => setRole(e.target.value)}>
+                  <option value="technician">Technician</option>
+                  <option value="technician_lead">Technician Lead</option>
+                  <option value="data_manager">Data Manager</option>
+                </select>
+              )}
+            </div>
+
+            <div className="mb-3">
+              <div className={labelCls}>Department</div>
+              <select className={inputCls} value={department} onChange={e => setDepartment(e.target.value)}>
+                <option value="">Select department…</option>
+                {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
-            )}
-          </div>
+            </div>
+          </>
         )}
 
         {error && <div className="text-[12px] text-error mb-3">{error}</div>}
@@ -169,9 +195,9 @@ function AddUserSheet({ isLead, onClose, onCreated }) {
             className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
             Cancel
           </button>
-          <button onClick={handleAdd} disabled={!selected || saving}
+          <button onClick={handleAdd} disabled={!selected || !department || saving}
             className="flex-1 h-12 rounded-xl text-white text-sm font-semibold border-none"
-            style={{ background: selected ? 'var(--color-navy)' : '#BDBDBD' }}>
+            style={{ background: selected && department ? 'var(--color-navy)' : '#BDBDBD' }}>
             {saving ? 'Adding…' : 'Add'}
           </button>
         </div>
@@ -182,16 +208,21 @@ function AddUserSheet({ isLead, onClose, onCreated }) {
 
 // ── Edit role sheet (data_manager only) ─────────────────────────────────────
 function EditRoleSheet({ user, onClose, onUpdated }) {
-  const [role,   setRole]   = useState(user.role);
-  const [saving, setSaving] = useState(false);
-  const [error,  setError]  = useState(null);
+  const [role,       setRole]       = useState(user.role);
+  const [department, setDepartment] = useState(user.department ?? '');
+  const [saving,     setSaving]     = useState(false);
+  const [error,      setError]      = useState(null);
 
   async function handleSave() {
-    if (role === user.role) { onClose(); return; }
+    const unchanged = role === user.role && department === (user.department ?? '');
+    if (unchanged) { onClose(); return; }
     setSaving(true);
     setError(null);
     try {
-      const updated = await updateUser(user.id, { role });
+      const updated = await updateUser(user.id, {
+        role,
+        department: department || null,
+      });
       onUpdated(updated);
       onClose();
     } catch (err) {
@@ -207,14 +238,20 @@ function EditRoleSheet({ user, onClose, onUpdated }) {
   return (
     <div className="back-sheet-overlay">
       <div className="back-sheet">
-        <div className="text-[15px] font-bold text-text-dark mb-1">Edit role</div>
+        <div className="text-[15px] font-bold text-text-dark mb-1">Edit user</div>
         <div className="text-[12px] text-text-light mb-4">{user.full_name ?? user.email}</div>
 
         <div className={labelCls}>Role</div>
-        <select className={inputCls} value={role} onChange={e => setRole(e.target.value)}>
+        <select className={inputCls + ' mb-3'} value={role} onChange={e => setRole(e.target.value)}>
           <option value="technician">Technician</option>
           <option value="technician_lead">Technician Lead</option>
           <option value="data_manager">Data Manager</option>
+        </select>
+
+        <div className={labelCls}>Department</div>
+        <select className={inputCls} value={department} onChange={e => setDepartment(e.target.value)}>
+          <option value="">None</option>
+          {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
 
         {error && <div className="text-[12px] text-error mt-3">{error}</div>}
@@ -389,6 +426,7 @@ function UserRow({ user, isManager, isLead, isSelf, toggling, onToggle, onEditRo
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
+        <DeptBadge department={user.department} />
         <RoleBadge role={user.role} />
 
         {isManager && !isSelf && (

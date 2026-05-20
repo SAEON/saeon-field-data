@@ -907,7 +907,8 @@ async function getRainfallSummary(stationId, from, to) {
        COALESCE(SUM(non_rainfall_count), 0)::integer           AS non_rainfall_count,
        COUNT(*) FILTER (WHERE is_anomaly)::integer             AS anomaly_count,
        MIN(period_start)                                       AS first_record,
-       MAX(period_start)                                       AS last_record
+       MAX(period_start)                                       AS last_record,
+       (SELECT MIN(period_start) FROM rainfall WHERE station_id = $1) AS earliest_record
      FROM rainfall
      WHERE station_id = $1
        AND period_start BETWEEN $2 AND $3`,
@@ -980,7 +981,7 @@ async function getAllUsers({ role } = {}) {
   const clauses = ['1=1'];
   if (role) { params.push(role); clauses.push(`role = $${params.length}`); }
   const result = await pool.query(
-    `SELECT id, email, full_name, display_name, initials, role, active, last_login, created_at
+    `SELECT id, email, full_name, display_name, initials, role, department, active, last_login, created_at
      FROM   users
      WHERE  ${clauses.join(' AND ')}
      ORDER  BY full_name`,
@@ -989,27 +990,27 @@ async function getAllUsers({ role } = {}) {
   return result.rows;
 }
 
-async function createUser({ email, fullName, initials, role }) {
+async function createUser({ email, fullName, initials, role, department }) {
   const result = await pool.query(
-    `INSERT INTO users (email, full_name, display_name, initials, role, active)
-     VALUES ($1, $2, $2, $3, $4, true)
-     RETURNING id, email, full_name, display_name, initials, role, active, created_at`,
-    [email, fullName, initials, role]
+    `INSERT INTO users (email, full_name, display_name, initials, role, department, active)
+     VALUES ($1, $2, $2, $3, $4, $5, true)
+     RETURNING id, email, full_name, display_name, initials, role, department, active, created_at`,
+    [email, fullName, initials, role, department ?? null]
   );
   return result.rows[0];
 }
 
-// Only role and active are editable — everything else comes from Keycloak on first login
-async function updateUser(id, { role, active }) {
+async function updateUser(id, { role, active, department }) {
   const sets = [];
   const vals = [id];
   let i = 2;
-  if (role   !== undefined) { sets.push(`role = $${i++}`);   vals.push(role); }
-  if (active !== undefined) { sets.push(`active = $${i++}`); vals.push(active); }
+  if (role       !== undefined) { sets.push(`role = $${i++}`);       vals.push(role); }
+  if (active     !== undefined) { sets.push(`active = $${i++}`);     vals.push(active); }
+  if (department !== undefined) { sets.push(`department = $${i++}`); vals.push(department); }
   if (!sets.length) return null;
   const result = await pool.query(
     `UPDATE users SET ${sets.join(', ')} WHERE id = $1
-     RETURNING id, email, full_name, display_name, initials, role, active`,
+     RETURNING id, email, full_name, display_name, initials, role, department, active`,
     vals
   );
   return result.rows[0] || null;

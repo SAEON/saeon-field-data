@@ -79,6 +79,10 @@ function RainfallOverview() {
                     {sd?.summary
                       ? (() => {
                           const sum = sd.summary;
+                          if (!sum.first_record && sum.earliest_record) {
+                            const year = new Date(sum.earliest_record).getFullYear();
+                            return <span style={{ color: 'var(--color-text-light)' }}>No data in last 12 months · data from {year}</span>;
+                          }
                           const flagged = (sum.double_tip_count || 0) + (sum.interfere_count || 0) + (sum.pseudo_event_count || 0);
                           return <>{parseFloat(sum.total_mm || 0).toFixed(1)} mm · {flagged > 0 ? <span style={{ color: '#E65100' }}>{flagged} flagged tip{flagged !== 1 ? 's' : ''}</span> : '0 flagged tips'}</>;
                         })()

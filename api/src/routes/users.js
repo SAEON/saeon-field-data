@@ -97,7 +97,7 @@ router.get('/', requireRole('technician_lead'), async (req, res, next) => {
 // =============================================================
 router.post('/', requireRole('technician_lead'), async (req, res, next) => {
   try {
-    const { email, full_name, role } = req.body;
+    const { email, full_name, role, department } = req.body;
 
     if (!email || !full_name || !role) {
       return res.status(400).json({ error: 'email, full_name, and role are required' });
@@ -106,6 +106,11 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
     const VALID_ROLES = ['technician', 'technician_lead', 'data_manager'];
     if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` });
+    }
+
+    const DEPARTMENTS = ['EFTEON', 'GFW', 'SMCRI'];
+    if (!department || !DEPARTMENTS.includes(department)) {
+      return res.status(400).json({ error: `department must be one of: ${DEPARTMENTS.join(', ')}` });
     }
 
     // A caller can only create accounts strictly below their own level (leads → technicians; managers → any)
@@ -120,7 +125,7 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
     const parts    = full_name.trim().split(/\s+/).filter(Boolean);
     const initials = ((parts[0]?.[0] ?? '') + (parts[parts.length - 1]?.[0] ?? '')).toUpperCase();
 
-    const user = await db.createUser({ email, fullName: full_name, initials, role });
+    const user = await db.createUser({ email, fullName: full_name, initials, role, department });
     res.status(201).json(user);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'A user with that email already exists' });
@@ -139,7 +144,7 @@ router.patch('/:id', requireRole('technician_lead'), async (req, res, next) => {
     const target = await db.getUserById(id);
     if (!target) return res.status(404).json({ error: 'User not found' });
 
-    const { role, active } = req.body;
+    const { role, active, department } = req.body;
 
     const callerLevel   = ROLE_HIERARCHY[req.user.roles[0]] ?? 0;
     const targetLevel   = ROLE_HIERARCHY[target.role] ?? 0;
@@ -157,7 +162,14 @@ router.patch('/:id', requireRole('technician_lead'), async (req, res, next) => {
       }
     }
 
-    const updated = await db.updateUser(id, { role, active });
+    if (department !== undefined) {
+      const DEPARTMENTS = ['EFTEON', 'GFW', 'SMCRI'];
+      if (!DEPARTMENTS.includes(department)) {
+        return res.status(400).json({ error: `department must be one of: ${DEPARTMENTS.join(', ')}` });
+      }
+    }
+
+    const updated = await db.updateUser(id, { role, active, department });
     if (!updated) return res.status(400).json({ error: 'No valid fields to update' });
 
     res.json(updated);

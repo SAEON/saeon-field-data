@@ -1,0 +1,2 @@
+# Force-include CSV sample files despite root *.csv rule
+!*.csv
