@@ -68,6 +68,7 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
   const [fetching,     setFetching]     = useState(false);
   const [fetchErr,     setFetchErr]     = useState(null);
   const [reprocessing, setReprocessing] = useState(false);
+  const [refreshKey,   setRefreshKey]   = useState(0);
   const [page,         setPage]         = useState(1);
   const [pageSize,     setPageSize]     = useState(50);
   const [gaps,         setGaps]         = useState([]);
@@ -95,14 +96,14 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
         .finally(() => setFetching(false));
     }, 400);
     return () => clearTimeout(debounceRef.current);
-  }, [stationId, from, to, resolution]);
+  }, [stationId, from, to, resolution, refreshKey]);
 
   function handleReprocess() {
     if (!stationId) return;
     setReprocessing(true);
     processStationRainfall(stationId).finally(() => {
       setReprocessing(false);
-      setTo(isoDate(new Date()));
+      setRefreshKey(k => k + 1);
     });
   }
 
