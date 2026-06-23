@@ -9,7 +9,7 @@ export async function initLoginFlow() {
   return r.json();
 }
 
-export async function submitLogin(flowId, identifier, password) {
+export async function submitLogin(flowId, csrfToken, identifier, password) {
   const r = await fetch(`${BASE}/self-service/login?flow=${flowId}`, {
     method: 'POST',
     headers: {
@@ -17,7 +17,7 @@ export async function submitLogin(flowId, identifier, password) {
       Accept: 'application/json',
     },
     credentials: 'include',
-    body: JSON.stringify({ method: 'password', identifier, password }),
+    body: JSON.stringify({ method: 'password', identifier, password, csrf_token: csrfToken }),
   });
   const data = await r.json();
   if (!r.ok) throw data;

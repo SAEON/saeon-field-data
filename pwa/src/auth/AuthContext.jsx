@@ -53,8 +53,10 @@ export function AuthProvider({ children }) {
   }, [userFields]);
 
   const login = useCallback(async (email, password) => {
-    const { id: flowId } = await initLoginFlow();
-    await submitLogin(flowId, email, password);
+    const flow = await initLoginFlow();
+    const csrfNode = flow.ui?.nodes?.find(n => n.attributes?.name === 'csrf_token');
+    const csrfToken = csrfNode?.attributes?.value ?? '';
+    await submitLogin(flow.id, csrfToken, email, password);
     setJustSignedOut(false);
     await applySession();
   }, [applySession]);
