@@ -16,7 +16,7 @@ async function requireAuth(req, res, next) {
   }
 
   const { id: kratosId, traits } = identity;
-  const { email, name } = traits;
+  const { email, name, role: kratosRole } = traits;
 
   try {
     const existing = await pool.query(
@@ -27,9 +27,11 @@ async function requireAuth(req, res, next) {
     let dbUser;
     if (existing.rows.length === 0) {
       const initials = deriveInitials(name);
+      const VALID_ROLES = ['technician', 'technician_lead', 'data_manager'];
+      const initialRole = VALID_ROLES.includes(kratosRole) ? kratosRole : 'technician';
       const result = await pool.query(
         `INSERT INTO users (auth_provider_id, auth_provider, email, full_name, display_name, initials, role, active)
-         VALUES ($1, 'kratos', $2, $3, $3, $4, 'technician', true)
+         VALUES ($1, 'kratos', $2, $3, $3, $4, $5, true)
          ON CONFLICT (email) DO UPDATE
            SET auth_provider_id = EXCLUDED.auth_provider_id,
                auth_provider    = 'kratos',
@@ -37,7 +39,7 @@ async function requireAuth(req, res, next) {
                initials         = EXCLUDED.initials,
                full_name        = COALESCE(users.full_name, EXCLUDED.full_name)
          RETURNING id, role, active`,
-        [kratosId, email, name, initials]
+        [kratosId, email, name, initials, initialRole]
       );
       dbUser = result.rows[0];
     } else {
