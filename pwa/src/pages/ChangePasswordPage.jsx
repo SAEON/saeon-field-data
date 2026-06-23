@@ -52,7 +52,7 @@ export default function ChangePasswordPage() {
         </div>
         <div style={{ fontSize: 19, fontWeight: 800, color: '#0D1B2E' }}>Set your password</div>
         <div style={{ fontSize: 12, color: '#8A9BB0', marginTop: 6, maxWidth: 300 }}>
-          Welcome{full_name ? `, ${full_name.split(' ')[0]}` : ''}. Please choose a personal password before continuing.
+          Please choose a personal password before continuing.
         </div>
       </div>
 

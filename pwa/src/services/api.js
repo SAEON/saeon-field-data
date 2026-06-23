@@ -214,7 +214,7 @@ export function updateUser(userId, { role, active, department }) {
 }
 
 export function acknowledgePasswordChange() {
-  return request('/api/users/me/password-changed', { method: 'PATCH' });
+  return request('/api/users/me/password-changed', { method: 'POST' });
 }
 
 // ── Rainfall ───────────────────────────────────────────────────────────────

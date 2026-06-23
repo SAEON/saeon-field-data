@@ -61,8 +61,8 @@ router.get('/me', async (req, res, next) => {
   }
 });
 
-// PATCH /api/users/me/password-changed — clear the forced-change flag after user sets new password
-router.patch('/me/password-changed', async (req, res, next) => {
+// POST /api/users/me/password-changed — clear the forced-change flag after user sets new password
+router.post('/me/password-changed', async (req, res, next) => {
   try {
     await db.clearPasswordChangeRequired(req.user.id);
     res.json({ ok: true });
