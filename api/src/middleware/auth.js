@@ -1,17 +1,13 @@
 const pool = require('../db/pool');
 
 async function requireAuth(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Missing session token' });
-  }
-
-  const token = authHeader.split(' ')[1];
+  const cookie = req.headers.cookie;
+  if (!cookie) return res.status(401).json({ error: 'No session' });
 
   let identity;
   try {
     const resp = await fetch(`${process.env.KRATOS_PUBLIC_URL}/sessions/whoami`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Cookie: cookie },
     });
     if (!resp.ok) return res.status(401).json({ error: 'Invalid or expired session' });
     ({ identity } = await resp.json());

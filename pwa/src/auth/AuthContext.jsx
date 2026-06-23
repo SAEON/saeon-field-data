@@ -2,8 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import { initLoginFlow, kratosLogout, submitLogin, whoami } from './kratos.js';
 import { getMe } from '../services/api.js';
 
-const STORAGE_KEY = 'kratos_session';
-
 const ROLE_HIERARCHY = {
   technician:      1,
   technician_lead: 2,
@@ -17,12 +15,9 @@ export function AuthProvider({ children }) {
   const [isReady,       setIsReady]       = useState(false);
   const [justSignedOut, setJustSignedOut] = useState(false);
 
-  // Validate a token, fetch FDS profile, populate state.
-  // Token must already be in localStorage before calling so getMe() can attach it.
-  const applySession = useCallback(async (token) => {
-    const session = await whoami(token);
+  const applySession = useCallback(async () => {
+    const session = await whoami();
     if (!session) {
-      localStorage.removeItem(STORAGE_KEY);
       setUserFields(null);
       setIsReady(true);
       return;
@@ -42,44 +37,30 @@ export function AuthProvider({ children }) {
     setIsReady(true);
   }, []);
 
-  // On mount: restore session from localStorage
+  // On mount: check if a Kratos session cookie exists
   useEffect(() => {
-    const token = localStorage.getItem(STORAGE_KEY);
-    if (token) {
-      applySession(token);
-    } else {
-      setIsReady(true);
-    }
+    applySession();
   }, [applySession]);
 
   // Poll whoami every 5 min to detect server-side session expiry
   useEffect(() => {
     if (!userFields) return;
     const id = setInterval(async () => {
-      const token = localStorage.getItem(STORAGE_KEY);
-      if (!token) return;
-      const session = await whoami(token);
-      if (!session) {
-        localStorage.removeItem(STORAGE_KEY);
-        setUserFields(null);
-      }
+      const session = await whoami();
+      if (!session) setUserFields(null);
     }, 5 * 60 * 1000);
     return () => clearInterval(id);
   }, [userFields]);
 
   const login = useCallback(async (email, password) => {
     const { id: flowId } = await initLoginFlow();
-    const result = await submitLogin(flowId, email, password);
-    const token = result.session_token;
-    localStorage.setItem(STORAGE_KEY, token);
+    await submitLogin(flowId, email, password);
     setJustSignedOut(false);
-    await applySession(token);
+    await applySession();
   }, [applySession]);
 
   const logout = useCallback(async () => {
-    const token = localStorage.getItem(STORAGE_KEY);
-    if (token) await kratosLogout(token).catch(() => {});
-    localStorage.removeItem(STORAGE_KEY);
+    await kratosLogout().catch(() => {});
     setUserFields(null);
     setJustSignedOut(true);
   }, []);

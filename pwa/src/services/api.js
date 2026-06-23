@@ -27,10 +27,8 @@ async function request(path, options = {}) {
 
   try {
     const headers = { ...(options.headers || {}) };
-    const token = localStorage.getItem('kratos_session');
-    if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const res = await fetch(`${BASE}${path}`, { ...options, headers, signal: controller.signal });
+    const res = await fetch(`${BASE}${path}`, { ...options, headers, credentials: 'include', signal: controller.signal });
     if (!res.ok) {
       const body = await res.text();
       throw new Error(body || `HTTP ${res.status}`);
