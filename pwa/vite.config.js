@@ -41,7 +41,6 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {
-            // NetworkFirst: serve fresh when online, fall back to cache offline
             urlPattern: /\/api\/stations$/,
             handler: 'NetworkFirst',
             options: {

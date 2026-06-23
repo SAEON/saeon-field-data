@@ -990,12 +990,12 @@ async function getAllUsers({ role } = {}) {
   return result.rows;
 }
 
-async function createUser({ email, fullName, initials, role, department }) {
+async function createUser({ email, fullName, initials, role, department, authProviderId }) {
   const result = await pool.query(
-    `INSERT INTO users (email, full_name, display_name, initials, role, department, active)
-     VALUES ($1, $2, $2, $3, $4, $5, true)
+    `INSERT INTO users (email, full_name, display_name, initials, role, department, active, auth_provider, auth_provider_id)
+     VALUES ($1, $2, $2, $3, $4, $5, true, 'kratos', $6)
      RETURNING id, email, full_name, display_name, initials, role, department, active, created_at`,
-    [email, fullName, initials, role, department ?? null]
+    [email, fullName, initials, role, department ?? null, authProviderId ?? null]
   );
   return result.rows[0];
 }

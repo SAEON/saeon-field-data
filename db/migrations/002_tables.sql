@@ -24,12 +24,8 @@ CREATE TABLE users (
   role              TEXT NOT NULL
     CHECK (role IN ('technician', 'technician_lead', 'data_manager')),
 
-  -- Set auth_provider based on what you end up using:
-  --   'microsoft' = Azure AD / Microsoft 365 (preferred - SAEON is on Microsoft)
-  --   'keycloak'  = self-hosted Keycloak (good open source fallback)
-  --   'local'     = simple JWT fallback for development/testing only
-  auth_provider     TEXT NOT NULL DEFAULT 'keycloak'
-    CHECK (auth_provider IN ('microsoft', 'keycloak', 'local')),
+  auth_provider     TEXT NOT NULL DEFAULT 'kratos'
+    CHECK (auth_provider IN ('microsoft', 'keycloak', 'kratos', 'local')),
 
   -- Unique ID from the auth provider.
   -- Microsoft : Azure AD Object ID  (the 'oid' claim in the JWT)

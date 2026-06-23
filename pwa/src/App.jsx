@@ -3,6 +3,7 @@ import { loadDraft, saveDraft, clearDraft } from './hooks/useDraftVisit.js';
 import { createVisit, submitVisit, abandonVisit } from './services/api.js';
 import { useAuth } from './auth/AuthContext.jsx';
 import ProfileButton from './auth/ProfileSheet.jsx';
+import LoginPage from './pages/LoginPage.jsx';
 import SelectStation  from './pages/SelectStation.jsx';
 import VisitDetails   from './pages/VisitDetails.jsx';
 import UploadFiles    from './pages/UploadFiles.jsx';
@@ -695,11 +696,21 @@ export function FieldApp({ onExit, embedded = false }) {
 
 // ── App — role router ──────────────────────────────────────────────────────
 export default function App() {
-  const user  = useAuth();
-  const roles = user?.roles ?? [];
+  const auth  = useAuth();
 
-  if (roles?.includes('technician_lead')) return <LeadDashboard />;
-  if (roles?.includes('data_manager'))    return <ManagerDashboard />;
+  if (!auth?.isReady) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100dvh', background: '#F4F6F8' }}>
+        <div style={{ fontSize: 13, color: '#8A9BB0' }}>Loading…</div>
+      </div>
+    );
+  }
+
+  if (!auth?.id) return <LoginPage />;
+
+  const roles = auth?.roles ?? [];
+  if (roles.includes('technician_lead')) return <LeadDashboard />;
+  if (roles.includes('data_manager'))    return <ManagerDashboard />;
 
   return <FieldApp />;
 }

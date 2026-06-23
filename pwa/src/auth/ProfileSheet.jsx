@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import keycloak from './keycloak.js';
 import { useAuth } from './AuthContext.jsx';
 
 // ── Dropdown ────────────────────────────────────────────────────────────────
 function ProfileDropdown({ onClose }) {
-  const me = useAuth(); // cached from AuthContext — no extra API call
+  const me = useAuth();
   const ref = useRef(null);
 
   useEffect(() => {
@@ -15,8 +14,8 @@ function ProfileDropdown({ onClose }) {
     return () => document.removeEventListener('pointerdown', handlePointer);
   }, [onClose]);
 
-  function handleLogout() {
-    keycloak.logout({ redirectUri: window.location.origin + '/fds/' });
+  async function handleLogout() {
+    await me.logout();
   }
 
   const ROLE_LABELS = {

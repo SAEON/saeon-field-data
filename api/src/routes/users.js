@@ -5,53 +5,39 @@ const { requireAuth, requireRole, ROLE_HIERARCHY } = require('../middleware/auth
 
 router.use(requireAuth);
 
-// ── Keycloak admin helper ─────────────────────────────────────────────────────
+const VALID_ROLES  = ['technician', 'technician_lead', 'data_manager'];
+const DEPARTMENTS  = ['EFTEON', 'GFW', 'SMCRI'];
 
-async function getKeycloakAdminToken() {
-  const res = await fetch(
-    `${process.env.KEYCLOAK_URL}/realms/master/protocol/openid-connect/token`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id:  'admin-cli',
-        grant_type: 'password',
-        username:   process.env.KC_ADMIN_USER,
-        password:   process.env.KC_ADMIN_PASSWORD,
-      }),
-    }
-  );
-  if (!res.ok) throw new Error('Failed to obtain Keycloak admin token');
-  const data = await res.json();
-  return data.access_token;
+// ── Kratos admin helper ───────────────────────────────────────────────────────
+
+async function kratosAdminFetch(path, options = {}) {
+  const url = `${process.env.KRATOS_ADMIN_URL}${path}`;
+  const res  = await fetch(url, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
+  });
+  return res;
 }
 
 // =============================================================
 // GET /api/users/available
-// Returns Keycloak users in the realm who are NOT yet in FDS.
-// Used by the "Add user" picker in the dashboard.
+// Returns Kratos identities that are not yet in FDS.
 // =============================================================
 router.get('/available', requireRole('technician_lead'), async (req, res, next) => {
   try {
-    const token = await getKeycloakAdminToken();
+    const kratosRes = await kratosAdminFetch('/admin/identities?page_size=200');
+    if (!kratosRes.ok) throw new Error('Failed to fetch identities from auth service');
+    const identities = await kratosRes.json();
 
-    const kcRes = await fetch(
-      `${process.env.KEYCLOAK_URL}/admin/realms/${process.env.KEYCLOAK_REALM}/users?max=200&enabled=true`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    if (!kcRes.ok) throw new Error('Failed to fetch users from Keycloak');
-    const kcUsers = await kcRes.json();
-
-    // Get emails already in FDS
-    const existing = await db.getAllUsers();
+    const existing      = await db.getAllUsers();
     const existingEmails = new Set(existing.map(u => u.email?.toLowerCase()));
 
-    const available = kcUsers
-      .filter(u => u.email && !existingEmails.has(u.email.toLowerCase()))
-      .map(u => ({
-        keycloak_id: u.id,
-        email:       u.email,
-        full_name:   [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email,
+    const available = identities
+      .filter(i => i.state === 'active' && i.traits?.email && !existingEmails.has(i.traits.email.toLowerCase()))
+      .map(i => ({
+        kratos_id: i.id,
+        email:     i.traits.email,
+        full_name: i.traits.name || i.traits.email,
       }))
       .sort((a, b) => a.full_name.localeCompare(b.full_name));
 
@@ -68,8 +54,8 @@ router.get('/me', async (req, res, next) => {
   try {
     const user = await db.getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    const { id, email, full_name, display_name, initials, role, active } = user;
-    res.json({ id, email, full_name, display_name, initials, role, active });
+    const { id, email, full_name, display_name, initials, role, department, active } = user;
+    res.json({ id, email, full_name, display_name, initials, role, department, active });
   } catch (err) {
     next(err);
   }
@@ -92,28 +78,24 @@ router.get('/', requireRole('technician_lead'), async (req, res, next) => {
 
 // =============================================================
 // POST /api/users
-// Leads: can only create technician accounts.
-// Managers: can create any role.
+// Creates the Kratos identity first, then the FDS DB row.
+// Rolls back the Kratos identity if the DB insert fails.
 // =============================================================
 router.post('/', requireRole('technician_lead'), async (req, res, next) => {
   try {
-    const { email, full_name, role, department } = req.body;
+    const { email, full_name, role, department, password } = req.body;
 
-    if (!email || !full_name || !role) {
-      return res.status(400).json({ error: 'email, full_name, and role are required' });
+    if (!email || !full_name || !role || !password) {
+      return res.status(400).json({ error: 'email, full_name, role, and password are required' });
     }
-
-    const VALID_ROLES = ['technician', 'technician_lead', 'data_manager'];
     if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` });
     }
-
-    const DEPARTMENTS = ['EFTEON', 'GFW', 'SMCRI'];
     if (!department || !DEPARTMENTS.includes(department)) {
       return res.status(400).json({ error: `department must be one of: ${DEPARTMENTS.join(', ')}` });
     }
 
-    // A caller can only create accounts strictly below their own level (leads → technicians; managers → any)
+    // Leads can only create accounts strictly below their own level
     const callerLevel   = ROLE_HIERARCHY[req.user.roles[0]] ?? 0;
     const targetLevel   = ROLE_HIERARCHY[role] ?? 0;
     const maxManageable = callerLevel === ROLE_HIERARCHY['data_manager'] ? callerLevel : callerLevel - 1;
@@ -121,14 +103,45 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
       return res.status(403).json({ error: 'Cannot create a user with this role' });
     }
 
-    // Compute initials from full_name (first letter of first + last word)
+    // 1. Create identity in Kratos
+    const kratosRes = await kratosAdminFetch('/admin/identities', {
+      method: 'POST',
+      body: JSON.stringify({
+        schema_id:   'fds-identity',
+        traits:      { email, name: full_name, role },
+        credentials: { password: { config: { password } } },
+      }),
+    });
+
+    if (!kratosRes.ok) {
+      const body = await kratosRes.json().catch(() => ({}));
+      const msg  = body?.error?.message ?? body?.ui?.messages?.[0]?.text ?? 'Failed to create identity in auth service';
+      return res.status(kratosRes.status === 409 ? 409 : 400).json({ error: msg });
+    }
+
+    const identity = await kratosRes.json();
+
+    // 2. Insert into FDS DB — rollback Kratos identity on failure
     const parts    = full_name.trim().split(/\s+/).filter(Boolean);
     const initials = ((parts[0]?.[0] ?? '') + (parts[parts.length - 1]?.[0] ?? '')).toUpperCase();
 
-    const user = await db.createUser({ email, fullName: full_name, initials, role, department });
-    res.status(201).json(user);
+    try {
+      const user = await db.createUser({
+        email,
+        fullName:       full_name,
+        initials,
+        role,
+        department,
+        authProviderId: identity.id,
+      });
+      res.status(201).json(user);
+    } catch (dbErr) {
+      // Rollback: remove the Kratos identity so it doesn't become an orphan
+      await kratosAdminFetch(`/admin/identities/${identity.id}`, { method: 'DELETE' }).catch(() => {});
+      if (dbErr.code === '23505') return res.status(409).json({ error: 'A user with that email already exists' });
+      throw dbErr;
+    }
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'A user with that email already exists' });
     next(err);
   }
 });
@@ -152,21 +165,12 @@ router.patch('/:id', requireRole('technician_lead'), async (req, res, next) => {
     if (targetLevel > maxManageable) {
       return res.status(403).json({ error: 'Cannot manage this account' });
     }
-    // Non-managers can only toggle active; they cannot reassign roles
     if (callerLevel < ROLE_HIERARCHY['data_manager']) {
-      if (role !== undefined) {
-        return res.status(403).json({ error: 'Cannot change user roles' });
-      }
-      if (active === undefined) {
-        return res.status(400).json({ error: 'active is required' });
-      }
+      if (role !== undefined) return res.status(403).json({ error: 'Cannot change user roles' });
+      if (active === undefined) return res.status(400).json({ error: 'active is required' });
     }
-
-    if (department !== undefined) {
-      const DEPARTMENTS = ['EFTEON', 'GFW', 'SMCRI'];
-      if (!DEPARTMENTS.includes(department)) {
-        return res.status(400).json({ error: `department must be one of: ${DEPARTMENTS.join(', ')}` });
-      }
+    if (department !== undefined && !DEPARTMENTS.includes(department)) {
+      return res.status(400).json({ error: `department must be one of: ${DEPARTMENTS.join(', ')}` });
     }
 
     const updated = await db.updateUser(id, { role, active, department });

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getUsers, getAvailableKeycloakUsers, createUser, updateUser } from '../services/api.js';
+import { getUsers, createUser, updateUser } from '../services/api.js';
 
 function AppBar({ title }) {
   return (
@@ -73,39 +73,28 @@ function InitialsAvatar({ initials, active }) {
   );
 }
 
-// ── Add user sheet — picks from Keycloak ─────────────────────────────────────
+// ── Add user sheet — create new user directly ────────────────────────────────
 function AddUserSheet({ isLead, onClose, onCreated }) {
-  const [candidates, setCandidates] = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState(null);
-  const [search,     setSearch]     = useState('');
-  const [selected,   setSelected]   = useState(null); // { keycloak_id, email, full_name }
+  const [fullName,   setFullName]   = useState('');
+  const [email,      setEmail]      = useState('');
   const [role,       setRole]       = useState('technician');
   const [department, setDepartment] = useState('');
+  const [password,   setPassword]   = useState('');
+  const [error,      setError]      = useState(null);
   const [saving,     setSaving]     = useState(false);
 
-  useEffect(() => {
-    getAvailableKeycloakUsers()
-      .then(setCandidates)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const filtered = candidates.filter(u => {
-    const q = search.toLowerCase();
-    return u.full_name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
-  });
-
-  async function handleAdd() {
-    if (!selected || !department) return;
+  async function handleAdd(e) {
+    e.preventDefault();
+    if (!fullName || !email || !department || !password) return;
     setSaving(true);
     setError(null);
     try {
       const user = await createUser({
-        email:      selected.email,
-        full_name:  selected.full_name,
-        role,
+        email:      email.trim(),
+        full_name:  fullName.trim(),
+        role:       isLead ? 'technician' : role,
         department,
+        password,
       });
       onCreated(user);
       onClose();
@@ -119,88 +108,72 @@ function AddUserSheet({ isLead, onClose, onCreated }) {
   const inputCls = 'w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark';
   const labelCls = 'text-[11px] font-semibold text-text-light uppercase tracking-wide mb-1';
 
+  const canSubmit = fullName && email && department && password && !saving;
+
   return (
     <div className="back-sheet-overlay">
-      <div className="back-sheet" style={{ maxHeight: '90dvh', display: 'flex', flexDirection: 'column' }}>
-        <div className="text-[15px] font-bold text-text-dark mb-3">Search user</div>
+      <div className="back-sheet" style={{ maxHeight: '90dvh', overflowY: 'auto' }}>
+        <div className="text-[15px] font-bold text-text-dark mb-4">Add user</div>
 
-        {/* Search */}
-        <input
-          className={inputCls + ' mb-3'}
-          placeholder="Search by name or email…"
-          value={search}
-          onChange={e => { setSearch(e.target.value); setSelected(null); }}
-          autoFocus
-        />
+        <form onSubmit={handleAdd}>
+          <div className="mb-3">
+            <div className={labelCls}>Full name</div>
+            <input type="text" required className={inputCls} placeholder="Jane Smith"
+              value={fullName} onChange={e => setFullName(e.target.value)} autoFocus />
+          </div>
 
-        {/* Candidate list */}
-        <div className="flex-1 overflow-y-auto flex flex-col gap-1.5 mb-3" style={{ maxHeight: 240 }}>
-          {loading && (
-            <div className="text-center text-text-light text-[13px] py-6">Loading from Keycloak…</div>
-          )}
-          {!loading && !error && filtered.length === 0 && (
-            <div className="text-center text-text-light text-[13px] py-6">
-              {search ? 'No matches.' : 'All users are already in FDS.'}
-            </div>
-          )}
-          {!loading && filtered.map(u => (
-            <button
-              key={u.keycloak_id}
-              onClick={() => setSelected(u)}
-              className="text-left px-3 py-2.5 rounded-xl border text-[13px] transition-colors"
-              style={{
-                borderColor: selected?.keycloak_id === u.keycloak_id ? 'var(--color-navy)' : 'var(--color-border)',
-                background:  selected?.keycloak_id === u.keycloak_id ? '#EAF0FB' : 'white',
-                fontWeight:  selected?.keycloak_id === u.keycloak_id ? 600 : 400,
-              }}
-            >
-              <div className="text-text-dark">{u.full_name}</div>
-              <div className="text-[11px] text-text-light">{u.email}</div>
-            </button>
-          ))}
-        </div>
+          <div className="mb-3">
+            <div className={labelCls}>Email</div>
+            <input type="email" required className={inputCls} placeholder="jane@saeon.ac.za"
+              value={email} onChange={e => setEmail(e.target.value)} />
+          </div>
 
-        {/* Role + department pickers */}
-        {selected && (
-          <>
-            <div className="mb-3">
-              <div className={labelCls}>Role in FDS</div>
-              {isLead ? (
-                <div className="px-3 py-2 rounded-xl bg-surface text-[12px] text-text-light">
-                  Role will be set to <strong>Technician</strong>. Only a Data Manager can assign elevated roles.
-                </div>
-              ) : (
-                <select className={inputCls} value={role} onChange={e => setRole(e.target.value)}>
-                  <option value="technician">Technician</option>
-                  <option value="technician_lead">Technician Lead</option>
-                  <option value="data_manager">Data Manager</option>
-                </select>
-              )}
-            </div>
-
-            <div className="mb-3">
-              <div className={labelCls}>Department</div>
-              <select className={inputCls} value={department} onChange={e => setDepartment(e.target.value)}>
-                <option value="">Select department…</option>
-                {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+          <div className="mb-3">
+            <div className={labelCls}>Role in FDS</div>
+            {isLead ? (
+              <div className="px-3 py-2 rounded-xl bg-surface text-[12px] text-text-light">
+                Role will be set to <strong>Technician</strong>. Only a Data Manager can assign elevated roles.
+              </div>
+            ) : (
+              <select className={inputCls} value={role} onChange={e => setRole(e.target.value)}>
+                <option value="technician">Technician</option>
+                <option value="technician_lead">Technician Lead</option>
+                <option value="data_manager">Data Manager</option>
               </select>
+            )}
+          </div>
+
+          <div className="mb-3">
+            <div className={labelCls}>Department</div>
+            <select required className={inputCls} value={department} onChange={e => setDepartment(e.target.value)}>
+              <option value="">Select department…</option>
+              {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+
+          <div className="mb-4">
+            <div className={labelCls}>Temporary password</div>
+            <input type="password" required className={inputCls} placeholder="Min 8 characters"
+              value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" />
+            <div className="text-[11px] text-text-light mt-1">
+              The user will sign in with this password and should change it after first login.
             </div>
-          </>
-        )}
+          </div>
 
-        {error && <div className="text-[12px] text-error mb-3">{error}</div>}
+          {error && <div className="text-[12px] text-error mb-3">{error}</div>}
 
-        <div className="flex gap-2.5">
-          <button onClick={onClose} disabled={saving}
-            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
-            Cancel
-          </button>
-          <button onClick={handleAdd} disabled={!selected || !department || saving}
-            className="flex-1 h-12 rounded-xl text-white text-sm font-semibold border-none"
-            style={{ background: selected && department ? 'var(--color-navy)' : '#BDBDBD' }}>
-            {saving ? 'Adding…' : 'Add'}
-          </button>
-        </div>
+          <div className="flex gap-2.5">
+            <button type="button" onClick={onClose} disabled={saving}
+              className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
+              Cancel
+            </button>
+            <button type="submit" disabled={!canSubmit}
+              className="flex-1 h-12 rounded-xl text-white text-sm font-semibold border-none"
+              style={{ background: canSubmit ? 'var(--color-navy)' : '#BDBDBD' }}>
+              {saving ? 'Creating…' : 'Create user'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -378,7 +351,7 @@ export default function UserManagement() {
 
             {users.length === 0 && (
               <div className="text-center text-text-light text-[13px] mt-10">
-                No users in FDS yet. Use the button below to add from Keycloak.
+                No users in FDS yet. Use the button below to add one.
               </div>
             )}
           </div>

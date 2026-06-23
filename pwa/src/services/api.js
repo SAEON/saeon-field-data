@@ -1,8 +1,6 @@
 // src/services/api.js
 // All API calls in one place. Components never call fetch directly.
 
-import keycloak from '../auth/keycloak';
-
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
 async function request(path, options = {}) {
@@ -29,7 +27,8 @@ async function request(path, options = {}) {
 
   try {
     const headers = { ...(options.headers || {}) };
-    if (keycloak.token) headers['Authorization'] = `Bearer ${keycloak.token}`;
+    const token = localStorage.getItem('kratos_session');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const res = await fetch(`${BASE}${path}`, { ...options, headers, signal: controller.signal });
     if (!res.ok) {
@@ -192,10 +191,6 @@ export function getFilesWithErrors() {
 
 // ── Users ──────────────────────────────────────────────────────────────────
 
-export function getAvailableKeycloakUsers() {
-  return request('/api/users/available');
-}
-
 export function getMe() {
   return request('/api/users/me');
 }
@@ -204,11 +199,11 @@ export function getUsers() {
   return request('/api/users');
 }
 
-export function createUser({ email, full_name, role, department }) {
+export function createUser({ email, full_name, role, department, password }) {
   return request('/api/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, full_name, role, department }),
+    body: JSON.stringify({ email, full_name, role, department, password }),
   });
 }
 
