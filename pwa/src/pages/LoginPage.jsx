@@ -46,14 +46,8 @@ export default function LoginPage() {
       >
         {/* Wordmark */}
         <div>
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 44, height: 44, borderRadius: 10,
-            background: 'rgba(255,255,255,0.12)',
-            border: '1px solid rgba(255,255,255,0.18)',
-            marginBottom: 24,
-          }}>
-            <img src={`${import.meta.env.BASE_URL}icons/icon-192.png`} alt="SAEON FDS" style={{ width: 28, height: 28, objectFit: 'contain' }} />
+          <div style={{ marginBottom: 24 }}>
+            <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="SAEON FDS" style={{ width: 44, height: 44, objectFit: 'contain', display: 'block' }} />
           </div>
           <div style={{ color: 'white', fontSize: 22, fontWeight: 800, lineHeight: 1.2, marginBottom: 8 }}>
             Field Data System
@@ -81,13 +75,8 @@ export default function LoginPage() {
 
         {/* Mobile-only header */}
         <div style={{ marginBottom: 32, textAlign: 'center' }} className="login-mobile-header">
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 48, height: 48, borderRadius: 12,
-            background: '#0D1B2E',
-            marginBottom: 14,
-          }}>
-            <img src={`${import.meta.env.BASE_URL}icons/icon-192.png`} alt="SAEON FDS" style={{ width: 30, height: 30, objectFit: 'contain' }} />
+          <div style={{ marginBottom: 14 }}>
+            <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="SAEON FDS" style={{ width: 48, height: 48, objectFit: 'contain', display: 'block' }} />
           </div>
           <div style={{ fontSize: 19, fontWeight: 800, color: '#0D1B2E' }}>
             Field Data System
@@ -124,11 +113,8 @@ export default function LoginPage() {
           border: '1px solid #E4E6EA',
           padding: '32px 28px',
         }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: '#0D1B2E', marginBottom: 4 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: '#0D1B2E', marginBottom: 24 }}>
             Sign in
-          </div>
-          <div style={{ fontSize: 12, color: '#8A9BB0', marginBottom: 24 }}>
-            Use your SAEON FDS credentials
           </div>
 
           <form onSubmit={handleSubmit}>
@@ -140,7 +126,6 @@ export default function LoginPage() {
                 type="email"
                 required
                 autoComplete="email"
-                placeholder="name@saeon.nrf.ac.za"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 style={{
