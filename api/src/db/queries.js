@@ -992,12 +992,16 @@ async function getAllUsers({ role } = {}) {
 
 async function createUser({ email, fullName, initials, role, department, authProviderId }) {
   const result = await pool.query(
-    `INSERT INTO users (email, full_name, display_name, initials, role, department, active, auth_provider, auth_provider_id)
-     VALUES ($1, $2, $2, $3, $4, $5, true, 'kratos', $6)
+    `INSERT INTO users (email, full_name, display_name, initials, role, department, active, auth_provider, auth_provider_id, password_change_required)
+     VALUES ($1, $2, $2, $3, $4, $5, true, 'kratos', $6, true)
      RETURNING id, email, full_name, display_name, initials, role, department, active, created_at`,
     [email, fullName, initials, role, department ?? null, authProviderId ?? null]
   );
   return result.rows[0];
+}
+
+async function clearPasswordChangeRequired(id) {
+  await pool.query('UPDATE users SET password_change_required = false WHERE id = $1', [id]);
 }
 
 async function updateUser(id, { role, active, department }) {
@@ -1270,6 +1274,7 @@ module.exports = {
   getAllUsers,
   createUser,
   updateUser,
+  clearPasswordChangeRequired,
   // Instrument history
   getInstrumentHistory,
   getCalibrationPeriodsForStation,

@@ -54,8 +54,18 @@ router.get('/me', async (req, res, next) => {
   try {
     const user = await db.getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    const { id, email, full_name, display_name, initials, role, department, active } = user;
-    res.json({ id, email, full_name, display_name, initials, role, department, active });
+    const { id, email, full_name, display_name, initials, role, department, active, password_change_required } = user;
+    res.json({ id, email, full_name, display_name, initials, role, department, active, password_change_required: !!password_change_required });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/users/me/password-changed — clear the forced-change flag after user sets new password
+router.patch('/me/password-changed', async (req, res, next) => {
+  try {
+    await db.clearPasswordChangeRequired(req.user.id);
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

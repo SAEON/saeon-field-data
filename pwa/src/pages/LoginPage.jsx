@@ -1,6 +1,19 @@
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 
+function SatelliteIcon({ size = 24, color = 'currentColor' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="2" y1="12" x2="7" y2="12" />
+      <line x1="17" y1="12" x2="22" y2="12" />
+      <rect x="7" y="8" width="10" height="8" rx="1.5" />
+      <line x1="12" y1="2" x2="12" y2="7" />
+      <line x1="12" y1="17" x2="12" y2="22" />
+      <circle cx="12" cy="12" r="1.5" fill={color} stroke="none" />
+    </svg>
+  );
+}
+
 export default function LoginPage() {
   const { login, justSignedOut } = useAuth();
   const [email,    setEmail]    = useState('');
@@ -52,7 +65,7 @@ export default function LoginPage() {
             border: '1px solid rgba(255,255,255,0.18)',
             marginBottom: 24,
           }}>
-            <span style={{ color: 'white', fontSize: 18, fontWeight: 800, letterSpacing: '-0.02em' }}>S</span>
+            <SatelliteIcon size={22} color="white" />
           </div>
           <div style={{ color: 'white', fontSize: 22, fontWeight: 800, lineHeight: 1.2, marginBottom: 8 }}>
             Field Data System
@@ -86,7 +99,7 @@ export default function LoginPage() {
             background: '#0D1B2E',
             marginBottom: 14,
           }}>
-            <span style={{ color: 'white', fontSize: 20, fontWeight: 800 }}>S</span>
+            <SatelliteIcon size={24} color="white" />
           </div>
           <div style={{ fontSize: 19, fontWeight: 800, color: '#0D1B2E' }}>
             Field Data System
@@ -139,7 +152,7 @@ export default function LoginPage() {
                 type="email"
                 required
                 autoComplete="email"
-                placeholder="you@saeon.ac.za"
+                placeholder="name@saeon.nrf.ac.za"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 style={{
@@ -195,7 +208,7 @@ export default function LoginPage() {
                 transition: 'background 0.15s',
               }}
             >
-              {loading ? 'Signing in…' : 'Sign in →'}
+              {loading ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
         </div>

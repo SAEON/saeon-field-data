@@ -33,6 +33,27 @@ export async function whoami() {
   return r.json();
 }
 
+export async function initSettingsFlow() {
+  const r = await fetch(`${BASE}/self-service/settings/browser`, {
+    headers: { Accept: 'application/json' },
+    credentials: 'include',
+  });
+  if (!r.ok) throw new Error('Could not initiate settings flow');
+  return r.json();
+}
+
+export async function submitPasswordChange(flowId, csrfToken, password) {
+  const r = await fetch(`${BASE}/self-service/settings?flow=${flowId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ method: 'password', password, csrf_token: csrfToken }),
+  });
+  const data = await r.json();
+  if (!r.ok) throw data;
+  return data;
+}
+
 export async function kratosLogout() {
   const r = await fetch(`${BASE}/self-service/logout/browser`, {
     credentials: 'include',

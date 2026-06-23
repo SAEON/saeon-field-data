@@ -25,14 +25,15 @@ export function AuthProvider({ children }) {
     const traits = session.identity.traits;
     const me = await getMe().catch(() => null);
     setUserFields({
-      name:       traits.name,
-      email:      traits.email,
-      full_name:  me?.full_name  ?? traits.name,
-      id:         me?.id         ?? null,
-      role:       me?.role       ?? null,
-      roles:      me?.role       ? [me.role] : [],
-      initials:   deriveInitials(traits.name),
-      department: me?.department ?? null,
+      name:                    traits.name,
+      email:                   traits.email,
+      full_name:               me?.full_name  ?? traits.name,
+      id:                      me?.id         ?? null,
+      role:                    me?.role       ?? null,
+      roles:                   me?.role       ? [me.role] : [],
+      initials:                deriveInitials(traits.name),
+      department:              me?.department ?? null,
+      password_change_required: me?.password_change_required ?? false,
     });
     setIsReady(true);
   }, []);
@@ -73,7 +74,7 @@ export function AuthProvider({ children }) {
   }, [userFields]);
 
   return (
-    <AuthContext.Provider value={{ isReady, login, logout, hasRole, justSignedOut, ...(userFields ?? {}) }}>
+    <AuthContext.Provider value={{ isReady, login, logout, hasRole, justSignedOut, applySession, ...(userFields ?? {}) }}>
       {children}
     </AuthContext.Provider>
   );

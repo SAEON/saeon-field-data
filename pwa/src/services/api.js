@@ -213,6 +213,10 @@ export function updateUser(userId, { role, active, department }) {
   });
 }
 
+export function acknowledgePasswordChange() {
+  return request('/api/users/me/password-changed', { method: 'PATCH' });
+}
+
 // ── Rainfall ───────────────────────────────────────────────────────────────
 
 export function getStationRainfall(stationId, { resolution = 'daily', from, to } = {}) {

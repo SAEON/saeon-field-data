@@ -4,6 +4,7 @@ import { createVisit, submitVisit, abandonVisit } from './services/api.js';
 import { useAuth } from './auth/AuthContext.jsx';
 import ProfileButton from './auth/ProfileSheet.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import ChangePasswordPage from './pages/ChangePasswordPage.jsx';
 import SelectStation  from './pages/SelectStation.jsx';
 import VisitDetails   from './pages/VisitDetails.jsx';
 import UploadFiles    from './pages/UploadFiles.jsx';
@@ -707,6 +708,7 @@ export default function App() {
   }
 
   if (!auth?.id) return <LoginPage />;
+  if (auth?.password_change_required) return <ChangePasswordPage />;
 
   const roles = auth?.roles ?? [];
   if (roles.includes('technician_lead')) return <LeadDashboard />;

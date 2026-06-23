@@ -73,15 +73,35 @@ function InitialsAvatar({ initials, active }) {
   );
 }
 
+function generatePassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => chars[b % chars.length]).join('');
+}
+
 // ── Add user sheet — create new user directly ────────────────────────────────
 function AddUserSheet({ isLead, onClose, onCreated }) {
   const [fullName,   setFullName]   = useState('');
   const [email,      setEmail]      = useState('');
   const [role,       setRole]       = useState('technician');
   const [department, setDepartment] = useState('');
-  const [password,   setPassword]   = useState('');
+  const [password,   setPassword]   = useState(() => generatePassword());
+  const [copied,     setCopied]     = useState(false);
   const [error,      setError]      = useState(null);
   const [saving,     setSaving]     = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(password).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  function handleRegenerate() {
+    setPassword(generatePassword());
+    setCopied(false);
+  }
 
   async function handleAdd(e) {
     e.preventDefault();
@@ -108,7 +128,7 @@ function AddUserSheet({ isLead, onClose, onCreated }) {
   const inputCls = 'w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark';
   const labelCls = 'text-[11px] font-semibold text-text-light uppercase tracking-wide mb-1';
 
-  const canSubmit = fullName && email && department && password && !saving;
+  const canSubmit = fullName && email && department && !saving;
 
   return (
     <div className="back-sheet-overlay">
@@ -129,7 +149,7 @@ function AddUserSheet({ isLead, onClose, onCreated }) {
           </div>
 
           <div className="mb-3">
-            <div className={labelCls}>Role in FDS</div>
+            <div className={labelCls}>Role</div>
             {isLead ? (
               <div className="px-3 py-2 rounded-xl bg-surface text-[12px] text-text-light">
                 Role will be set to <strong>Technician</strong>. Only a Data Manager can assign elevated roles.
@@ -153,10 +173,20 @@ function AddUserSheet({ isLead, onClose, onCreated }) {
 
           <div className="mb-4">
             <div className={labelCls}>Temporary password</div>
-            <input type="password" required className={inputCls} placeholder="Min 8 characters"
-              value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" />
-            <div className="text-[11px] text-text-light mt-1">
-              The user will sign in with this password and should change it after first login.
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-10 px-3 rounded-xl border border-border bg-surface flex items-center text-[13px] font-mono text-text-dark tracking-wider select-all">
+                {password}
+              </div>
+              <button type="button" onClick={handleCopy}
+                className="h-10 px-3 rounded-xl border border-border bg-white text-[12px] font-semibold text-text-med shrink-0"
+                style={{ minWidth: 60 }}>
+                {copied ? '✓ Copied' : 'Copy'}
+              </button>
+              <button type="button" onClick={handleRegenerate}
+                className="h-10 px-3 rounded-xl border border-border bg-white text-[12px] font-semibold text-text-med shrink-0"
+                title="Generate a new password">
+                ↻
+              </button>
             </div>
           </div>
 
