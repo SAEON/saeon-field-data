@@ -53,7 +53,7 @@ export default function LoginPage() {
             border: '1px solid rgba(255,255,255,0.18)',
             marginBottom: 24,
           }}>
-            <img src="/icons/icon-192.png" alt="SAEON FDS" style={{ width: 28, height: 28, objectFit: 'contain' }} />
+            <img src={`${import.meta.env.BASE_URL}icons/icon-192.png`} alt="SAEON FDS" style={{ width: 28, height: 28, objectFit: 'contain' }} />
           </div>
           <div style={{ color: 'white', fontSize: 22, fontWeight: 800, lineHeight: 1.2, marginBottom: 8 }}>
             Field Data System
@@ -87,7 +87,7 @@ export default function LoginPage() {
             background: '#0D1B2E',
             marginBottom: 14,
           }}>
-            <img src="/icons/icon-192.png" alt="SAEON FDS" style={{ width: 30, height: 30, objectFit: 'contain' }} />
+            <img src={`${import.meta.env.BASE_URL}icons/icon-192.png`} alt="SAEON FDS" style={{ width: 30, height: 30, objectFit: 'contain' }} />
           </div>
           <div style={{ fontSize: 19, fontWeight: 800, color: '#0D1B2E' }}>
             Field Data System
