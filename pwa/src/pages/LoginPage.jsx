@@ -16,10 +16,10 @@ export default function LoginPage() {
     try {
       await login(email.trim(), password);
     } catch (err) {
-      const msg = err?.ui?.messages?.[0]?.text
-        ?? err?.message
-        ?? 'Invalid email or password.';
-      setError(msg);
+      const kratosCode = err?.ui?.messages?.[0]?.id;
+      setError(kratosCode === 4000006
+        ? 'Invalid email or password.'
+        : 'Sign in failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -145,7 +145,6 @@ export default function LoginPage() {
                 type="password"
                 required
                 autoComplete="current-password"
-                placeholder="••••••••"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 style={{
