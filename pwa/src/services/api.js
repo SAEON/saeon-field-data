@@ -1,7 +1,7 @@
-// src/services/api.js
-// All API calls in one place. Components never call fetch directly.
-
 const BASE = import.meta.env.VITE_API_URL ?? '';
+
+let _onUnauthorized = null;
+export function setUnauthorizedHandler(fn) { _onUnauthorized = fn; }
 
 async function request(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
@@ -29,6 +29,10 @@ async function request(path, options = {}) {
     const headers = { ...(options.headers || {}) };
 
     const res = await fetch(`${BASE}${path}`, { ...options, headers, credentials: 'include', signal: controller.signal });
+    if (res.status === 401) {
+      _onUnauthorized?.();
+      throw new Error('Session expired');
+    }
     if (!res.ok) {
       const body = await res.text();
       throw new Error(body || `HTTP ${res.status}`);

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { initLoginFlow, kratosLogout, submitLogin, whoami } from './kratos.js';
-import { getMe } from '../services/api.js';
+import { getMe, setUnauthorizedHandler } from '../services/api.js';
 
 const ROLE_HIERARCHY = {
   technician:      1,
@@ -41,6 +41,12 @@ export function AuthProvider({ children }) {
   // On mount: check if a Kratos session cookie exists
   useEffect(() => {
     applySession();
+  }, [applySession]);
+
+  // Register 401 interceptor — any API call returning 401 triggers immediate session refresh
+  useEffect(() => {
+    setUnauthorizedHandler(applySession);
+    return () => setUnauthorizedHandler(null);
   }, [applySession]);
 
   // Poll whoami every 5 min to detect server-side session expiry
