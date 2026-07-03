@@ -166,7 +166,7 @@ function AddUserSheet({ isLead, departments, onClose, onCreated }) {
             <div className={labelCls}>Department</div>
             <select required className={inputCls} value={department} onChange={e => setDepartment(e.target.value)}>
               <option value="">Select department…</option>
-              {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+              {departments.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
 
