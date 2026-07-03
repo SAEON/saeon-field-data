@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getUsers, createUser, updateUser } from '../services/api.js';
+import { getUsers, createUser, updateUser, getDepartments } from '../services/api.js';
 
 function AppBar({ title }) {
   return (
@@ -28,7 +28,6 @@ function Fab({ label, onPress }) {
   );
 }
 
-const DEPARTMENTS = ['EFTEON', 'GFW', 'SMCRI'];
 
 function RoleBadge({ role }) {
   const MAP = {
@@ -81,7 +80,7 @@ function generatePassword() {
 }
 
 // ── Add user sheet — create new user directly ────────────────────────────────
-function AddUserSheet({ isLead, onClose, onCreated }) {
+function AddUserSheet({ isLead, departments, onClose, onCreated }) {
   const [fullName,   setFullName]   = useState('');
   const [email,      setEmail]      = useState('');
   const [role,       setRole]       = useState('technician');
@@ -210,7 +209,7 @@ function AddUserSheet({ isLead, onClose, onCreated }) {
 }
 
 // ── Edit role sheet (data_manager only) ─────────────────────────────────────
-function EditRoleSheet({ user, onClose, onUpdated }) {
+function EditRoleSheet({ user, departments, onClose, onUpdated }) {
   const [role,       setRole]       = useState(user.role);
   const [department, setDepartment] = useState(user.department ?? '');
   const [saving,     setSaving]     = useState(false);
@@ -279,18 +278,21 @@ export default function UserManagement() {
   const isManager = hasRole?.('data_manager') ?? false;
   const isLead    = (hasRole?.('technician_lead') ?? false) && !isManager;
 
-  const [users,      setUsers]      = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState(null);
-  const [toggling,   setToggling]   = useState(null);
-  const [showAdd,    setShowAdd]    = useState(false);
-  const [editTarget, setEditTarget] = useState(null);
+  const [users,       setUsers]       = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState(null);
+  const [toggling,    setToggling]    = useState(null);
+  const [showAdd,     setShowAdd]     = useState(false);
+  const [editTarget,  setEditTarget]  = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setUsers(await getUsers());
+      const [u, d] = await Promise.all([getUsers(), getDepartments()]);
+      setUsers(u);
+      setDepartments(d);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -393,6 +395,7 @@ export default function UserManagement() {
       {showAdd && (
         <AddUserSheet
           isLead={isLead}
+          departments={departments}
           onClose={() => setShowAdd(false)}
           onCreated={handleCreated}
         />
@@ -401,6 +404,7 @@ export default function UserManagement() {
       {editTarget && (
         <EditRoleSheet
           user={editTarget}
+          departments={departments}
           onClose={() => setEditTarget(null)}
           onUpdated={handleUpdated}
         />

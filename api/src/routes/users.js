@@ -6,7 +6,13 @@ const { requireAuth, requireRole, ROLE_HIERARCHY } = require('../middleware/auth
 router.use(requireAuth);
 
 const VALID_ROLES  = ['technician', 'technician_lead', 'data_manager'];
-const DEPARTMENTS  = ['EFTEON', 'GFW', 'SMCRI'];
+const DEPARTMENTS  = [
+  'Arid Lands', 'EFTEON', 'Egagasini', 'Elwandle',
+  'Fynbos', 'GFW', 'Grasslands', 'Ndlovu', 'SAPRI', 'SMCRI',
+];
+
+// GET /api/users/departments
+router.get('/departments', (req, res) => res.json(DEPARTMENTS));
 
 // ── Kratos admin helper ───────────────────────────────────────────────────────
 

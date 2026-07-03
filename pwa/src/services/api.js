@@ -221,6 +221,10 @@ export function acknowledgePasswordChange() {
   return request('/api/users/me/password-changed', { method: 'POST' });
 }
 
+export function getDepartments() {
+  return request('/api/users/departments');
+}
+
 // ── Rainfall ───────────────────────────────────────────────────────────────
 
 export function getStationRainfall(stationId, { resolution = 'daily', from, to } = {}) {
