@@ -126,9 +126,9 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
 });
 
 // =============================================================
-// PATCH /api/stations/:id  (technician_lead only)
+// POST /api/stations/:id  (technician_lead only — PATCH blocked by WAF)
 // =============================================================
-router.patch('/:id', requireRole('technician_lead'), async (req, res, next) => {
+router.post('/:id', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const station = await db.getStationById(id);

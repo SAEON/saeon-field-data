@@ -163,7 +163,7 @@ export function createStation(data) {
 
 export function updateStation(stationId, data) {
   return request(`/api/stations/${stationId}`, {
-    method: 'PATCH',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });

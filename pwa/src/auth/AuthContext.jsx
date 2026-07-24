@@ -16,26 +16,31 @@ export function AuthProvider({ children }) {
   const [justSignedOut, setJustSignedOut] = useState(false);
 
   const applySession = useCallback(async () => {
-    const session = await whoami();
-    if (!session) {
+    try {
+      const session = await whoami();
+      if (!session) {
+        setUserFields(null);
+        setIsReady(true);
+        return;
+      }
+      const traits = session.identity.traits;
+      const me = await getMe().catch(() => null);
+      setUserFields({
+        name:                    traits.name,
+        email:                   traits.email,
+        full_name:               me?.full_name  ?? traits.name,
+        id:                      me?.id         ?? null,
+        role:                    me?.role       ?? null,
+        roles:                   me?.role       ? [me.role] : [],
+        initials:                deriveInitials(traits.name),
+        department:              me?.department ?? null,
+        password_change_required: me?.password_change_required ?? false,
+      });
+      setIsReady(true);
+    } catch {
       setUserFields(null);
       setIsReady(true);
-      return;
     }
-    const traits = session.identity.traits;
-    const me = await getMe().catch(() => null);
-    setUserFields({
-      name:                    traits.name,
-      email:                   traits.email,
-      full_name:               me?.full_name  ?? traits.name,
-      id:                      me?.id         ?? null,
-      role:                    me?.role       ?? null,
-      roles:                   me?.role       ? [me.role] : [],
-      initials:                deriveInitials(traits.name),
-      department:              me?.department ?? null,
-      password_change_required: me?.password_change_required ?? false,
-    });
-    setIsReady(true);
   }, []);
 
   // On mount: check if a Kratos session cookie exists
