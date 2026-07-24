@@ -253,7 +253,7 @@ function EditRoleSheet({ user, departments, onClose, onUpdated }) {
         <div className={labelCls}>Department</div>
         <select className={inputCls} value={department} onChange={e => setDepartment(e.target.value)}>
           <option value="">None</option>
-          {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+          {departments.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
 
         {error && <div className="text-[12px] text-error mt-3">{error}</div>}
