@@ -97,7 +97,7 @@ export function getVisits({ status, technician_id, station_id } = {}) {
 
 export function assignVisit(visitId, technicianId) {
   return request(`/api/visits/${visitId}/assign`, {
-    method: 'PATCH',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ technician_id: technicianId }),
   });
@@ -105,7 +105,7 @@ export function assignVisit(visitId, technicianId) {
 
 export function updateVisit(visitId, { visited_at, notes }) {
   return request(`/api/visits/${visitId}`, {
-    method: 'PATCH',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ visited_at, notes }),
   });
@@ -113,14 +113,14 @@ export function updateVisit(visitId, { visited_at, notes }) {
 
 export function submitVisit(visitId) {
   return request(`/api/visits/${visitId}/status`, {
-    method: 'PATCH',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status: 'submitted' }),
   });
 }
 
 export function abandonVisit(visitId) {
-  return request(`/api/visits/${visitId}`, { method: 'DELETE' });
+  return request(`/api/visits/${visitId}/abandon`, { method: 'POST' });
 }
 
 // ── Files ──────────────────────────────────────────────────────────────────
@@ -144,7 +144,7 @@ export function reparseFile(fileId) {
 }
 
 export function deleteFile(fileId) {
-  return request(`/api/files/${fileId}`, { method: 'DELETE' });
+  return request(`/api/files/${fileId}/delete`, { method: 'POST' });
 }
 
 // ── Station registry (technician_lead) ─────────────────────────────────────
@@ -170,7 +170,7 @@ export function updateStation(stationId, data) {
 }
 
 export function deactivateStation(stationId) {
-  return request(`/api/stations/${stationId}`, { method: 'DELETE' });
+  return request(`/api/stations/${stationId}/deactivate`, { method: 'POST' });
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ export function createUser({ email, full_name, role, department, password }) {
 
 export function updateUser(userId, { role, active, department }) {
   return request(`/api/users/${userId}`, {
-    method: 'PATCH',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role, active, department }),
   });
@@ -267,7 +267,7 @@ export function createReading(visitId, { reading_type, value_numeric, value_text
 }
 
 export function deleteReading(visitId, readingType) {
-  return request(`/api/visits/${visitId}/readings/${readingType}`, { method: 'DELETE' });
+  return request(`/api/visits/${visitId}/readings/${readingType}/delete`, { method: 'POST' });
 }
 
 // ── Instruments ────────────────────────────────────────────────────────────

@@ -126,7 +126,7 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
 });
 
 // =============================================================
-// POST /api/stations/:id  (technician_lead only — PATCH blocked by WAF)
+// POST /api/stations/:id  (technician_lead only)
 // =============================================================
 router.post('/:id', requireRole('technician_lead'), async (req, res, next) => {
   try {
@@ -159,7 +159,7 @@ router.post('/:id', requireRole('technician_lead'), async (req, res, next) => {
 // DELETE /api/stations/:id  (technician_lead only — soft delete)
 // Sets active = false. Hard delete not permitted (visit history preserved).
 // =============================================================
-router.delete('/:id', requireRole('technician_lead'), async (req, res, next) => {
+router.post('/:id/deactivate', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const station = await db.getStationById(id);

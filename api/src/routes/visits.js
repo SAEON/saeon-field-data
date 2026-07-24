@@ -59,8 +59,8 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// PATCH /api/visits/:id — update visited_at and/or notes on a draft visit
-router.patch('/:id', async (req, res, next) => {
+// POST /api/visits/:id — update visited_at and/or notes on a draft visit
+router.post('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { visited_at, notes } = req.body;
@@ -82,8 +82,8 @@ router.patch('/:id', async (req, res, next) => {
   }
 });
 
-// PATCH /api/visits/:id/status
-router.patch('/:id/status', async (req, res, next) => {
+// POST /api/visits/:id/status
+router.post('/:id/status', async (req, res, next) => {
   try {
     const id     = parseInt(req.params.id, 10);
     const { status } = req.body;
@@ -123,10 +123,10 @@ router.patch('/:id/status', async (req, res, next) => {
 });
 
 // =============================================================
-// PATCH /api/visits/:id/assign  (technician_lead only)
+// POST /api/visits/:id/assign  (technician_lead only)
 // Leads/managers assign an upcoming visit to a specific technician.
 // =============================================================
-router.patch('/:id/assign', requireRole('technician_lead'), async (req, res, next) => {
+router.post('/:id/assign', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const visitId      = parseInt(req.params.id, 10);
     const technicianId = req.body.technician_id ? parseInt(req.body.technician_id, 10) : null;
@@ -162,8 +162,8 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-// DELETE /api/visits/:id — abandon a draft visit (technician owns it, status must be 'draft')
-router.delete('/:id', async (req, res, next) => {
+// POST /api/visits/:id/abandon — abandon a draft visit
+router.post('/:id/abandon', async (req, res, next) => {
   try {
     const id    = parseInt(req.params.id, 10);
     const visit = await db.getVisitById(id);

@@ -321,10 +321,10 @@ router.post('/:id/reparse', requireRole('technician_lead'), async (req, res, nex
 });
 
 // =============================================================
-// DELETE /api/files/:id
+// POST /api/files/:id/delete
 // Removes DB record, raw_measurements, and the file from disk.
 // =============================================================
-router.delete('/:id', requireRole('technician_lead'), async (req, res, next) => {
+router.post('/:id/delete', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const fileRecord = await db.getFileById(parseInt(req.params.id, 10));
     if (!fileRecord) return res.status(404).json({ error: 'File not found' });

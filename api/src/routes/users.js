@@ -163,11 +163,11 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
 });
 
 // =============================================================
-// PATCH /api/users/:id
+// POST /api/users/:id
 // Leads: can only toggle active on technician accounts.
 // Managers: can update role or active on any user.
 // =============================================================
-router.patch('/:id', requireRole('technician_lead'), async (req, res, next) => {
+router.post('/:id', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const id     = parseInt(req.params.id, 10);
     const target = await db.getUserById(id);

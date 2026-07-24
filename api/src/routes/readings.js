@@ -37,8 +37,8 @@ router.post('/:id/readings', async (req, res, next) => {
   }
 });
 
-// DELETE /api/visits/:id/readings/:readingType
-router.delete('/:id/readings/:readingType', async (req, res, next) => {
+// POST /api/visits/:id/readings/:readingType/delete
+router.post('/:id/readings/:readingType/delete', async (req, res, next) => {
   try {
     const visitId     = parseInt(req.params.id, 10);
     const readingType = req.params.readingType;
