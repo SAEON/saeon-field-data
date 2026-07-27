@@ -191,6 +191,16 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
         {query && ` · "${query}"`}
       </div>
 
+      {/* ── Start visit CTA ───────────────────────────────────────── */}
+      {selectedId && (
+        <div className="px-4 pb-3 shrink-0">
+          <button onClick={handleStart} className="cta-btn">
+            Start visit — {selectedStation?.display_name.split(' ').slice(0, 3).join(' ')}
+            <span className="text-lg">→</span>
+          </button>
+        </div>
+      )}
+
       {/* ── Station list ──────────────────────────────────────────── */}
       <div className="station-list flex-1 px-4 flex flex-col gap-2">
         {filtered.map(s => (
@@ -243,22 +253,8 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
           </div>
         )}
 
-        {/* Spacer so sticky CTA doesn't obscure last card */}
-        <div className={selectedId ? 'h-24' : 'h-8'} />
+        <div className="h-4" />
       </div>
-
-      {/* ── Sticky CTA ────────────────────────────────────────────── */}
-      {selectedId && (
-        <div
-          className="sticky bottom-0 px-4 pb-7 pt-4 shrink-0"
-          style={{ background: 'linear-gradient(to top, var(--color-surface) 70%, transparent)' }}
-        >
-          <button onClick={handleStart} className="cta-btn">
-            Start visit — {selectedStation?.display_name.split(' ').slice(0, 3).join(' ')}
-            <span className="text-lg">→</span>
-          </button>
-        </div>
-      )}
     </div>
   );
 }
