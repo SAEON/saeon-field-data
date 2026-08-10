@@ -486,30 +486,30 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
 
     // Activities as JSON arrays
     if (loggerActs.size > 0)
-      saves.push(onSave({ reading_type: 'logger_activities', value_text: JSON.stringify([...loggerActs]), recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'logger_activities', value_text: JSON.stringify([...loggerActs]), recorded_at: now }));
     if (rgActs.size > 0)
-      saves.push(onSave({ reading_type: 'raingauge_activities', value_text: JSON.stringify([...rgActs]), recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'raingauge_activities', value_text: JSON.stringify([...rgActs]), recorded_at: now }));
 
     // Logger deploy → instrument_history
     if (hasLoggerDeploy && loggerSerial.trim())
-      saves.push(createInstrumentRecord(stationId, {
+      saves.push(() => createInstrumentRecord(stationId, {
         instrument_type: 'datalogger', serial_no: loggerSerial.trim(),
         mm_per_tip: null, visit_id: visitId,
         notes: 'Recorded on-site by technician during visit',
       }));
 
     if (hasLoggerMaintenance && loggerMaintChecks.size > 0)
-      saves.push(onSave({ reading_type: 'logger_maintenance_checks', value_text: JSON.stringify([...loggerMaintChecks]), recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'logger_maintenance_checks', value_text: JSON.stringify([...loggerMaintChecks]), recorded_at: now }));
     if (hasLoggerProblem && loggerNotes.trim())
-      saves.push(onSave({ reading_type: 'logger_problem_notes', value_text: loggerNotes, recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'logger_problem_notes', value_text: loggerNotes, recorded_at: now }));
     if (battery)
-      saves.push(onSave({ reading_type: 'battery_voltage', value_numeric: parseFloat(battery), unit: '%', recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'battery_voltage', value_numeric: parseFloat(battery), unit: '%', recorded_at: now }));
     if (memory)
-      saves.push(onSave({ reading_type: 'memory_used_pct', value_numeric: parseFloat(memory), unit: '%', recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'memory_used_pct', value_numeric: parseFloat(memory), unit: '%', recorded_at: now }));
 
     // Raingauge deploy → instrument_history
     if (hasRgDeploy && rgSerial.trim())
-      saves.push(createInstrumentRecord(stationId, {
+      saves.push(() => createInstrumentRecord(stationId, {
         instrument_type: 'raingauge', serial_no: rgSerial.trim(),
         mm_per_tip: rgMmPerTip ? parseFloat(rgMmPerTip) : 0.254,
         visit_id: visitId,
@@ -518,33 +518,33 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
 
     // Raingauge calibration → instrument_history (requires both serial and mm/tip)
     if (hasRgCal && rgCalSerial.trim() && rgCalMm)
-      saves.push(createInstrumentRecord(stationId, {
+      saves.push(() => createInstrumentRecord(stationId, {
         instrument_type: 'raingauge', serial_no: rgCalSerial.trim(),
         mm_per_tip: parseFloat(rgCalMm), visit_id: visitId,
         notes: rgActs.has('raingauge_calibrate') ? 'Calibration recorded on-site' : 'Calibration check — factor confirmed',
       }));
     if (rgActs.has('raingauge_calibration_check')) {
-      if (rgCalExpectedTips) saves.push(onSave({ reading_type: 'cal_check_expected_tips', value_numeric: parseFloat(rgCalExpectedTips), recorded_at: now }));
-      if (rgCalActualTips)   saves.push(onSave({ reading_type: 'cal_check_actual_tips',   value_numeric: parseFloat(rgCalActualTips),   recorded_at: now }));
+      if (rgCalExpectedTips) saves.push(() => onSave({ reading_type: 'cal_check_expected_tips', value_numeric: parseFloat(rgCalExpectedTips), recorded_at: now }));
+      if (rgCalActualTips)   saves.push(() => onSave({ reading_type: 'cal_check_actual_tips',   value_numeric: parseFloat(rgCalActualTips),   recorded_at: now }));
     }
 
     if (hasMaintenance && rgMaintChecks.size > 0)
-      saves.push(onSave({ reading_type: 'raingauge_maintenance_checks', value_text: JSON.stringify([...rgMaintChecks]), recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'raingauge_maintenance_checks', value_text: JSON.stringify([...rgMaintChecks]), recorded_at: now }));
     if (hasRgProblem && rgNotes.trim())
-      saves.push(onSave({ reading_type: 'raingauge_problem_notes', value_text: rgNotes, recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'raingauge_problem_notes', value_text: rgNotes, recorded_at: now }));
     if (gaugeCondition.size > 0)
-      saves.push(onSave({ reading_type: 'gauge_condition', value_text: JSON.stringify([...gaugeCondition]), recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'gauge_condition', value_text: JSON.stringify([...gaugeCondition]), recorded_at: now }));
     if (gaugeReading)
-      saves.push(onSave({ reading_type: 'gauge_reading', value_numeric: parseFloat(gaugeReading), unit: 'mm', recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'gauge_reading', value_numeric: parseFloat(gaugeReading), unit: 'mm', recorded_at: now }));
     if (lastEmptied)
-      saves.push(onSave({ reading_type: 'last_emptied', value_text: new Date(lastEmptied).toISOString(), recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'last_emptied', value_text: new Date(lastEmptied).toISOString(), recorded_at: now }));
     if (didTip !== null)
-      saves.push(onSave({ reading_type: 'did_tip', value_text: didTip ? 'yes' : 'no', recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'did_tip', value_text: didTip ? 'yes' : 'no', recorded_at: now }));
     if (siteCondition)
-      saves.push(onSave({ reading_type: 'overall_site_condition', value_text: siteCondition, recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'overall_site_condition', value_text: siteCondition, recorded_at: now }));
 
     try {
-      await Promise.all(saves);
+      for (const save of saves) await save();
       setSaveState('idle');
     } catch (err) {
       setSaveState(err?.offline ? 'idle' : 'error');

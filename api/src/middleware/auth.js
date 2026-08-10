@@ -1,18 +1,42 @@
 const pool = require('../db/pool');
 
+// Short-lived session cache — prevents concurrent requests for the same cookie
+// from hammering Kratos sessions/whoami simultaneously (causes spurious 401s).
+const SESSION_CACHE_TTL_MS = 10_000;
+const sessionCache = new Map();
+
+function getCached(cookie) {
+  const entry = sessionCache.get(cookie);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > SESSION_CACHE_TTL_MS) { sessionCache.delete(cookie); return null; }
+  return entry.identity;
+}
+
+function setCached(cookie, identity) {
+  sessionCache.set(cookie, { identity, ts: Date.now() });
+  // Evict entries older than TTL to prevent unbounded growth
+  if (sessionCache.size > 500) {
+    const cutoff = Date.now() - SESSION_CACHE_TTL_MS;
+    for (const [k, v] of sessionCache) { if (v.ts < cutoff) sessionCache.delete(k); }
+  }
+}
+
 async function requireAuth(req, res, next) {
   const cookie = req.headers.cookie;
   if (!cookie) return res.status(401).json({ error: 'No session' });
 
-  let identity;
-  try {
-    const resp = await fetch(`${process.env.KRATOS_PUBLIC_URL}/sessions/whoami`, {
-      headers: { Cookie: cookie },
-    });
-    if (!resp.ok) return res.status(401).json({ error: 'Invalid or expired session' });
-    ({ identity } = await resp.json());
-  } catch {
-    return res.status(401).json({ error: 'Auth service unreachable' });
+  let identity = getCached(cookie);
+  if (!identity) {
+    try {
+      const resp = await fetch(`${process.env.KRATOS_PUBLIC_URL}/sessions/whoami`, {
+        headers: { Cookie: cookie },
+      });
+      if (!resp.ok) return res.status(401).json({ error: 'Invalid or expired session' });
+      ({ identity } = await resp.json());
+      setCached(cookie, identity);
+    } catch {
+      return res.status(401).json({ error: 'Auth service unreachable' });
+    }
   }
 
   const { id: kratosId, traits } = identity;
