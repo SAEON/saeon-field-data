@@ -23,7 +23,7 @@ const LOGGER_ACTS = [
 ];
 
 const RAINGAUGE_ACTS = [
-  { value: 'raingauge_maintenance',       label: 'Maintenance' },
+  { value: 'raingauge_maintenance',       label: 'Maintenance / Download' },
   { value: 'raingauge_missing',           label: 'Missing' },
   { value: 'raingauge_deploy',            label: 'Deployed' },
   { value: 'raingauge_decommission',      label: 'Decommission' },

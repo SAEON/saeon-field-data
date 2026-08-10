@@ -8,7 +8,7 @@ const PROMPTS = [
   {
     id: 'access',
     label: 'Site access',
-    options: ['No issues', 'Gate locked — used key', 'Road flooded', 'Road damaged', '4x4 required'],
+    options: ['No issues', 'Gate locked — used key', 'Road flooded', 'Road damaged', '4x4 required', 'Other'],
   },
   {
     id: 'equipment',
@@ -41,6 +41,7 @@ export default function VisitDetails({ visitId, station, formState, setFormState
   const [visitTime,  setVisitTime]  = useState(formState?.visitTime  || nowTime);
   const [selections, setSelections] = useState(formState?.selections || { access: [], equipment: [] });
   const [extraNotes, setExtraNotes] = useState(formState?.extraNotes || '');
+  const [otherNotes, setOtherNotes] = useState(formState?.otherNotes || {});
   const [saveState,    setSaveState]    = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
   const [coverage,     setCoverage]     = useState(null);
   const [raining,      setRaining]      = useState(null);   // null | 'true' | 'false'
@@ -75,7 +76,10 @@ export default function VisitDetails({ visitId, station, formState, setFormState
       .map(p => {
         const chosen = selections[p.id];
         if (!chosen.length) return null;
-        return `• ${p.label}: ${chosen.join(', ')}`;
+        const items = chosen.map(o =>
+          o === 'Other' && otherNotes[p.id]?.trim() ? `Other: ${otherNotes[p.id].trim()}` : o
+        );
+        return `• ${p.label}: ${items.join(', ')}`;
       })
       .filter(Boolean);
     if (extraNotes.trim()) parts.push(`• ${extraNotes.trim()}`);
@@ -92,14 +96,14 @@ export default function VisitDetails({ visitId, station, formState, setFormState
         await updateVisit(visitId, { visited_at, notes: buildNote() });
         setSaveState('saved');
         // Bubble form state up to App.jsx so IDB draft stays in sync
-        setFormState({ visitDate, visitTime, selections, extraNotes });
+        setFormState({ visitDate, visitTime, selections, extraNotes, otherNotes });
       } catch {
         setSaveState('error');
       }
     }, 800);
     return () => clearTimeout(saveTimer.current);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visitDate, visitTime, selections, extraNotes]);
+  }, [visitDate, visitTime, selections, extraNotes, otherNotes]);
 
   function toggle(id, opt) {
     setSelections(prev => {
@@ -111,7 +115,12 @@ export default function VisitDetails({ visitId, station, formState, setFormState
     });
   }
 
-  const allPromptsDone = Object.values(selections).every(arr => arr.length > 0);
+  const allPromptsDone = PROMPTS.every(p => {
+    const arr = selections[p.id];
+    if (!arr.length) return false;
+    if (arr.includes('Other') && !otherNotes[p.id]?.trim()) return false;
+    return true;
+  });
 
   async function saveRaining(val) {
     if (raining === val) return;
@@ -140,7 +149,10 @@ export default function VisitDetails({ visitId, station, formState, setFormState
     .map(p => {
       const chosen = selections[p.id];
       if (!chosen.length) return null;
-      return `• ${chosen.join(', ')}`;
+      const items = chosen.map(o =>
+        o === 'Other' && otherNotes[p.id]?.trim() ? `Other: ${otherNotes[p.id].trim()}` : o
+      );
+      return `• ${items.join(', ')}`;
     })
     .filter(Boolean)
     .join('  ·  ');
@@ -269,6 +281,16 @@ export default function VisitDetails({ visitId, station, formState, setFormState
                   </button>
                 ))}
               </div>
+
+              {selections[section.id].includes('Other') && (
+                <input
+                  type="text"
+                  value={otherNotes[section.id] || ''}
+                  onChange={e => setOtherNotes(prev => ({ ...prev, [section.id]: e.target.value }))}
+                  placeholder="Describe the issue…"
+                  className="field-input mt-2"
+                />
+              )}
 
               {si < PROMPTS.length - 1 && (
                 <div className="mt-3.5" style={{ borderTop: '1.5px solid var(--color-border)' }} />
