@@ -70,7 +70,7 @@ const EVENT_TYPE_LABELS = {
   logger_missing: 'Logger missing', logger_deploy: 'Logger deployed',
   logger_decommission: 'Logger decommissioned', logger_program: 'Logger programmed',
   logger_stopped: 'Logger stopped', raingauge_maintenance: 'Raingauge maintenance',
-  raingauge_missing: 'Raingauge missing', raingauge_deploy: 'Raingauge deployed',
+  raingauge_download: 'Raingauge download', raingauge_missing: 'Raingauge missing', raingauge_deploy: 'Raingauge deployed',
   raingauge_decommission: 'Raingauge decommissioned', raingauge_calibrate: 'Raingauge calibration',
   raingauge_calibration_check: 'Calibration check',
   pseudo_events: 'Non-rainfall water entry',

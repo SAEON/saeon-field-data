@@ -23,20 +23,19 @@ const LOGGER_ACTS = [
 ];
 
 const RAINGAUGE_ACTS = [
-  { value: 'raingauge_maintenance',       label: 'Maintenance / Download' },
-  { value: 'raingauge_missing',           label: 'Missing' },
-  { value: 'raingauge_deploy',            label: 'Deployed' },
+  { value: 'raingauge_download',          label: 'Download' },
+  { value: 'raingauge_maintenance',       label: 'Maintenance' },
+  { value: 'raingauge_deploy',            label: 'Deploy' },
+  { value: 'raingauge_calibration_check', label: 'Calibration check' },
   { value: 'raingauge_decommission',      label: 'Decommission' },
-  { value: 'raingauge_calibration_check', label: 'Cal. check' },
   { value: 'raingauge_calibrate',         label: 'Calibrate' },
-  { value: 'pseudo_events',               label: 'Mechanism washed' },
 ];
 
 const RG_MAINT_CHECKS     = ['Funnel removed & inspected', 'Funnel clear of obstruction', 'Tipping mechanism checked', 'Tipping mechanism cleaned', 'Bubble level OK', 'Cable connection intact', 'Bracket secure', 'Bucket test done'];
 const LOGGER_MAINT_CHECKS = ['Display checked', 'Battery changed', 'Cable intact', 'Connections checked', 'Memory full — reset', 'Memory reset', 'Logger relaunched', 'Mount secure', 'Enclosure inspected'];
 
 const LOGGER_PROBLEM    = new Set(['logger_missing', 'logger_stopped', 'logger_decommission']);
-const RAINGAUGE_PROBLEM = new Set(['raingauge_missing', 'raingauge_decommission']);
+const RAINGAUGE_PROBLEM = new Set(['raingauge_decommission']);
 
 
 // ── Save button ───────────────────────────────────────────────────────────────
@@ -463,9 +462,10 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
   function toggleGaugeCondition(value) {
     setGaugeCondition(prev => {
       if (prev.has(value)) return new Set(); // deselect
-      if (value === 'good') return new Set(['good']); // Good clears all others
+      if (value === 'good' || value === 'missing') return new Set([value]); // exclusive
       const next = new Set(prev);
-      next.delete('good'); // any problem option clears Good
+      next.delete('good');
+      next.delete('missing'); // any observable condition means gauge is present
       next.add(value);
       return next;
     });
@@ -476,7 +476,7 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
   const hasLoggerProblem      = [...loggerActs].some(v => LOGGER_PROBLEM.has(v));
   const hasRgDeploy       = rgActs.has('raingauge_deploy');
   const hasRgCal          = rgActs.has('raingauge_calibrate') || rgActs.has('raingauge_calibration_check');
-  const hasRgProblem      = [...rgActs].some(v => RAINGAUGE_PROBLEM.has(v));
+  const hasRgProblem      = [...rgActs].some(v => RAINGAUGE_PROBLEM.has(v)) || gaugeCondition.has('missing');
   const hasMaintenance    = rgActs.has('raingauge_maintenance');
 
   async function handleSaveAll() {
@@ -574,17 +574,6 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
           ))}
         </div>
       </div>
-
-      {hasRgProblem && (
-        <div className="form-card" style={{ borderColor: '#FDE68A' }}>
-          <div className="text-[12px] font-semibold text-text-dark mb-1">
-            Notes <span className="text-warning text-[11px]">*</span>
-          </div>
-          <textarea value={rgNotes} onChange={e => setRgNotes(e.target.value)}
-            placeholder="e.g. Raingauge was missing — mounting bracket removed."
-            rows={3} className="notes-textarea w-full" />
-        </div>
-      )}
 
       {hasRgDeploy && (
         <div className="form-card" style={{ borderColor: '#BBF7D0' }}>
@@ -742,13 +731,24 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
           <span className="text-[10px] text-text-light">How did you find the gauge?</span>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {[{ value: 'good', label: 'Good' }, { value: 'blocked', label: 'Blocked' }, { value: 'bucket_obstructed', label: 'Bucket obstructed' }, { value: 'orifice_missing', label: 'Orifice missing' }, { value: 'debris', label: 'Debris inside' }, { value: 'damaged', label: 'Damaged' }, { value: 'submerged', label: 'Submerged' }].map(opt => (
+          {[{ value: 'good', label: 'Good' }, { value: 'missing', label: 'Missing' }, { value: 'mechanism_washed', label: 'Mechanism washed' }, { value: 'blocked', label: 'Blocked' }, { value: 'bucket_obstructed', label: 'Bucket obstructed' }, { value: 'orifice_missing', label: 'Orifice missing' }, { value: 'debris', label: 'Debris inside' }, { value: 'damaged', label: 'Damaged' }, { value: 'submerged', label: 'Submerged' }].map(opt => (
             <button key={opt.value} data-selected={gaugeCondition.has(opt.value) ? 'true' : undefined}
               onClick={() => toggleGaugeCondition(opt.value)}
               className="note-chip">{opt.label}</button>
           ))}
         </div>
       </div>
+
+      {hasRgProblem && (
+        <div className="form-card" style={{ borderColor: '#FDE68A' }}>
+          <div className="text-[12px] font-semibold text-text-dark mb-1">
+            Notes <span className="text-warning text-[11px]">*</span>
+          </div>
+          <textarea value={rgNotes} onChange={e => setRgNotes(e.target.value)}
+            placeholder="e.g. Raingauge was missing — mounting bracket removed."
+            rows={3} className="notes-textarea w-full" />
+        </div>
+      )}
 
       {/* ── LOGGER ──────────────────────────────────────────────── */}
       <SectionDivider label="Logger" />
