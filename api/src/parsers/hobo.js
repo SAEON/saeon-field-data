@@ -52,8 +52,10 @@ function extractSerial(h) {
 }
 
 function parseDateTime(dateStr, timeStr, tzOffsetMs = 0) {
+  // Normalise dash-separated dates (e.g. "26-03-27") to slash-separated before matching.
   const s = (timeStr ? `${dateStr.trim()} ${timeStr.trim()}` : dateStr.trim())
-    .replace(/"/g, '').trim();
+    .replace(/"/g, '').trim()
+    .replace(/^(\d{1,4})-(\d{1,2})-(\d{1,4})/, '$1/$2/$3');
 
   // MM/DD/YY(YY) HH:MM:SS [AM/PM]  — or YY/MM/DD HH:MM:SS (no AM/PM, first field > 12)
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?\s*(AM|PM)?$/i);
@@ -223,7 +225,7 @@ module.exports = async function parseHobo(filePath) {
         if (dateParseAttempts >= 3 && dateParseFailures === dateParseAttempts) {
           throw new Error(
             `Unrecognised date format in HOBO CSV (sample: "${firstBadSample}"). ` +
-            `Expected MM/DD/YY HH:MM:SS AM/PM, YY/MM/DD HH:MM:SS, or YYYY/MM/DD HH:MM:SS.`
+            `Expected MM/DD/YY HH:MM:SS AM/PM, YY/MM/DD HH:MM:SS, or YYYY/MM/DD HH:MM:SS (slashes or dashes).`
           );
         }
         continue;
