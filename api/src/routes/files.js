@@ -19,7 +19,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 function detectFileFormat(filename, buffer) {
   const ext = path.extname(filename).toLowerCase();
   if (ext === '.hobo') return 'hobo_binary';
-  if (ext === '.xle') return 'solonist_xle';
+  if (ext === '.xle') return 'solinst_xle';
   if (ext === '.dat') return 'campbell_toa5';
   if (ext === '.csv') {
     // STOM exports have ISO 8601 "Timestamp" column or "# Citation link:" header.
@@ -211,7 +211,7 @@ function formatToModule(format) {
   const map = {
     hobo_binary:   'hobo_binary',
     hobo_csv:      'hobo',
-    solonist_xle:  'solonist',
+    solinst_xle:   'solinst',
     campbell_toa5: 'campbell_toa5',
     saeon_stom:    'saeon_stom',
   };
@@ -300,7 +300,7 @@ router.post('/:id/files', upload.single('file'), async (req, res, next) => {
 // POST /api/files/:id/reparse
 // Re-triggers background parsing for a file stuck in pending/error.
 // =============================================================
-router.post('/:id/reparse', requireRole('technician_lead'), async (req, res, next) => {
+router.post('/:id/reparse', requireRole('technician'), async (req, res, next) => {
   try {
     const fileRecord = await db.getFileById(parseInt(req.params.id, 10));
     if (!fileRecord) return res.status(404).json({ error: 'File not found' });
@@ -324,7 +324,7 @@ router.post('/:id/reparse', requireRole('technician_lead'), async (req, res, nex
 // POST /api/files/:id/delete
 // Removes DB record, raw_measurements, and the file from disk.
 // =============================================================
-router.post('/:id/delete', requireRole('technician_lead'), async (req, res, next) => {
+router.post('/:id/delete', requireRole('technician'), async (req, res, next) => {
   try {
     const fileRecord = await db.getFileById(parseInt(req.params.id, 10));
     if (!fileRecord) return res.status(404).json({ error: 'File not found' });
