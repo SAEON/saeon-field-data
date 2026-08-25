@@ -1156,6 +1156,137 @@ async function getStationDataCoverage(stationId) {
 
 
 // =============================================================
+// GROUNDWATER PROCESSING
+// =============================================================
+
+async function getRawGroundwaterForStation(stationId) {
+  const result = await pool.query(
+    `SELECT rm.id, rm.stream_id, rm.measured_at, rm.value_numeric,
+            p.name AS phenomenon_name
+     FROM   raw_measurements rm
+     JOIN   station_data_streams sds ON sds.id = rm.stream_id
+     JOIN   phenomena p ON p.id = rm.phenomenon_id
+     WHERE  sds.station_id = $1
+       AND  p.name IN ('water_level_smp', 'temp_c', 'conductivity_smp')
+       AND  rm.is_interference = false
+     ORDER  BY rm.measured_at`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+async function getBaroSeriesForStation(stationId) {
+  const result = await pool.query(
+    `SELECT rm.measured_at, rm.value_numeric
+     FROM   raw_measurements rm
+     JOIN   station_data_streams sds ON sds.id = rm.stream_id
+     JOIN   phenomena p ON p.id = rm.phenomenon_id
+     WHERE  sds.station_id = (SELECT baro_station_id FROM stations WHERE id = $1)
+       AND  p.name = 'baro_pressure_smp'
+       AND  rm.is_interference = false
+     ORDER  BY rm.measured_at`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+async function getDipperAnchorReadings(stationId) {
+  const result = await pool.query(
+    `SELECT fv.id AS visit_id,
+            dr.recorded_at,
+            dr.value_numeric AS dipper_depth_m,
+            COALESCE(cv.value_numeric, s.casing_ht_m) AS casing_ht_m
+     FROM   field_visits fv
+     JOIN   stations s ON s.id = fv.station_id
+     JOIN   manual_readings dr
+            ON dr.visit_id = fv.id AND dr.reading_type = 'dipper_depth'
+     LEFT JOIN manual_readings cv
+            ON cv.visit_id = fv.id AND cv.reading_type = 'casing_ht_verification'
+     WHERE  fv.station_id = $1
+       AND  dr.value_numeric IS NOT NULL
+     ORDER  BY dr.recorded_at`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+async function getDataHandlesForStation(stationId) {
+  const result = await pool.query(
+    `SELECT id, handle_type, start_at, end_at, notes
+     FROM   data_handles
+     WHERE  station_id = $1
+       AND  qa = TRUE
+     ORDER  BY start_at`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+async function upsertGroundwaterLevels(rows) {
+  if (!rows.length) return;
+  const stationIds   = rows.map(r => r.stationId);
+  const streamIds    = rows.map(r => r.streamId);
+  const measuredAts  = rows.map(r => r.measuredAt);
+  const levelMRaws   = rows.map(r => r.levelMRaw         ?? null);
+  const baroKpas     = rows.map(r => r.baroKpa           ?? null);
+  const levelMComps  = rows.map(r => r.levelMComp        ?? null);
+  const tempCs       = rows.map(r => r.tempC             ?? null);
+  const condUs       = rows.map(r => r.conductivityUsCm  ?? null);
+  const btOutliers   = rows.map(r => r.btOutlier         ?? false);
+  const btRules      = rows.map(r => r.btOutlierRule     ?? null);
+  const levelMCleans = rows.map(r => r.levelMCleaned     ?? null);
+  const driftOffsets = rows.map(r => r.driftOffsetM      ?? null);
+  const levelMAsls   = rows.map(r => r.levelMAsl         ?? null);
+
+  await pool.query(
+    `INSERT INTO groundwater_levels
+       (station_id, stream_id, measured_at,
+        level_m_raw, baro_kpa, level_m_comp,
+        temp_c, conductivity_us_cm,
+        bt_outlier, bt_outlier_rule,
+        level_m_cleaned, drift_offset_m, level_m_asl)
+     SELECT * FROM unnest(
+       $1::int[], $2::int[], $3::timestamptz[],
+       $4::numeric[], $5::numeric[], $6::numeric[],
+       $7::numeric[], $8::numeric[],
+       $9::bool[], $10::text[],
+       $11::numeric[], $12::numeric[], $13::numeric[]
+     )
+     ON CONFLICT (stream_id, measured_at) DO UPDATE SET
+       level_m_raw        = EXCLUDED.level_m_raw,
+       baro_kpa           = EXCLUDED.baro_kpa,
+       level_m_comp       = EXCLUDED.level_m_comp,
+       temp_c             = EXCLUDED.temp_c,
+       conductivity_us_cm = EXCLUDED.conductivity_us_cm,
+       bt_outlier         = EXCLUDED.bt_outlier,
+       bt_outlier_rule    = EXCLUDED.bt_outlier_rule,
+       level_m_cleaned    = EXCLUDED.level_m_cleaned,
+       drift_offset_m     = EXCLUDED.drift_offset_m,
+       level_m_asl        = EXCLUDED.level_m_asl,
+       processed_at       = NOW()`,
+    [stationIds, streamIds, measuredAts, levelMRaws, baroKpas, levelMComps,
+     tempCs, condUs, btOutliers, btRules, levelMCleans, driftOffsets, levelMAsls]
+  );
+}
+
+async function getGroundwaterLevels(stationId, from, to) {
+  const result = await pool.query(
+    `SELECT measured_at, level_m_raw, baro_kpa, level_m_comp,
+            bt_outlier, bt_outlier_rule, level_m_cleaned,
+            drift_offset_m, level_m_asl, temp_c, conductivity_us_cm,
+            processed_at
+     FROM   groundwater_levels
+     WHERE  station_id = $1
+       AND  ($2::timestamptz IS NULL OR measured_at >= $2)
+       AND  ($3::timestamptz IS NULL OR measured_at <= $3)
+     ORDER  BY measured_at`,
+    [stationId, from || null, to || null]
+  );
+  return result.rows;
+}
+
+
+// =============================================================
 // Instrument history
 // =============================================================
 
@@ -1275,6 +1406,13 @@ module.exports = {
   createUser,
   updateUser,
   clearPasswordChangeRequired,
+  // Groundwater processing
+  getRawGroundwaterForStation,
+  getBaroSeriesForStation,
+  getDipperAnchorReadings,
+  getDataHandlesForStation,
+  upsertGroundwaterLevels,
+  getGroundwaterLevels,
   // Instrument history
   getInstrumentHistory,
   getCalibrationPeriodsForStation,

@@ -12,6 +12,11 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
       },
+      '/identity': {
+        target: 'http://localhost:4433',
+        changeOrigin: true,
+        rewrite: path => path.replace(/^\/identity/, ''),
+      },
     },
   },
   plugins: [

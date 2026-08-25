@@ -1,2 +1,3 @@
-# Force-include CSV sample files despite root *.csv rule
-!*.csv
+# All files in this directory are local test/reference data — not committed.
+*
+!.gitignore
