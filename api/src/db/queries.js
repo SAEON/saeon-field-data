@@ -1210,6 +1210,195 @@ async function createInstrumentRecord({ stationId, instrumentType, serialNo, mmP
   return result.rows[0];
 }
 
+// =============================================================
+// Met instruments
+// =============================================================
+
+async function getMetInstrumentTypeById(id) {
+  const result = await pool.query(
+    `SELECT id, category, requires_sensitivity FROM met_instrument_types WHERE id = $1`,
+    [id]
+  );
+  return result.rows[0] || null;
+}
+
+async function getSensorParametersForCalibration(stationSensorId) {
+  const result = await pool.query(`
+    SELECT mit.parameters
+    FROM   station_sensors ss
+    JOIN   met_instrument_types mit ON mit.id = ss.instrument_type_id
+    WHERE  ss.id = $1
+  `, [stationSensorId]);
+  return result.rows[0]?.parameters ?? null;
+}
+
+async function getAllMetInstrumentTypes() {
+  const result = await pool.query(`
+    SELECT id, label, category, manufacturer, model,
+           parameters, requires_sensitivity, requires_transfer_std,
+           transfer_std_parameters, maintenance_checks, active
+    FROM   met_instrument_types
+    WHERE  active = true
+    ORDER  BY category, label
+  `);
+  return result.rows;
+}
+
+async function getMetInstrumentTypesByCategory(category) {
+  const result = await pool.query(`
+    SELECT id, label, category, manufacturer, model,
+           parameters, requires_sensitivity, requires_transfer_std,
+           transfer_std_parameters, maintenance_checks, active
+    FROM   met_instrument_types
+    WHERE  active = true AND category = $1
+    ORDER  BY label
+  `, [category]);
+  return result.rows;
+}
+
+async function getActiveSensorsForStation(stationId) {
+  const result = await pool.query(`
+    SELECT ss.id, ss.station_id, ss.serial_no, ss.sensitivity_value,
+           ss.effective_from, ss.effective_to, ss.notes,
+           mit.id AS instrument_type_id, mit.label, mit.category,
+           mit.manufacturer, mit.model, mit.parameters,
+           mit.requires_sensitivity, mit.requires_transfer_std,
+           mit.transfer_std_parameters, mit.maintenance_checks,
+           u.full_name AS deployed_by_name
+    FROM   station_sensors ss
+    JOIN   met_instrument_types mit ON mit.id = ss.instrument_type_id
+    LEFT   JOIN users u ON u.id = ss.deployed_by
+    WHERE  ss.station_id = $1 AND ss.effective_to IS NULL
+    ORDER  BY mit.category, mit.label
+  `, [stationId]);
+  return result.rows;
+}
+
+async function getSensorHistoryForStation(stationId) {
+  const result = await pool.query(`
+    SELECT ss.id, ss.station_id, ss.serial_no, ss.sensitivity_value,
+           ss.effective_from, ss.effective_to, ss.notes,
+           mit.id AS instrument_type_id, mit.label, mit.category,
+           mit.manufacturer, mit.model,
+           u.full_name AS deployed_by_name
+    FROM   station_sensors ss
+    JOIN   met_instrument_types mit ON mit.id = ss.instrument_type_id
+    LEFT   JOIN users u ON u.id = ss.deployed_by
+    WHERE  ss.station_id = $1
+    ORDER  BY ss.effective_from DESC
+  `, [stationId]);
+  return result.rows;
+}
+
+async function assignSensorToStation({ stationId, instrumentTypeId, serialNo, sensitivityValue, effectiveFrom, deployedBy, visitId, notes }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`
+      UPDATE station_sensors
+      SET    effective_to = $1
+      WHERE  station_id = $2 AND instrument_type_id = $3 AND effective_to IS NULL
+    `, [effectiveFrom, stationId, instrumentTypeId]);
+    const result = await client.query(`
+      INSERT INTO station_sensors
+        (station_id, instrument_type_id, serial_no, sensitivity_value,
+         effective_from, deployed_by, visit_id, notes)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *
+    `, [stationId, instrumentTypeId, serialNo ?? null, sensitivityValue ?? null,
+        effectiveFrom, deployedBy, visitId ?? null, notes ?? null]);
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function getActiveTransferStandards() {
+  const result = await pool.query(`
+    SELECT id, kit_label, manufacturer, model, serial_no,
+           parameters, measurement_range, accuracy,
+           certificate_number, calibration_lab,
+           calibration_date, calibration_due_date, status,
+           calibration_due_date < CURRENT_DATE AS overdue
+    FROM   transfer_standards
+    WHERE  status = 'active'
+    ORDER  BY kit_label, model
+  `);
+  return result.rows;
+}
+
+async function createCalibrationCheck({
+  visitId, stationSensorId, transferStandardId, parameter,
+  calibrationDate, calibrationMethod,
+  transferStdReading, sensorReading,
+  asFoundError, withinTolerance,
+  correctionApplied, offsetApplied,
+  stationReadingPostCal, transferStdVerificationReading,
+  asLeftError, postCalWithinTolerance,
+  certificateIssued, certificateNumber,
+  technicianId, remarks,
+}) {
+  const result = await pool.query(`
+    INSERT INTO calibration_checks (
+      visit_id, station_sensor_id, transfer_standard_id, parameter,
+      calibration_date, calibration_method,
+      transfer_std_reading, sensor_reading,
+      as_found_error, within_tolerance,
+      correction_applied, offset_applied,
+      station_reading_post_cal, transfer_std_verification_reading,
+      as_left_error, post_cal_within_tolerance,
+      certificate_issued, certificate_number,
+      technician_id, remarks
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
+    ) RETURNING *
+  `, [
+    visitId, stationSensorId, transferStandardId, parameter,
+    calibrationDate, calibrationMethod ?? 'Field verification',
+    transferStdReading ?? null, sensorReading ?? null,
+    asFoundError ?? null, withinTolerance ?? null,
+    correctionApplied ?? false, offsetApplied ?? null,
+    stationReadingPostCal ?? null, transferStdVerificationReading ?? null,
+    asLeftError ?? null, postCalWithinTolerance ?? null,
+    certificateIssued ?? null, certificateNumber ?? null,
+    technicianId ?? null, remarks ?? null,
+  ]);
+  return result.rows[0];
+}
+
+async function decommissionSensor(stationSensorId) {
+  const result = await pool.query(`
+    UPDATE station_sensors
+    SET    effective_to = NOW()
+    WHERE  id = $1 AND effective_to IS NULL
+    RETURNING *
+  `, [stationSensorId]);
+  return result.rows[0] || null;
+}
+
+async function getCalibrationChecksForVisit(visitId) {
+  const result = await pool.query(`
+    SELECT cc.*,
+           mit.label          AS sensor_label,
+           mit.category       AS sensor_category,
+           ss.serial_no       AS sensor_serial_no,
+           ts.kit_label,
+           ts.model           AS transfer_std_model,
+           ts.serial_no       AS transfer_std_serial
+    FROM   calibration_checks cc
+    JOIN   station_sensors ss     ON ss.id  = cc.station_sensor_id
+    JOIN   met_instrument_types mit ON mit.id = ss.instrument_type_id
+    JOIN   transfer_standards ts  ON ts.id  = cc.transfer_standard_id
+    WHERE  cc.visit_id = $1
+    ORDER  BY cc.created_at
+  `, [visitId]);
+  return result.rows;
+}
+
 module.exports = {
   // Stations
   getAllStations,
@@ -1295,4 +1484,16 @@ module.exports = {
   getStationGaps,
   getLoggerSnapshotForVisit,
   getStationLoggerSnapshots,
+  // Met instruments
+  getMetInstrumentTypeById,
+  getSensorParametersForCalibration,
+  getAllMetInstrumentTypes,
+  getMetInstrumentTypesByCategory,
+  getActiveSensorsForStation,
+  getSensorHistoryForStation,
+  assignSensorToStation,
+  decommissionSensor,
+  getActiveTransferStandards,
+  createCalibrationCheck,
+  getCalibrationChecksForVisit,
 };

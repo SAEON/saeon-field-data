@@ -40,6 +40,7 @@ app.use('/api/stations', require('./routes/rainfall'));    // GET/POST /api/stat
 app.use('/api/stations', require('./routes/instruments')); // GET/POST /api/stations/:id/instruments
 app.use('/api/users',     require('./routes/users'));     // GET/POST/PATCH /api/users
 app.use('/api/dashboard', require('./routes/dashboard')); // GET /api/dashboard/*
+app.use('/api',           require('./routes/met-instruments')); // /api/met/*, /api/stations/:id/sensors*, /api/visits/:id/calibration-checks
 
 // Error handler — must be last
 app.use(require('./middleware/error'));

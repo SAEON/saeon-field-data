@@ -291,3 +291,41 @@ export function getLoggerSnapshot(visitId) {
 export function getStationLoggerSnapshots() {
   return request(`/api/stations/logger-snapshots`);
 }
+
+// ── Met instruments ────────────────────────────────────────────────────────
+
+export function getMetInstrumentTypes() {
+  return request('/api/met/instrument-types');
+}
+
+export function getTransferStandards() {
+  return request('/api/met/transfer-standards');
+}
+
+export function getStationSensors(stationId) {
+  return request(`/api/stations/${stationId}/sensors`);
+}
+
+export function decommissionSensor(stationId, sensorId) {
+  return request(`/api/stations/${stationId}/sensors/${sensorId}/decommission`, { method: 'PATCH' });
+}
+
+export function assignSensor(stationId, data) {
+  return request(`/api/stations/${stationId}/sensors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export function createCalibrationCheck(visitId, data) {
+  return request(`/api/visits/${visitId}/calibration-checks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export function getCalibrationChecks(visitId) {
+  return request(`/api/visits/${visitId}/calibration-checks`);
+}

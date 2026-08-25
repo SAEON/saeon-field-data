@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers, getInstrumentHistory, createInstrumentRecord, getVisits } from '../services/api.js';
+import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers, getInstrumentHistory, createInstrumentRecord, getVisits, getMetInstrumentTypes, getStationSensors, assignSensor } from '../services/api.js';
 
 const DATA_FAMILY_OPTIONS = [
   { value: 'groundwater', label: 'Groundwater' },
@@ -67,6 +67,7 @@ function formatDate(iso) {
 // ── Station form sheet ───────────────────────────────────────────────────────
 function StationSheet({ station, onClose, onSaved }) {
   const isNew = !station;
+  const [createdStation, setCreatedStation] = useState(null); // met stations stay open after create
   const [form, setForm] = useState({
     name:                    station?.name                    ?? '',
     display_name:            station?.display_name            ?? '',
@@ -123,10 +124,15 @@ function StationSheet({ station, onClose, onSaved }) {
       let saved;
       if (isNew) {
         saved = await createStation(payload);
+        onSaved(saved, isNew);
+        if (saved.data_family === 'met') {
+          setCreatedStation(saved);
+          return;
+        }
       } else {
         saved = await updateStation(station.id, { ...payload, active: form.active });
+        onSaved(saved, isNew);
       }
-      onSaved(saved, isNew);
       onClose();
     } catch (err) {
       setError(err.message);
@@ -137,6 +143,27 @@ function StationSheet({ station, onClose, onSaved }) {
 
   const inputCls = 'w-full h-9 px-2.5 rounded-lg border border-border bg-white text-[12px] text-text-dark';
   const labelCls = 'text-[10px] font-semibold text-text-light uppercase tracking-wide mb-1';
+
+  // After creating a met station, show sensor setup inline before closing
+  if (createdStation) {
+    return (
+      <div className="back-sheet-overlay">
+        <div className="back-sheet" style={{ maxHeight: '90dvh', overflowY: 'auto', paddingBottom: 24 }}>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[13px] font-bold text-text-dark">Station created</div>
+            <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold"
+              style={{ background: '#FFF3E0', color: '#E65100' }}>Meteorological</span>
+          </div>
+          <div className="text-[12px] text-text-light mb-4">{createdStation.display_name}</div>
+          <MetSensorsSection station={createdStation} />
+          <button onClick={onClose}
+            className="w-full h-10 rounded-xl bg-navy text-white text-[12px] font-semibold border-none mt-4">
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="back-sheet-overlay">
@@ -220,7 +247,7 @@ function StationSheet({ station, onClose, onSaved }) {
             />
           </div>
 
-          {isNew && (
+          {isNew && form.data_family !== 'met' && (
             <div>
               <div className={labelCls}>
                 {form.data_family === 'rainfall' ? 'Raingauge serial no.' : 'Instrument serial no.'}
@@ -257,6 +284,10 @@ function StationSheet({ station, onClose, onSaved }) {
 
         {!isNew && station?.data_family === 'rainfall' && (
           <InstrumentsSection station={station} />
+        )}
+
+        {!isNew && station?.data_family === 'met' && (
+          <MetSensorsSection station={station} />
         )}
 
         {error && <div className="text-[11px] text-error mt-2">{error}</div>}
@@ -401,6 +432,174 @@ function InstrumentsSection({ station }) {
       {history?.length === 0 && !showForm && (
         <div className="text-[11px] text-text-light">No instrument changes recorded yet.</div>
       )}
+    </div>
+  );
+}
+
+// ── Met sensor section ───────────────────────────────────────────────────────
+const SOIL_CATS = new Set(['soil', 'leaf_wetness']);
+const CAL_UNIT  = { temperature: '°C', humidity: '%', pressure: ' hPa' };
+
+const CATEGORY_LABEL = {
+  temperature_humidity: 'Temp / Humidity',
+  pressure:             'Pressure',
+  wind:                 'Wind',
+  radiation:            'Radiation',
+  rain_gauge:           'Rain gauge',
+  soil:                 'Soil',
+  leaf_wetness:         'Leaf wetness',
+  snow:                 'Snow',
+  weather_station:      'Weather station',
+  datalogger:           'Datalogger',
+};
+
+function MetSensorsSection({ station }) {
+  const [sensors,    setSensors]    = useState(null);
+  const [types,      setTypes]      = useState([]);
+  const [showForm,   setShowForm]   = useState(false);
+  const [typeId,     setTypeId]     = useState('');
+  const [serial,     setSerial]     = useState('');
+  const [sensitivity, setSensitivity] = useState('');
+  const [effectiveFrom, setEffectiveFrom] = useState(() => new Date().toISOString().split('T')[0]);
+  const [notes,      setNotes]      = useState('');
+  const [saveState,  setSaveState]  = useState('idle');
+  const [error,      setError]      = useState(null);
+
+  useEffect(() => {
+    if (!station?.id) return;
+    getStationSensors(station.id).then(setSensors).catch(() => setSensors([]));
+    getMetInstrumentTypes().then(setTypes).catch(() => {});
+  }, [station?.id]);
+
+  const selectedType = types.find(t => t.id === parseInt(typeId, 10));
+  const needsSerial      = selectedType && !SOIL_CATS.has(selectedType.category);
+  const needsSensitivity = selectedType?.requires_sensitivity;
+
+  const canSave = typeId && effectiveFrom &&
+    (!needsSerial      || serial.trim()) &&
+    (!needsSensitivity || sensitivity !== '');
+
+  async function handleSave() {
+    setSaveState('saving');
+    setError(null);
+    try {
+      await assignSensor(station.id, {
+        instrument_type_id: parseInt(typeId, 10),
+        serial_no:          needsSerial ? serial.trim() : null,
+        sensitivity_value:  needsSensitivity ? parseFloat(sensitivity) : null,
+        effective_from:     effectiveFrom,
+        notes:              notes.trim() || null,
+      });
+      const updated = await getStationSensors(station.id);
+      setSensors(updated);
+      setShowForm(false);
+      setTypeId(''); setSerial(''); setSensitivity(''); setNotes('');
+      setSaveState('idle');
+    } catch (err) {
+      setError(err.message);
+      setSaveState('error');
+    }
+  }
+
+  // Group instrument types by category for the select
+  const byCategory = types.reduce((acc, t) => {
+    (acc[t.category] = acc[t.category] || []).push(t);
+    return acc;
+  }, {});
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[12px] font-semibold text-text-dark">Station sensors</div>
+        <button onClick={() => { setShowForm(v => !v); setError(null); setSaveState('idle'); }}
+          className="text-[11px] font-semibold text-navy border-none bg-transparent p-0">
+          {showForm ? 'Cancel' : '+ Add sensor'}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="form-card mb-3" style={{ borderColor: '#BBF7D0' }}>
+          <div className="flex flex-col gap-2">
+            <select value={typeId} onChange={e => { setTypeId(e.target.value); setSerial(''); setSensitivity(''); }}
+              className={`field-input w-full ${typeId ? 'field-input--active' : ''}`} style={{ height: 36 }}>
+              <option value="">Select sensor type…</option>
+              {Object.entries(byCategory).map(([cat, items]) => (
+                <optgroup key={cat} label={CATEGORY_LABEL[cat] ?? cat}>
+                  {items.map(t => (
+                    <option key={t.id} value={t.id}>{t.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+
+            {needsSerial && (
+              <input type="text" value={serial} onChange={e => setSerial(e.target.value)}
+                placeholder="Serial number (from sensor label)"
+                className={`field-input w-full ${serial ? 'field-input--active' : ''}`} style={{ height: 36 }} />
+            )}
+
+            {needsSensitivity && (
+              <div className="relative">
+                <input type="number" step="any" value={sensitivity} onChange={e => setSensitivity(e.target.value)}
+                  placeholder="Sensitivity value"
+                  className={`field-input w-full ${sensitivity !== '' ? 'field-input--active' : ''}`}
+                  style={{ height: 36, paddingRight: 80 }} />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">
+                  µV/(W·m⁻²)
+                </span>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-text-light font-medium">Deployment date</span>
+              <input type="date" value={effectiveFrom} onChange={e => setEffectiveFrom(e.target.value)}
+                className={`field-input w-full field-input--active`} style={{ height: 36 }} />
+            </div>
+
+            <textarea value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Notes (optional)" rows={2} className="notes-textarea w-full" />
+
+            {error && <div className="text-[11px] text-error">{error}</div>}
+
+            <button onClick={handleSave} disabled={!canSave || saveState === 'saving'}
+              className="w-full h-10 rounded-xl text-white text-[12px] font-semibold border-none transition-colors"
+              style={{ background: canSave ? 'var(--color-navy)' : '#BDBDBD' }}>
+              {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Error — retry' : 'Add to station'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sensors === null && <div className="text-[11px] text-text-light">Loading…</div>}
+
+      {sensors?.length === 0 && !showForm && (
+        <div className="text-[11px] text-text-light">No sensors assigned yet. Use "+ Add sensor" to set up this station.</div>
+      )}
+
+      {sensors?.map(s => (
+        <div key={s.id} className="flex items-start justify-between py-1.5 border-b border-border last:border-0">
+          <div>
+            <div className="text-[12px] font-semibold text-text-dark">
+              {s.label}
+              {s.serial_no && <span className="ml-2 text-[11px] font-normal text-text-light">Serial: {s.serial_no}</span>}
+            </div>
+            {s.sensitivity_value != null && (
+              <div className="text-[11px] text-text-light">Sensitivity: {s.sensitivity_value} µV/(W·m⁻²)</div>
+            )}
+            <div className="text-[11px] text-text-light">
+              Effective {s.effective_from ? new Date(s.effective_from).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+            </div>
+            {s.requires_transfer_std && (
+              <div className="text-[10px] mt-0.5" style={{ color: 'var(--color-navy)' }}>
+                Cal required: {(s.transfer_std_parameters || []).map(p => {
+                  const tol = s.parameters?.[p]?.tolerance;
+                  return `${p}${tol != null ? ` ±${tol}${CAL_UNIT[p] ?? ''}` : ''}`;
+                }).join(', ')}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
