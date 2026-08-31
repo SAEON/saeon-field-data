@@ -80,6 +80,20 @@ async function parseInBackground(fileRecord, visitId) {
       };
     }
 
+    // ── Barologger/level mismatch guard (groundwater XLE only) ────────────────
+    if (visit.data_family === 'groundwater' && result._metadata?.is_barologger_file !== undefined) {
+      const station       = await db.getStationById(visit.station_id);
+      const fileIsBaro    = result._metadata.is_barologger_file;
+      const stationIsBaro = station?.is_barologger ?? false;
+      if (fileIsBaro !== stationIsBaro) {
+        throw new Error(
+          fileIsBaro
+            ? 'File is from a barologger (pressure in psi/kPa) but this station is not marked as a barologger.'
+            : 'File is from a level logger (depth in metres) but this station is marked as a barologger.'
+        );
+      }
+    }
+
     const streamId = await db.getOrCreateStream(visit.station_id, result.streamName);
 
     // Clear any previous parse of this file (handles reparse), then clear any

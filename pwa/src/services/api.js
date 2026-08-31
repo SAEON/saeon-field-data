@@ -173,6 +173,10 @@ export function deactivateStation(stationId) {
   return request(`/api/stations/${stationId}/deactivate`, { method: 'POST' });
 }
 
+export function getBarologgerStations() {
+  return request('/api/stations/barologgers');
+}
+
 // ── Dashboard ──────────────────────────────────────────────────────────────
 
 export function getOverdueStations() {

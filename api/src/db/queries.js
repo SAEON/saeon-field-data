@@ -89,19 +89,25 @@ async function getAllStationsRegistry() {
   return result.rows;
 }
 
-async function createStation({ name, displayName, dataFamily, region, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId, serialNo }) {
+async function createStation({ name, displayName, dataFamily, region, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId, serialNo, isBarologger, casingHtM, baroStationId, wellDepthM, surveyMethod, surveyedAt }) {
   const result = await pool.query(
     `INSERT INTO stations
-       (name, display_name, data_family, region, location, elevation_m, notes, visit_frequency_days, assigned_technician_id, serial_no)
+       (name, display_name, data_family, region, location, elevation_m, notes,
+        visit_frequency_days, assigned_technician_id, serial_no,
+        is_barologger, casing_ht_m, baro_station_id,
+        well_depth_m, survey_method, surveyed_at)
      VALUES ($1, $2, $3, $4,
        CASE WHEN $5::numeric IS NOT NULL AND $6::numeric IS NOT NULL
             THEN ST_MakePoint($6, $5)::geography ELSE NULL END,
-       $7, $8, COALESCE($9, 30), $10, $11)
+       $7, $8, COALESCE($9, 30), $10, $11,
+       $12, $13, $14, $15, $16, $17)
      RETURNING *`,
     [name, displayName, dataFamily, region ?? null,
      latitude ?? null, longitude ?? null,
      elevationM ?? null, notes ?? null,
-     visitFrequencyDays ?? null, assignedTechnicianId ?? null, serialNo ?? null]
+     visitFrequencyDays ?? null, assignedTechnicianId ?? null, serialNo ?? null,
+     isBarologger ?? false, casingHtM ?? null, baroStationId ?? null,
+     wellDepthM ?? null, surveyMethod ?? null, surveyedAt ?? null]
   );
   return result.rows[0];
 }
@@ -111,6 +117,8 @@ async function updateStation(id, fields) {
     name, displayName, dataFamily, region,
     latitude, longitude, elevationM, notes,
     visitFrequencyDays, assignedTechnicianId, active, serialNo,
+    isBarologger, casingHtM, baroStationId,
+    wellDepthM, surveyMethod, surveyedAt,
   } = fields;
 
   const sets = [];
@@ -127,6 +135,12 @@ async function updateStation(id, fields) {
   if (assignedTechnicianId !== undefined){ sets.push(`assigned_technician_id = $${i++}`); vals.push(assignedTechnicianId); }
   if (active            !== undefined) { sets.push(`active = $${i++}`);                    vals.push(active); }
   if (serialNo          !== undefined) { sets.push(`serial_no = $${i++}`);                 vals.push(serialNo); }
+  if (isBarologger      !== undefined) { sets.push(`is_barologger = $${i++}`);             vals.push(isBarologger); }
+  if (casingHtM         !== undefined) { sets.push(`casing_ht_m = $${i++}`);              vals.push(casingHtM); }
+  if (baroStationId     !== undefined) { sets.push(`baro_station_id = $${i++}`);           vals.push(baroStationId); }
+  if (wellDepthM        !== undefined) { sets.push(`well_depth_m = $${i++}`);              vals.push(wellDepthM); }
+  if (surveyMethod      !== undefined) { sets.push(`survey_method = $${i++}`);             vals.push(surveyMethod); }
+  if (surveyedAt        !== undefined) { sets.push(`surveyed_at = $${i++}`);               vals.push(surveyedAt); }
 
   if (latitude !== undefined && longitude !== undefined) {
     sets.push(`location = ST_MakePoint($${i}, $${i + 1})::geography`);
@@ -150,6 +164,16 @@ async function updateStation(id, fields) {
 
 async function deactivateStation(id) {
   await pool.query(`UPDATE stations SET active = false WHERE id = $1`, [id]);
+}
+
+async function getBarologgerStations() {
+  const result = await pool.query(`
+    SELECT id, name, display_name
+    FROM   stations
+    WHERE  is_barologger = true AND active = true
+    ORDER  BY display_name
+  `);
+  return result.rows;
 }
 
 
@@ -1344,6 +1368,7 @@ async function createInstrumentRecord({ stationId, instrumentType, serialNo, mmP
 module.exports = {
   // Stations
   getAllStations,
+  getBarologgerStations,
   getAllStationsWithLastVisit,
   getAllStationsRegistry,
   getStationById,

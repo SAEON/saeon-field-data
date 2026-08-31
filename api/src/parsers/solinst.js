@@ -98,6 +98,8 @@ module.exports = async function parseSolinst(buffer) {
 
   if (!channels.length) throw new Error('Solinst XLE: no channel headers found');
 
+  const isBarologgerFile = channels[0]?.unit === 'psi' || channels[0]?.unit === 'kPa';
+
   const logEntries = body.Data?.[0]?.Log ?? [];
 
   const measurements = [];
@@ -146,6 +148,7 @@ module.exports = async function parseSolinst(buffer) {
       date_range_start:     dateRangeStart,
       date_range_end:       dateRangeEnd,
       record_count:         measurements.length,
+      is_barologger_file:   isBarologgerFile,
     },
     measurements,
   };
