@@ -576,6 +576,7 @@ export function FieldApp({ onExit, embedded = false }) {
                     visitId={draftVisit.visitId}
                     stationId={draftVisit.station.id}
                     dataFamily={draftVisit.station.data_family}
+                    isBarologger={draftVisit.station.is_barologger ?? false}
                     onReadingsSaved={() => setReadingsDone(true)}
                     onLoggerUnavailable={v => setLoggerUnavailable(v)}
                   />

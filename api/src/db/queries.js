@@ -89,19 +89,25 @@ async function getAllStationsRegistry() {
   return result.rows;
 }
 
-async function createStation({ name, displayName, dataFamily, region, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId, serialNo }) {
+async function createStation({ name, displayName, dataFamily, region, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId, serialNo, isBarologger, casingHtM, baroStationId, wellDepthM, surveyMethod, surveyedAt }) {
   const result = await pool.query(
     `INSERT INTO stations
-       (name, display_name, data_family, region, location, elevation_m, notes, visit_frequency_days, assigned_technician_id, serial_no)
+       (name, display_name, data_family, region, location, elevation_m, notes,
+        visit_frequency_days, assigned_technician_id, serial_no,
+        is_barologger, casing_ht_m, baro_station_id,
+        well_depth_m, survey_method, surveyed_at)
      VALUES ($1, $2, $3, $4,
        CASE WHEN $5::numeric IS NOT NULL AND $6::numeric IS NOT NULL
             THEN ST_MakePoint($6, $5)::geography ELSE NULL END,
-       $7, $8, COALESCE($9, 30), $10, $11)
+       $7, $8, COALESCE($9, 30), $10, $11,
+       $12, $13, $14, $15, $16, $17)
      RETURNING *`,
     [name, displayName, dataFamily, region ?? null,
      latitude ?? null, longitude ?? null,
      elevationM ?? null, notes ?? null,
-     visitFrequencyDays ?? null, assignedTechnicianId ?? null, serialNo ?? null]
+     visitFrequencyDays ?? null, assignedTechnicianId ?? null, serialNo ?? null,
+     isBarologger ?? false, casingHtM ?? null, baroStationId ?? null,
+     wellDepthM ?? null, surveyMethod ?? null, surveyedAt ?? null]
   );
   return result.rows[0];
 }
@@ -111,6 +117,8 @@ async function updateStation(id, fields) {
     name, displayName, dataFamily, region,
     latitude, longitude, elevationM, notes,
     visitFrequencyDays, assignedTechnicianId, active, serialNo,
+    isBarologger, casingHtM, baroStationId,
+    wellDepthM, surveyMethod, surveyedAt,
   } = fields;
 
   const sets = [];
@@ -127,6 +135,12 @@ async function updateStation(id, fields) {
   if (assignedTechnicianId !== undefined){ sets.push(`assigned_technician_id = $${i++}`); vals.push(assignedTechnicianId); }
   if (active            !== undefined) { sets.push(`active = $${i++}`);                    vals.push(active); }
   if (serialNo          !== undefined) { sets.push(`serial_no = $${i++}`);                 vals.push(serialNo); }
+  if (isBarologger      !== undefined) { sets.push(`is_barologger = $${i++}`);             vals.push(isBarologger); }
+  if (casingHtM         !== undefined) { sets.push(`casing_ht_m = $${i++}`);              vals.push(casingHtM); }
+  if (baroStationId     !== undefined) { sets.push(`baro_station_id = $${i++}`);           vals.push(baroStationId); }
+  if (wellDepthM        !== undefined) { sets.push(`well_depth_m = $${i++}`);              vals.push(wellDepthM); }
+  if (surveyMethod      !== undefined) { sets.push(`survey_method = $${i++}`);             vals.push(surveyMethod); }
+  if (surveyedAt        !== undefined) { sets.push(`surveyed_at = $${i++}`);               vals.push(surveyedAt); }
 
   if (latitude !== undefined && longitude !== undefined) {
     sets.push(`location = ST_MakePoint($${i}, $${i + 1})::geography`);
@@ -150,6 +164,16 @@ async function updateStation(id, fields) {
 
 async function deactivateStation(id) {
   await pool.query(`UPDATE stations SET active = false WHERE id = $1`, [id]);
+}
+
+async function getBarologgerStations() {
+  const result = await pool.query(`
+    SELECT id, name, display_name
+    FROM   stations
+    WHERE  is_barologger = true AND active = true
+    ORDER  BY display_name
+  `);
+  return result.rows;
 }
 
 
@@ -1156,6 +1180,137 @@ async function getStationDataCoverage(stationId) {
 
 
 // =============================================================
+// GROUNDWATER PROCESSING
+// =============================================================
+
+async function getRawGroundwaterForStation(stationId) {
+  const result = await pool.query(
+    `SELECT rm.id, rm.stream_id, rm.measured_at, rm.value_numeric,
+            p.name AS phenomenon_name
+     FROM   raw_measurements rm
+     JOIN   station_data_streams sds ON sds.id = rm.stream_id
+     JOIN   phenomena p ON p.id = rm.phenomenon_id
+     WHERE  sds.station_id = $1
+       AND  p.name IN ('water_level_smp', 'temp_c', 'conductivity_smp')
+       AND  rm.is_interference = false
+     ORDER  BY rm.measured_at`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+async function getBaroSeriesForStation(stationId) {
+  const result = await pool.query(
+    `SELECT rm.measured_at, rm.value_numeric
+     FROM   raw_measurements rm
+     JOIN   station_data_streams sds ON sds.id = rm.stream_id
+     JOIN   phenomena p ON p.id = rm.phenomenon_id
+     WHERE  sds.station_id = (SELECT baro_station_id FROM stations WHERE id = $1)
+       AND  p.name = 'baro_pressure_smp'
+       AND  rm.is_interference = false
+     ORDER  BY rm.measured_at`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+async function getDipperAnchorReadings(stationId) {
+  const result = await pool.query(
+    `SELECT fv.id AS visit_id,
+            dr.recorded_at,
+            dr.value_numeric AS dipper_depth_m,
+            COALESCE(cv.value_numeric, s.casing_ht_m) AS casing_ht_m
+     FROM   field_visits fv
+     JOIN   stations s ON s.id = fv.station_id
+     JOIN   manual_readings dr
+            ON dr.visit_id = fv.id AND dr.reading_type = 'dipper_depth'
+     LEFT JOIN manual_readings cv
+            ON cv.visit_id = fv.id AND cv.reading_type = 'casing_ht_verification'
+     WHERE  fv.station_id = $1
+       AND  dr.value_numeric IS NOT NULL
+     ORDER  BY dr.recorded_at`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+async function getDataHandlesForStation(stationId) {
+  const result = await pool.query(
+    `SELECT id, handle_type, start_at, end_at, notes
+     FROM   data_handles
+     WHERE  station_id = $1
+       AND  qa = TRUE
+     ORDER  BY start_at`,
+    [stationId]
+  );
+  return result.rows;
+}
+
+async function upsertGroundwaterLevels(rows) {
+  if (!rows.length) return;
+  const stationIds   = rows.map(r => r.stationId);
+  const streamIds    = rows.map(r => r.streamId);
+  const measuredAts  = rows.map(r => r.measuredAt);
+  const levelMRaws   = rows.map(r => r.levelMRaw         ?? null);
+  const baroKpas     = rows.map(r => r.baroKpa           ?? null);
+  const levelMComps  = rows.map(r => r.levelMComp        ?? null);
+  const tempCs       = rows.map(r => r.tempC             ?? null);
+  const condUs       = rows.map(r => r.conductivityUsCm  ?? null);
+  const btOutliers   = rows.map(r => r.btOutlier         ?? false);
+  const btRules      = rows.map(r => r.btOutlierRule     ?? null);
+  const levelMCleans = rows.map(r => r.levelMCleaned     ?? null);
+  const driftOffsets = rows.map(r => r.driftOffsetM      ?? null);
+  const levelMAsls   = rows.map(r => r.levelMAsl         ?? null);
+
+  await pool.query(
+    `INSERT INTO groundwater_levels
+       (station_id, stream_id, measured_at,
+        level_m_raw, baro_kpa, level_m_comp,
+        temp_c, conductivity_us_cm,
+        bt_outlier, bt_outlier_rule,
+        level_m_cleaned, drift_offset_m, level_m_asl)
+     SELECT * FROM unnest(
+       $1::int[], $2::int[], $3::timestamptz[],
+       $4::numeric[], $5::numeric[], $6::numeric[],
+       $7::numeric[], $8::numeric[],
+       $9::bool[], $10::text[],
+       $11::numeric[], $12::numeric[], $13::numeric[]
+     )
+     ON CONFLICT (stream_id, measured_at) DO UPDATE SET
+       level_m_raw        = EXCLUDED.level_m_raw,
+       baro_kpa           = EXCLUDED.baro_kpa,
+       level_m_comp       = EXCLUDED.level_m_comp,
+       temp_c             = EXCLUDED.temp_c,
+       conductivity_us_cm = EXCLUDED.conductivity_us_cm,
+       bt_outlier         = EXCLUDED.bt_outlier,
+       bt_outlier_rule    = EXCLUDED.bt_outlier_rule,
+       level_m_cleaned    = EXCLUDED.level_m_cleaned,
+       drift_offset_m     = EXCLUDED.drift_offset_m,
+       level_m_asl        = EXCLUDED.level_m_asl,
+       processed_at       = NOW()`,
+    [stationIds, streamIds, measuredAts, levelMRaws, baroKpas, levelMComps,
+     tempCs, condUs, btOutliers, btRules, levelMCleans, driftOffsets, levelMAsls]
+  );
+}
+
+async function getGroundwaterLevels(stationId, from, to) {
+  const result = await pool.query(
+    `SELECT measured_at, level_m_raw, baro_kpa, level_m_comp,
+            bt_outlier, bt_outlier_rule, level_m_cleaned,
+            drift_offset_m, level_m_asl, temp_c, conductivity_us_cm,
+            processed_at
+     FROM   groundwater_levels
+     WHERE  station_id = $1
+       AND  ($2::timestamptz IS NULL OR measured_at >= $2)
+       AND  ($3::timestamptz IS NULL OR measured_at <= $3)
+     ORDER  BY measured_at`,
+    [stationId, from || null, to || null]
+  );
+  return result.rows;
+}
+
+
+// =============================================================
 // Instrument history
 // =============================================================
 
@@ -1402,6 +1557,7 @@ async function getCalibrationChecksForVisit(visitId) {
 module.exports = {
   // Stations
   getAllStations,
+  getBarologgerStations,
   getAllStationsWithLastVisit,
   getAllStationsRegistry,
   getStationById,
@@ -1464,6 +1620,13 @@ module.exports = {
   createUser,
   updateUser,
   clearPasswordChangeRequired,
+  // Groundwater processing
+  getRawGroundwaterForStation,
+  getBaroSeriesForStation,
+  getDipperAnchorReadings,
+  getDataHandlesForStation,
+  upsertGroundwaterLevels,
+  getGroundwaterLevels,
   // Instrument history
   getInstrumentHistory,
   getCalibrationPeriodsForStation,

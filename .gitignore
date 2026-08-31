@@ -75,3 +75,12 @@ logs/
 *.dat
 *.csv
 *.docx
+
+# R reference pipeline (read-only reference, not part of FDS)
+r-reference/
+
+# -------------------------------------------------------------
+# Sample / test data files — local reference only, not committed
+# -------------------------------------------------------------
+samples/
+*.xle

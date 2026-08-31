@@ -22,6 +22,15 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// GET /api/stations/barologgers
+router.get('/barologgers', async (req, res, next) => {
+  try {
+    res.json(await db.getBarologgerStations());
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/stations/logger-snapshots
 // Returns the most recent temp_c and batt_v from raw_measurements per station —
 // used to surface logger conditions on the station list screen.
@@ -91,6 +100,8 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
       name, display_name, data_family, region,
       latitude, longitude, elevation_m, notes,
       visit_frequency_days, assigned_technician_id, serial_no,
+      is_barologger, casing_ht_m, baro_station_id,
+      well_depth_m, survey_method, surveyed_at,
     } = req.body;
 
     if (!name || !display_name || !data_family) {
@@ -102,6 +113,10 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
       region, latitude, longitude, elevationM: elevation_m,
       notes, visitFrequencyDays: visit_frequency_days,
       assignedTechnicianId: assigned_technician_id, serialNo: serial_no ?? null,
+      isBarologger: is_barologger ?? false,
+      casingHtM: casing_ht_m ?? null, baroStationId: baro_station_id ?? null,
+      wellDepthM: well_depth_m ?? null, surveyMethod: survey_method ?? null,
+      surveyedAt: surveyed_at ?? null,
     });
 
     // Seed instrument_history for rainfall stations created with a serial number
@@ -138,6 +153,8 @@ router.post('/:id', requireRole('technician_lead'), async (req, res, next) => {
       name, display_name, data_family, region,
       latitude, longitude, elevation_m, notes,
       visit_frequency_days, assigned_technician_id, active, serial_no,
+      is_barologger, casing_ht_m, baro_station_id,
+      well_depth_m, survey_method, surveyed_at,
     } = req.body;
 
     const updated = await db.updateStation(id, {
@@ -146,6 +163,9 @@ router.post('/:id', requireRole('technician_lead'), async (req, res, next) => {
       notes, visitFrequencyDays: visit_frequency_days,
       assignedTechnicianId: assigned_technician_id, active,
       serialNo: serial_no,
+      isBarologger: is_barologger, casingHtM: casing_ht_m,
+      baroStationId: baro_station_id,
+      wellDepthM: well_depth_m, surveyMethod: survey_method, surveyedAt: surveyed_at,
     });
 
     res.json(updated);

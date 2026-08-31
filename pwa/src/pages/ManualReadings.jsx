@@ -3,9 +3,10 @@ import { createReading, deleteReading, getVisit, createInstrumentRecord, getStat
 import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
 
 const REQUIRED_TYPES = {
-  rainfall:    ['logger_activities', 'raingauge_activities', 'gauge_condition', 'overall_site_condition'],
-  groundwater: ['dipper_depth', 'dipper_time', 'overall_site_condition'],
-  met:         ['met_activities', 'pyranometer_clean', 'anemometer_spinning', 'rain_gauge_clear', 'overall_site_condition'],
+  rainfall:           ['logger_activities', 'raingauge_activities', 'gauge_condition', 'overall_site_condition'],
+  groundwater_level:  ['logger_activities', 'dipper_depth', 'dipper_time', 'overall_site_condition'],
+  groundwater_baro:   ['logger_activities', 'overall_site_condition'],
+  met:                ['met_activities', 'pyranometer_clean', 'anemometer_spinning', 'rain_gauge_clear', 'overall_site_condition'],
 };
 
 const MET_ACTS = [
@@ -869,10 +870,33 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
   );
 }
 
+function BarologgerForm({ saved, onSave }) {
+  function ex(type) { return saved.find(r => r.reading_type === type); }
+  return (
+    <>
+      <ChipsField
+        readingType="logger_activities" label="Logger activity" required
+        options={LOGGER_ACTS}
+        existingReading={ex('logger_activities')} onSave={onSave}
+      />
+      <NumberField
+        readingType="battery_voltage" label="Battery voltage" hint="Optional"
+        unit="V" placeholder="0.0"
+        existingReading={ex('battery_voltage')} onSave={onSave}
+      />
+    </>
+  );
+}
+
 function GroundwaterForm({ saved, onSave }) {
   function ex(type) { return saved.find(r => r.reading_type === type); }
   return (
     <>
+      <ChipsField
+        readingType="logger_activities" label="Logger activity" required
+        options={LOGGER_ACTS}
+        existingReading={ex('logger_activities')} onSave={onSave}
+      />
       <NumberField
         readingType="dipper_depth" label="Dipper depth" required
         hint="Measured at visit" unit="m" placeholder="0.00"
@@ -1650,7 +1674,7 @@ function MetCalibrationSection({ visitId, stationId, onComplete }) {
 
 const FAMILY_LABEL = { rainfall: 'Rainfall', groundwater: 'Groundwater', met: 'Meteorological' };
 
-export default function ManualReadings({ visitId, stationId, dataFamily, onReadingsSaved, onLoggerUnavailable }) {
+export default function ManualReadings({ visitId, stationId, dataFamily, isBarologger, onReadingsSaved, onLoggerUnavailable }) {
   const [saved,               setSaved]               = useState([]);
   const [loaded,              setLoaded]              = useState(false);
   const [formKey,             setFormKey]             = useState(0);   // increment to remount fields after queue flush
@@ -1695,7 +1719,10 @@ export default function ManualReadings({ visitId, stationId, dataFamily, onReadi
     onLoggerUnavailable?.(isUnavailable);
 
     if (calledDone.current) return;
-    const required = REQUIRED_TYPES[dataFamily] || [];
+    const familyKey = dataFamily === 'groundwater'
+      ? (isBarologger ? 'groundwater_baro' : 'groundwater_level')
+      : dataFamily;
+    const required = REQUIRED_TYPES[familyKey] || [];
     if (required.length === 0) return;
     const savedTypes = new Set(saved.map(r => r.reading_type));
     const readingsDone = required.every(t => savedTypes.has(t));
@@ -1790,7 +1817,8 @@ export default function ManualReadings({ visitId, stationId, dataFamily, onReadi
 
         <div key={formKey}>
           {dataFamily === 'rainfall'    && <RainfallForm    saved={saved} onSave={handleSave} visitId={visitId} stationId={stationId} />}
-          {dataFamily === 'groundwater' && <GroundwaterForm saved={saved} onSave={handleSave} />}
+          {dataFamily === 'groundwater' && isBarologger  && <BarologgerForm  saved={saved} onSave={handleSave} />}
+          {dataFamily === 'groundwater' && !isBarologger && <GroundwaterForm saved={saved} onSave={handleSave} />}
           {dataFamily === 'met'         && (
             <MetForm
               saved={saved}

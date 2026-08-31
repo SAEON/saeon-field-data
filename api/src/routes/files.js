@@ -9,8 +9,9 @@ const { log } = require('../middleware/logger');
 router.use(requireAuth);
 const path    = require('path');
 const db      = require('../db/queries');
-const { processRainfall } = require('../processors/rainfall');
-const { processGaps }    = require('../processors/gaps');
+const { processRainfall }    = require('../processors/rainfall');
+const { processGaps }        = require('../processors/gaps');
+const { processGroundwater } = require('../processors/groundwater');
 
 // Multer — store in memory so we can hash before writing to disk
 const upload = multer({ storage: multer.memoryStorage() });
@@ -77,6 +78,20 @@ async function parseInBackground(fileRecord, visitId) {
         stream:     (async function* () { yield parsed.measurements; })(),
         _metadata:  parsed.metadata,
       };
+    }
+
+    // ── Barologger/level mismatch guard (groundwater XLE only) ────────────────
+    if (visit.data_family === 'groundwater' && result._metadata?.is_barologger_file !== undefined) {
+      const station       = await db.getStationById(visit.station_id);
+      const fileIsBaro    = result._metadata.is_barologger_file;
+      const stationIsBaro = station?.is_barologger ?? false;
+      if (fileIsBaro !== stationIsBaro) {
+        throw new Error(
+          fileIsBaro
+            ? 'File is from a barologger (pressure in psi/kPa) but this station is not marked as a barologger.'
+            : 'File is from a level logger (depth in metres) but this station is marked as a barologger.'
+        );
+      }
     }
 
     const streamId = await db.getOrCreateStream(visit.station_id, result.streamName);
@@ -184,6 +199,12 @@ async function parseInBackground(fileRecord, visitId) {
     }
 
     // Trigger gap and rainfall processing after a successful parse
+    if (visit?.data_family === 'groundwater') {
+      processGroundwater(visit.station_id)
+        .then(r  => log.info('[gw] Complete', { station_id: visit.station_id, ...r }))
+        .catch(e => log.error('[gw] Processing failed', { station_id: visit.station_id, error: e.message }));
+    }
+
     if (visit?.data_family === 'rainfall') {
       processGaps(visit.station_id)
         .then(() => log.info('[gaps] Complete', { station_id: visit.station_id }))

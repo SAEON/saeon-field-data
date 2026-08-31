@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers, getInstrumentHistory, createInstrumentRecord, getVisits, getMetInstrumentTypes, getStationSensors, assignSensor } from '../services/api.js';
+import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers, getInstrumentHistory, createInstrumentRecord, getVisits, getMetInstrumentTypes, getStationSensors, assignSensor, getBarologgerStations } from '../services/api.js';
 
 const DATA_FAMILY_OPTIONS = [
   { value: 'groundwater', label: 'Groundwater' },
@@ -81,8 +81,15 @@ function StationSheet({ station, onClose, onSaved }) {
     serial_no:               station?.serial_no               ?? '',
     active:                  station?.active                  ?? true,
     assigned_technician_id:  station?.assigned_technician_id  ?? '',
+    is_barologger:           station?.is_barologger           ?? false,
+    casing_ht_m:             station?.casing_ht_m             ?? '',
+    baro_station_id:         station?.baro_station_id         ?? '',
+    well_depth_m:            station?.well_depth_m            ?? '',
+    survey_method:           station?.survey_method           ?? '',
+    surveyed_at:             station?.surveyed_at ? station.surveyed_at.slice(0, 10) : '',
   });
-  const [technicians, setTechnicians] = useState([]);
+  const [technicians,      setTechnicians]      = useState([]);
+  const [barologgerStations, setBarologgerStations] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState(null);
 
@@ -90,6 +97,7 @@ function StationSheet({ station, onClose, onSaved }) {
     getUsers()
       .then(all => setTechnicians((all || []).filter(u => u.role === 'technician' && u.active)))
       .catch(() => {});
+    getBarologgerStations().then(setBarologgerStations).catch(() => {});
   }, []);
 
   function set(field, value) {
@@ -120,6 +128,12 @@ function StationSheet({ station, onClose, onSaved }) {
         notes:                  form.notes.trim() || null,
         assigned_technician_id: form.assigned_technician_id ? parseInt(form.assigned_technician_id, 10) : null,
         serial_no:              form.serial_no.trim() || null,
+        is_barologger:          form.is_barologger,
+        casing_ht_m:            form.casing_ht_m !== '' ? parseFloat(form.casing_ht_m) : null,
+        baro_station_id:        form.baro_station_id ? parseInt(form.baro_station_id, 10) : null,
+        well_depth_m:           form.well_depth_m !== '' ? parseFloat(form.well_depth_m) : null,
+        survey_method:          form.survey_method.trim() || null,
+        surveyed_at:            form.surveyed_at || null,
       };
       let saved;
       if (isNew) {
@@ -214,9 +228,12 @@ function StationSheet({ station, onClose, onSaved }) {
 
           <div className="flex gap-2">
             <div className="flex-1">
-              <div className={labelCls}>Elevation (m)</div>
-              <input className={inputCls} type="number" value={form.elevation_m}
-                onChange={e => set('elevation_m', e.target.value)} placeholder="Optional" />
+              <div className={labelCls}>
+                {form.data_family === 'groundwater' ? 'Casing elevation (m asl)' : 'Elevation (m)'}
+              </div>
+              <input className={inputCls} type="number" step="0.001" value={form.elevation_m}
+                onChange={e => set('elevation_m', e.target.value)}
+                placeholder="e.g. 62.0" />
             </div>
             <div className="flex-1">
               <div className={labelCls}>Visit frequency (days)</div>
@@ -224,6 +241,78 @@ function StationSheet({ station, onClose, onSaved }) {
                 onChange={e => set('visit_frequency_days', e.target.value)} />
             </div>
           </div>
+
+          {form.data_family === 'groundwater' && (
+            <>
+              <div className="flex items-center justify-between px-2.5 py-2 rounded-lg bg-surface">
+                <div>
+                  <div className="text-[12px] font-semibold text-text-dark">This station is a barologger</div>
+                  <div className="text-[10px] text-text-light">Barologgers provide atmospheric pressure compensation for level loggers</div>
+                </div>
+                <button
+                  onClick={() => set('is_barologger', !form.is_barologger)}
+                  className="relative w-10 h-5 rounded-full transition-colors duration-200 border-none shrink-0"
+                  style={{ background: form.is_barologger ? 'var(--color-navy)' : '#BDBDBD' }}
+                  aria-pressed={form.is_barologger}
+                >
+                  <span
+                    className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"
+                    style={{ transform: form.is_barologger ? 'translateX(20px)' : 'translateX(0)' }}
+                  />
+                </button>
+              </div>
+
+              {!form.is_barologger && (
+                <>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <div className={labelCls}>Casing height (m)</div>
+                      <input className={inputCls} type="number" step="0.001" min="0"
+                        value={form.casing_ht_m}
+                        onChange={e => set('casing_ht_m', e.target.value)}
+                        placeholder="e.g. 0.17" />
+                      <div className="text-[10px] text-text-light mt-0.5">Height of collar above ground surface</div>
+                    </div>
+                    <div className="flex-1">
+                      <div className={labelCls}>Well depth (m)</div>
+                      <input className={inputCls} type="number" step="0.01" min="0"
+                        value={form.well_depth_m}
+                        onChange={e => set('well_depth_m', e.target.value)}
+                        placeholder="Optional" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className={labelCls}>Baro station</div>
+                    <select className={`${inputCls} max-w-[50%]`} value={form.baro_station_id}
+                      onChange={e => set('baro_station_id', e.target.value)}>
+                      <option value="">No baro station</option>
+                      {barologgerStations.map(s => (
+                        <option key={s.id} value={s.id}>{s.display_name}</option>
+                      ))}
+                    </select>
+                    {!form.baro_station_id && (
+                      <div className="text-[10px] text-warning mt-0.5">Processing will be skipped until a baro station is linked</div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <div className={labelCls}>Survey method</div>
+                      <input className={inputCls} value={form.survey_method}
+                        onChange={e => set('survey_method', e.target.value)}
+                        placeholder="e.g. GPS-SRTM" />
+                    </div>
+                    <div className="flex-1">
+                      <div className={labelCls}>Survey date</div>
+                      <input className={inputCls} type="date" value={form.surveyed_at}
+                        onChange={e => set('surveyed_at', e.target.value)} />
+                    </div>
+                  </div>
+                </>
+              )}
+            </>
+          )}
 
           <div>
             <div className={labelCls}>Assigned technician</div>
@@ -993,6 +1082,26 @@ export default function StationRegistry() {
                     ))}
                   </div>
                 </div>
+
+                {station.data_family === 'groundwater' && !station.is_barologger && (
+                  <div className="flex flex-col gap-0.5 mt-1.5">
+                    {!station.baro_station_id && (
+                      <div className="text-[10px] text-warning font-medium">
+                        ⚠ No baro station — processing skipped until one is linked
+                      </div>
+                    )}
+                    {!station.casing_ht_m && (
+                      <div className="text-[10px] text-warning font-medium">
+                        ⚠ No casing height — dipper readings cannot be converted to depth-to-water
+                      </div>
+                    )}
+                    {!station.elevation_m && (
+                      <div className="text-[10px] text-warning font-medium">
+                        ⚠ No casing elevation — water level above sea level cannot be calculated
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
 
