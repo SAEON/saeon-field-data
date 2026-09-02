@@ -9,6 +9,7 @@ import RainfallTipChart from './RainfallTipChart.jsx';
 
 const RESOLUTIONS = [
   { value: '5min',       label: '5 min'     },
+  { value: '10min',      label: '10 min'    },
   { value: 'hourly',     label: 'Hourly'    },
   { value: 'daily',      label: 'Daily'      },
   { value: 'saws_daily', label: 'SAWS daily' },
@@ -29,7 +30,7 @@ function isoDate(d) { return d.toISOString().slice(0, 10); }
 
 function fmtPeriod(iso, resolution) {
   const d = new Date(iso);
-  if (resolution === '5min' || resolution === 'hourly') {
+  if (resolution === '5min' || resolution === '10min' || resolution === 'hourly') {
     return d.toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   }
   if (resolution === 'monthly') return d.toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' });

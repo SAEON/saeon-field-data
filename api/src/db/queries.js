@@ -865,7 +865,7 @@ async function upsertRainfallRows(rows) {
 }
 
 // Query rainfall aggregates at any resolution — aggregation happens here at runtime
-// resolution: '5min' | 'hourly' | 'daily' | 'monthly' | 'yearly'
+// resolution: '5min' | '10min' | 'hourly' | 'daily' | 'saws_daily' | 'monthly' | 'yearly'
 async function getRainfallData(stationId, from, to, resolution = 'daily') {
   if (resolution === '5min') {
     const result = await pool.query(
@@ -884,6 +884,7 @@ async function getRainfallData(stationId, from, to, resolution = 'daily') {
 
   // Validated against fixed map — safe to interpolate into SQL
   const truncMap = {
+    '10min':    `DATE_TRUNC('hour', period_start) + INTERVAL '10 minutes' * FLOOR(EXTRACT(MINUTE FROM period_start) / 10)`,
     hourly:     `DATE_TRUNC('hour',  period_start)`,
     daily:      `DATE_TRUNC('day',   period_start)`,
     saws_daily: `DATE_TRUNC('day',   period_start - INTERVAL '8 hours') + INTERVAL '8 hours'`,

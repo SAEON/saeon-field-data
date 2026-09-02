@@ -6,7 +6,7 @@ const db      = require('../db/queries');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { processRainfall } = require('../processors/rainfall');
 
-const VALID_RESOLUTIONS = ['5min', 'hourly', 'daily', 'saws_daily', 'monthly', 'yearly'];
+const VALID_RESOLUTIONS = ['5min', '10min', 'hourly', 'daily', 'saws_daily', 'monthly', 'yearly'];
 
 router.use(requireAuth);
 
