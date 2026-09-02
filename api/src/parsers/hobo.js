@@ -149,19 +149,20 @@ module.exports = async function parseHobo(filePath) {
   const hasIdCol  = headers[0].trim() === '#';
   const colOffset = hasIdCol ? 1 : 0;
 
-  // ── Extract timezone offset from date-time column header ────────────────────
-  // "Date Time, GMT+02:00" → tzOffsetMs = 7200000 (applied in parseDateTime to get UTC)
-  const dtHeader   = headers[colOffset] || '';
-  const tzMatch    = dtHeader.match(/GMT([+-]\d{1,2}):(\d{2})/i);
-  const tzOffsetMs = tzMatch
-    ? (parseInt(tzMatch[1]) * 60 + parseInt(tzMatch[2])) * 60000
-    : 0;
-
   // ── Detect separate vs combined datetime ────────────────────────────────────
   const dtH0 = (headers[colOffset]     || '').toLowerCase();
   const dtH1 = (headers[colOffset + 1] || '').toLowerCase();
   const separateDatetime =
     dtH0.includes('date') && !dtH0.includes('time') && dtH1.includes('time');
+
+  // ── Extract timezone offset from date-time column header ────────────────────
+  // Combined: "Date Time, GMT+02:00" — offset is in the date column.
+  // Separate: "Time, GMT+02:00" — offset is in the Time column, not the Date column.
+  const tzRaw    = separateDatetime ? (headers[colOffset + 1] || '') : (headers[colOffset] || '');
+  const tzMatch  = tzRaw.match(/GMT([+-]\d{1,2}):(\d{2})/i);
+  const tzOffsetMs = tzMatch
+    ? (parseInt(tzMatch[1]) * 60 + parseInt(tzMatch[2])) * 60000
+    : 0;
 
   const phenColStart = separateDatetime ? colOffset + 2 : colOffset + 1;
 

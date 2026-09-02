@@ -113,6 +113,12 @@ function StationSheet({ station, onClose, onSaved }) {
       setError('Display name and data family are required.');
       return;
     }
+    if (form.data_family === 'groundwater' && !form.is_barologger) {
+      if (form.elevation_m === '' || form.casing_ht_m === '') {
+        setError('Casing elevation (m asl) and casing height are required for groundwater stations.');
+        return;
+      }
+    }
     setSaving(true);
     setError(null);
     try {
@@ -229,7 +235,7 @@ function StationSheet({ station, onClose, onSaved }) {
           <div className="flex gap-2">
             <div className="flex-1">
               <div className={labelCls}>
-                {form.data_family === 'groundwater' ? 'Casing elevation (m asl)' : 'Elevation (m)'}
+                {form.data_family === 'groundwater' ? 'Casing elevation (m asl) *' : 'Elevation (m)'}
               </div>
               <input className={inputCls} type="number" step="0.001" value={form.elevation_m}
                 onChange={e => set('elevation_m', e.target.value)}
@@ -271,14 +277,14 @@ function StationSheet({ station, onClose, onSaved }) {
                         value={form.casing_ht_m}
                         onChange={e => set('casing_ht_m', e.target.value)}
                         placeholder="e.g. 0.17" />
-                      <div className="text-[10px] text-text-light mt-0.5">Height of collar above ground surface</div>
+
                     </div>
                     <div className="flex-1">
                       <div className={labelCls}>Well depth (m)</div>
                       <input className={inputCls} type="number" step="0.01" min="0"
                         value={form.well_depth_m}
                         onChange={e => set('well_depth_m', e.target.value)}
-                        placeholder="Optional" />
+                        placeholder="e.g. 12.5" />
                     </div>
                   </div>
 
@@ -1083,25 +1089,11 @@ export default function StationRegistry() {
                   </div>
                 </div>
 
-                {station.data_family === 'groundwater' && !station.is_barologger && (
-                  <div className="flex flex-col gap-0.5 mt-1.5">
-                    {!station.baro_station_id && (
-                      <div className="text-[10px] text-warning font-medium">
-                        ⚠ No baro station — processing skipped until one is linked
-                      </div>
-                    )}
-                    {!station.casing_ht_m && (
-                      <div className="text-[10px] text-warning font-medium">
-                        ⚠ No casing height — dipper readings cannot be converted to depth-to-water
-                      </div>
-                    )}
-                    {!station.elevation_m && (
-                      <div className="text-[10px] text-warning font-medium">
-                        ⚠ No casing elevation — water level above sea level cannot be calculated
-                      </div>
-                    )}
-                  </div>
-                )}
+              {station.data_family === 'groundwater' && !station.is_barologger && !station.baro_station_id && (
+                <div className="text-[10px] text-warning font-medium mt-1.5">
+                  ⚠ No baro station — processing skipped until one is linked
+                </div>
+              )}
               </div>
             ))}
 
