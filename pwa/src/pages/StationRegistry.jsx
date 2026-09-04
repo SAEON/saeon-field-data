@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers, getInstrumentHistory, createInstrumentRecord, getVisits, getMetInstrumentTypes, getStationSensors, assignSensor, getBarologgerStations } from '../services/api.js';
+import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers, getInstrumentHistory, createInstrumentRecord, getVisits, getMetInstrumentTypes, getStationSensors, assignSensor, getBarologgerStations, getDepartments } from '../services/api.js';
 
 const DATA_FAMILY_OPTIONS = [
   { value: 'groundwater', label: 'Groundwater' },
@@ -72,6 +72,7 @@ function StationSheet({ station, onClose, onSaved }) {
     name:                    station?.name                    ?? '',
     display_name:            station?.display_name            ?? '',
     data_family:             station?.data_family             ?? 'groundwater',
+    node:                    station?.node                    ?? '',
     region:                  station?.region                  ?? '',
     latitude:                station?.latitude                ?? '',
     longitude:               station?.longitude               ?? '',
@@ -88,8 +89,9 @@ function StationSheet({ station, onClose, onSaved }) {
     survey_method:           station?.survey_method           ?? '',
     surveyed_at:             station?.surveyed_at ? station.surveyed_at.slice(0, 10) : '',
   });
-  const [technicians,      setTechnicians]      = useState([]);
+  const [technicians,        setTechnicians]        = useState([]);
   const [barologgerStations, setBarologgerStations] = useState([]);
+  const [nodes,              setNodes]              = useState([]);
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState(null);
 
@@ -98,6 +100,7 @@ function StationSheet({ station, onClose, onSaved }) {
       .then(all => setTechnicians((all || []).filter(u => u.role === 'technician' && u.active)))
       .catch(() => {});
     getBarologgerStations().then(setBarologgerStations).catch(() => {});
+    getDepartments().then(setNodes).catch(() => {});
   }, []);
 
   function set(field, value) {
@@ -113,6 +116,18 @@ function StationSheet({ station, onClose, onSaved }) {
       setError('Display name and data family are required.');
       return;
     }
+    if (!form.node) {
+      setError('Node is required.');
+      return;
+    }
+    if (form.latitude === '' || form.longitude === '') {
+      setError('Latitude and longitude are required.');
+      return;
+    }
+    if (!form.region.trim()) {
+      setError('Region is required.');
+      return;
+    }
     if (form.data_family === 'groundwater' && !form.is_barologger) {
       if (form.elevation_m === '' || form.casing_ht_m === '') {
         setError('Casing elevation (m asl) and casing height are required for groundwater stations.');
@@ -126,6 +141,7 @@ function StationSheet({ station, onClose, onSaved }) {
         name:                   form.name || slugify(form.display_name),
         display_name:           form.display_name.trim(),
         data_family:            form.data_family,
+        node:                   form.node,
         region:                 form.region.trim() || null,
         latitude:               form.latitude !== '' ? parseFloat(form.latitude) : null,
         longitude:              form.longitude !== '' ? parseFloat(form.longitude) : null,
@@ -212,6 +228,16 @@ function StationSheet({ station, onClose, onSaved }) {
                 ))}
               </select>
             </div>
+            <div className="flex-1">
+              <div className={labelCls}>Node</div>
+              <select className={inputCls} value={form.node} onChange={e => set('node', e.target.value)}>
+                <option value="">Select node</option>
+                {nodes.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
             <div className="flex-1">
               <div className={labelCls}>Region</div>
               <input className={inputCls} value={form.region} onChange={e => set('region', e.target.value)}
@@ -1063,6 +1089,7 @@ export default function StationRegistry() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-[10px] text-text-light min-w-0">
                     <FamilyBadge family={station.data_family} />
+                    {station.node && <span className="font-semibold">{station.node}</span>}
                     {station.region ?? 'No region'}
                     {' · '}every {station.visit_frequency_days}d
                     {station.last_visited_at && (

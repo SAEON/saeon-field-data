@@ -97,20 +97,20 @@ router.get('/:id/coverage', async (req, res, next) => {
 router.post('/', requireRole('technician_lead'), async (req, res, next) => {
   try {
     const {
-      name, display_name, data_family, region,
+      name, display_name, data_family, region, node,
       latitude, longitude, elevation_m, notes,
       visit_frequency_days, assigned_technician_id, serial_no,
       is_barologger, casing_ht_m, baro_station_id,
       well_depth_m, survey_method, surveyed_at,
     } = req.body;
 
-    if (!name || !display_name || !data_family) {
-      return res.status(400).json({ error: 'name, display_name, and data_family are required' });
+    if (!name || !display_name || !data_family || !node) {
+      return res.status(400).json({ error: 'name, display_name, data_family, and node are required' });
     }
 
     const station = await db.createStation({
       name, displayName: display_name, dataFamily: data_family,
-      region, latitude, longitude, elevationM: elevation_m,
+      region, node, latitude, longitude, elevationM: elevation_m,
       notes, visitFrequencyDays: visit_frequency_days,
       assignedTechnicianId: assigned_technician_id, serialNo: serial_no ?? null,
       isBarologger: is_barologger ?? false,
@@ -150,7 +150,7 @@ router.post('/:id', requireRole('technician_lead'), async (req, res, next) => {
     if (!station) return res.status(404).json({ error: 'Station not found' });
 
     const {
-      name, display_name, data_family, region,
+      name, display_name, data_family, region, node,
       latitude, longitude, elevation_m, notes,
       visit_frequency_days, assigned_technician_id, active, serial_no,
       is_barologger, casing_ht_m, baro_station_id,
@@ -159,7 +159,7 @@ router.post('/:id', requireRole('technician_lead'), async (req, res, next) => {
 
     const updated = await db.updateStation(id, {
       name, displayName: display_name, dataFamily: data_family,
-      region, latitude, longitude, elevationM: elevation_m,
+      region, node, latitude, longitude, elevationM: elevation_m,
       notes, visitFrequencyDays: visit_frequency_days,
       assignedTechnicianId: assigned_technician_id, active,
       serialNo: serial_no,

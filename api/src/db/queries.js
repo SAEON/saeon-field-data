@@ -73,7 +73,7 @@ async function getAllStationsWithLastVisit(assignedToUserId = null) {
 // Registry view (leads/managers) — includes inactive stations
 async function getAllStationsRegistry() {
   const result = await pool.query(`
-    SELECT s.id, s.name, s.display_name, s.data_family, s.region,
+    SELECT s.id, s.name, s.display_name, s.data_family, s.region, s.node,
            s.active, s.visit_frequency_days, s.assigned_technician_id,
            u.full_name AS assigned_technician_name,
            s.elevation_m, s.notes,
@@ -89,20 +89,20 @@ async function getAllStationsRegistry() {
   return result.rows;
 }
 
-async function createStation({ name, displayName, dataFamily, region, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId, serialNo, isBarologger, casingHtM, baroStationId, wellDepthM, surveyMethod, surveyedAt }) {
+async function createStation({ name, displayName, dataFamily, region, node, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId, serialNo, isBarologger, casingHtM, baroStationId, wellDepthM, surveyMethod, surveyedAt }) {
   const result = await pool.query(
     `INSERT INTO stations
-       (name, display_name, data_family, region, location, elevation_m, notes,
+       (name, display_name, data_family, region, node, location, elevation_m, notes,
         visit_frequency_days, assigned_technician_id, serial_no,
         is_barologger, casing_ht_m, baro_station_id,
         well_depth_m, survey_method, surveyed_at)
-     VALUES ($1, $2, $3, $4,
-       CASE WHEN $5::numeric IS NOT NULL AND $6::numeric IS NOT NULL
-            THEN ST_MakePoint($6, $5)::geography ELSE NULL END,
-       $7, $8, COALESCE($9, 30), $10, $11,
-       $12, $13, $14, $15, $16, $17)
+     VALUES ($1, $2, $3, $4, $5,
+       CASE WHEN $6::numeric IS NOT NULL AND $7::numeric IS NOT NULL
+            THEN ST_MakePoint($7, $6)::geography ELSE NULL END,
+       $8, $9, COALESCE($10, 30), $11, $12,
+       $13, $14, $15, $16, $17, $18)
      RETURNING *`,
-    [name, displayName, dataFamily, region ?? null,
+    [name, displayName, dataFamily, region ?? null, node ?? null,
      latitude ?? null, longitude ?? null,
      elevationM ?? null, notes ?? null,
      visitFrequencyDays ?? null, assignedTechnicianId ?? null, serialNo ?? null,
@@ -114,7 +114,7 @@ async function createStation({ name, displayName, dataFamily, region, latitude, 
 
 async function updateStation(id, fields) {
   const {
-    name, displayName, dataFamily, region,
+    name, displayName, dataFamily, region, node,
     latitude, longitude, elevationM, notes,
     visitFrequencyDays, assignedTechnicianId, active, serialNo,
     isBarologger, casingHtM, baroStationId,
@@ -129,6 +129,7 @@ async function updateStation(id, fields) {
   if (displayName       !== undefined) { sets.push(`display_name = $${i++}`);              vals.push(displayName); }
   if (dataFamily        !== undefined) { sets.push(`data_family = $${i++}`);               vals.push(dataFamily); }
   if (region            !== undefined) { sets.push(`region = $${i++}`);                    vals.push(region); }
+  if (node              !== undefined) { sets.push(`node = $${i++}`);                      vals.push(node); }
   if (elevationM        !== undefined) { sets.push(`elevation_m = $${i++}`);               vals.push(elevationM); }
   if (notes             !== undefined) { sets.push(`notes = $${i++}`);                     vals.push(notes); }
   if (visitFrequencyDays !== undefined){ sets.push(`visit_frequency_days = $${i++}`);      vals.push(visitFrequencyDays); }
