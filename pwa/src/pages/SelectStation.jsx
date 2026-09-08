@@ -212,8 +212,14 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
             className="station-card"
           >
             <div className="flex-1 min-w-0">
-              <div className="font-semibold text-sm text-text-dark truncate">
+              <div className="font-semibold text-sm text-text-dark truncate flex items-center gap-1.5">
                 {s.display_name}
+                {s.data_family === 'groundwater' && (
+                  <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                    style={{ background: 'var(--color-surface)', color: 'var(--color-text-light)', border: '1px solid var(--color-border)' }}>
+                    {s.is_barologger ? 'Barologger' : 'Level logger'}
+                  </span>
+                )}
               </div>
               <div className={`text-[11px] mt-0.5 flex items-center gap-1 ${daysSince(s.last_visited_at) >= OVERDUE_DAYS ? 'text-warning' : 'text-text-light'}`}>
                 {daysSince(s.last_visited_at) >= OVERDUE_DAYS && <span>⚠</span>}

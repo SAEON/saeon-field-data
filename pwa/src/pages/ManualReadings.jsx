@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { createReading, deleteReading, getVisit, createInstrumentRecord, getStationSensors, getTransferStandards, createCalibrationCheck, getCalibrationChecks, getMetInstrumentTypes, assignSensor, decommissionSensor } from '../services/api.js';
+import { createReading, deleteReading, getVisit, createInstrumentRecord, getStationSensors, getTransferStandards, createCalibrationCheck, getCalibrationChecks, getMetInstrumentTypes, assignSensor, decommissionSensor, getStationById } from '../services/api.js';
 import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
 
 const REQUIRED_TYPES = {
@@ -872,57 +872,363 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
 
 function BarologgerForm({ saved, onSave }) {
   function ex(type) { return saved.find(r => r.reading_type === type); }
+
+  function parseActs(reading) {
+    if (!reading?.value_text) return new Set();
+    try { return new Set(JSON.parse(reading.value_text)); } catch { return new Set(); }
+  }
+
+  const isAlreadySaved = !!(ex('logger_activities') && ex('overall_site_condition'));
+  const [saveState,   setSaveState]   = useState(isAlreadySaved ? 'saved' : 'idle');
+  const locked = saveState === 'saved';
+
+  const [loggerActs,  setLoggerActs]  = useState(() => parseActs(ex('logger_activities')));
+  const [battery,     setBattery]     = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
+  const [loggerCond,  setLoggerCond]  = useState(ex('overall_site_condition')?.value_text ?? null);
+
+  function toggleAct(value) {
+    if (locked) return;
+    setLoggerActs(prev => {
+      const next = new Set(prev);
+      next.has(value) ? next.delete(value) : next.add(value);
+      return next;
+    });
+    setSaveState('idle');
+  }
+
+  async function handleSaveAll() {
+    setSaveState('saving');
+    const now = new Date().toISOString();
+    const saves = [];
+    saves.push(() => onSave({ reading_type: 'logger_activities', value_text: JSON.stringify([...loggerActs]), recorded_at: now }));
+    if (battery) saves.push(() => onSave({ reading_type: 'battery_voltage', value_numeric: parseFloat(battery), unit: 'V', recorded_at: now }));
+    saves.push(() => onSave({ reading_type: 'overall_site_condition', value_text: loggerCond, recorded_at: now }));
+    try {
+      for (const save of saves) await save();
+      setSaveState('saved');
+    } catch (err) {
+      setSaveState(err?.offline ? 'idle' : 'error');
+    }
+  }
+
+  const canSave = !locked && loggerActs.size > 0 && !!loggerCond;
+
+  const SITE_CONDS = [
+    { value: 'good',     label: 'Good' },
+    { value: 'fair',     label: 'Fair' },
+    { value: 'poor',     label: 'Poor' },
+    { value: 'critical', label: 'Critical' },
+  ];
+
   return (
     <>
-      <ChipsField
-        readingType="logger_activities" label="Logger activity" required
-        options={LOGGER_ACTS}
-        existingReading={ex('logger_activities')} onSave={onSave}
-      />
-      <NumberField
-        readingType="battery_voltage" label="Battery voltage" hint="Optional"
-        unit="V" placeholder="0.0"
-        existingReading={ex('battery_voltage')} onSave={onSave}
-      />
+      <div className="form-card">
+        <div className="text-[12px] font-semibold text-text-dark mb-2">
+          Logger activity <span className="text-warning text-[11px]">*</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {LOGGER_ACTS.map(({ value, label }) => (
+            <button key={value}
+              data-selected={loggerActs.has(value) ? 'true' : undefined}
+              onClick={() => toggleAct(value)}
+              className="note-chip">
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-1.5">
+          <div className="text-[12px] font-semibold text-text-dark">Battery voltage</div>
+          <span className="text-[10px] text-text-light">Optional</span>
+        </div>
+        <div className="relative" style={{ display: 'inline-block' }}>
+          <input type="number" step="0.1" placeholder="0.0"
+            value={battery} onChange={e => { setBattery(e.target.value); setSaveState('idle'); }}
+            disabled={locked}
+            className={`field-input ${battery ? 'field-input--active' : ''}`}
+            style={{ height: 36, width: 110, paddingRight: 28 }} />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">V</span>
+        </div>
+      </div>
+
+      <div className="form-card">
+        <div className="text-[12px] font-semibold text-text-dark mb-2">
+          Logger condition <span className="text-warning text-[11px]">*</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {SITE_CONDS.map(({ value, label }) => (
+            <button key={value}
+              data-selected={loggerCond === value ? 'true' : undefined}
+              onClick={() => { if (!locked) { setLoggerCond(loggerCond === value ? null : value); setSaveState('idle'); } }}
+              className="note-chip">
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {saveState === 'error' && (
+        <div className="form-card" style={{ borderColor: 'var(--color-error)' }}>
+          <div className="text-[12px] text-error">Save failed — tap to retry.</div>
+        </div>
+      )}
+      <button
+        onClick={handleSaveAll}
+        disabled={!canSave || saveState === 'saving'}
+        style={{ opacity: (!canSave || saveState === 'saving') ? 0.4 : 1, background: 'var(--color-navy)' }}
+        className="w-full h-12 rounded-xl font-bold text-white transition-colors">
+        {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : 'Save'}
+      </button>
     </>
   );
 }
 
-function GroundwaterForm({ saved, onSave }) {
+function GroundwaterForm({ saved, onSave, stationId }) {
   function ex(type) { return saved.find(r => r.reading_type === type); }
+
+  const [stationCasingHt, setStationCasingHt] = useState(null);
+  useEffect(() => {
+    if (stationId) getStationById(stationId).then(s => {
+      const ht = s?.casing_ht_m ?? null;
+      setStationCasingHt(ht);
+      if (ht != null && !ex('casing_ht_verification')) setCasingVerify(String(ht));
+    }).catch(() => {});
+  }, [stationId]);
+
+  function parseActs(reading) {
+    if (!reading?.value_text) return new Set();
+    try { return new Set(JSON.parse(reading.value_text)); } catch { return new Set(); }
+  }
+
+  const isAlreadySaved = !!(
+    ex('logger_activities') && ex('dipper_depth') &&
+    ex('dipper_time') && ex('overall_site_condition')
+  );
+  const [saveState,    setSaveState]    = useState(isAlreadySaved ? 'saved' : 'idle');
+  const locked = saveState === 'saved';
+
+  const [loggerActs,   setLoggerActs]   = useState(() => parseActs(ex('logger_activities')));
+  const [maintChecks,  setMaintChecks]  = useState(() => parseActs(ex('logger_maintenance_checks')));
+  const [dipperDepth,  setDipperDepth]  = useState(ex('dipper_depth')?.value_numeric != null ? String(ex('dipper_depth').value_numeric) : '');
+  const [dipperTime,   setDipperTime]   = useState(ex('dipper_time')?.value_text ?? '');
+  const [casingVerify, setCasingVerify] = useState(ex('casing_ht_verification')?.value_numeric != null ? String(ex('casing_ht_verification').value_numeric) : '');
+  const [waterColour,  setWaterColour]  = useState(ex('water_colour')?.value_text ?? null);
+  const [battery,      setBattery]      = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
+  const [siteCond,     setSiteCond]     = useState(ex('overall_site_condition')?.value_text ?? null);
+
+  const hasMaintenance = loggerActs.has('logger_maintenance');
+
+  function toggleAct(value) {
+    if (locked) return;
+    setLoggerActs(prev => {
+      const next = new Set(prev);
+      next.has(value) ? next.delete(value) : next.add(value);
+      return next;
+    });
+    setSaveState('idle');
+  }
+
+  function toggleMaint(label) {
+    if (locked) return;
+    setMaintChecks(prev => {
+      const next = new Set(prev);
+      next.has(label) ? next.delete(label) : next.add(label);
+      return next;
+    });
+  }
+
+  async function handleSaveAll() {
+    setSaveState('saving');
+    const now = new Date().toISOString();
+    const saves = [];
+
+    saves.push(() => onSave({ reading_type: 'logger_activities', value_text: JSON.stringify([...loggerActs]), recorded_at: now }));
+    if (hasMaintenance && maintChecks.size > 0)
+      saves.push(() => onSave({ reading_type: 'logger_maintenance_checks', value_text: JSON.stringify([...maintChecks]), recorded_at: now }));
+    saves.push(() => onSave({ reading_type: 'dipper_depth', value_numeric: parseFloat(dipperDepth), unit: 'm', recorded_at: now }));
+    saves.push(() => onSave({ reading_type: 'dipper_time', value_text: dipperTime, recorded_at: now }));
+    if (casingVerify)
+      saves.push(() => onSave({ reading_type: 'casing_ht_verification', value_numeric: parseFloat(casingVerify), unit: 'm', recorded_at: now }));
+    if (waterColour)
+      saves.push(() => onSave({ reading_type: 'water_colour', value_text: waterColour, recorded_at: now }));
+    if (battery)
+      saves.push(() => onSave({ reading_type: 'battery_voltage', value_numeric: parseFloat(battery), unit: 'V', recorded_at: now }));
+    saves.push(() => onSave({ reading_type: 'overall_site_condition', value_text: siteCond, recorded_at: now }));
+
+    try {
+      for (const save of saves) await save();
+      setSaveState('saved');
+    } catch (err) {
+      setSaveState(err?.offline ? 'idle' : 'error');
+    }
+  }
+
+  const canSave = !locked && loggerActs.size > 0 && !!dipperDepth && !!dipperTime && !!siteCond;
+
+  const WATER_COLOURS = [
+    { value: 'clear',  label: 'Clear' },
+    { value: 'turbid', label: 'Turbid' },
+    { value: 'brown',  label: 'Brown' },
+    { value: 'black',  label: 'Black' },
+    { value: 'dry',    label: 'Dry — no water' },
+  ];
+  const SITE_CONDS = [
+    { value: 'good',     label: 'Good' },
+    { value: 'fair',     label: 'Fair' },
+    { value: 'poor',     label: 'Poor' },
+    { value: 'critical', label: 'Critical' },
+  ];
+
   return (
     <>
-      <ChipsField
-        readingType="logger_activities" label="Logger activity" required
-        options={LOGGER_ACTS}
-        existingReading={ex('logger_activities')} onSave={onSave}
-      />
-      <NumberField
-        readingType="dipper_depth" label="Dipper depth" required
-        hint="Measured at visit" unit="m" placeholder="0.00"
-        existingReading={ex('dipper_depth')} onSave={onSave}
-      />
-      <TimeField
-        readingType="dipper_time" label="Time of dipper reading" required
-        hint="Exact time tape entered water"
-        existingReading={ex('dipper_time')} onSave={onSave}
-      />
-      <ChipsField
-        readingType="water_colour" label="Water colour / clarity" hint="Optional"
-        options={[
-          { value: 'clear',  label: 'Clear' },
-          { value: 'turbid', label: 'Turbid' },
-          { value: 'brown',  label: 'Brown' },
-          { value: 'black',  label: 'Black' },
-          { value: 'dry',    label: 'Dry — no water' },
-        ]}
-        existingReading={ex('water_colour')} onSave={onSave}
-      />
-      <NumberField
-        readingType="battery_voltage" label="Battery voltage" hint="Optional"
-        unit="V" placeholder="0.0"
-        existingReading={ex('battery_voltage')} onSave={onSave}
-      />
+      {/* A — Logger activity */}
+      <SectionDivider label="Logger" />
+
+      <div className="form-card">
+        <div className="text-[12px] font-semibold text-text-dark mb-2">
+          Logger activity <span className="text-warning text-[11px]">*</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {LOGGER_ACTS.map(({ value, label }) => (
+            <button key={value}
+              data-selected={loggerActs.has(value) ? 'true' : undefined}
+              onClick={() => toggleAct(value)}
+              className="note-chip">
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {hasMaintenance && (
+        <div className="form-card">
+          <div className="text-[12px] font-semibold text-text-dark mb-1.5">Maintenance checks</div>
+          <div className="text-[11px] text-text-light mb-2.5">Select all completed.</div>
+          <div className="flex flex-wrap gap-1.5">
+            {LOGGER_MAINT_CHECKS.map(label => (
+              <button key={label}
+                data-selected={maintChecks.has(label) ? 'true' : undefined}
+                onClick={() => toggleMaint(label)}
+                className="note-chip">
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* B — Dipper reading */}
+      <SectionDivider label="Dipper reading" />
+
+      <div className="form-card">
+        <div className="flex gap-3 flex-wrap">
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-text-light font-medium">Depth <span className="text-warning">*</span></span>
+            <div className="relative" style={{ display: 'inline-block' }}>
+              <input type="number" step="0.001" placeholder="0.000"
+                value={dipperDepth} onChange={e => { setDipperDepth(e.target.value); setSaveState('idle'); }}
+                disabled={locked}
+                className={`field-input ${dipperDepth ? 'field-input--active' : ''}`}
+                style={{ height: 36, width: 110, paddingRight: 28 }} />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">m</span>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-text-light font-medium">Read time <span className="text-warning">*</span></span>
+            <input type="time"
+              value={dipperTime} onChange={e => { setDipperTime(e.target.value); setSaveState('idle'); }}
+              disabled={locked}
+              className={`field-input ${dipperTime ? 'field-input--active' : ''}`}
+              style={{ height: 36 }} />
+          </div>
+        </div>
+      </div>
+
+      <div className="form-card">
+        <div className="flex items-baseline gap-2 mb-1.5">
+          <span className="text-[12px] font-semibold text-text-dark">Casing height</span>
+          <span className="text-[10px] text-text-light">(optional)</span>
+        </div>
+        <div className="relative" style={{ display: 'inline-block' }}>
+          <input type="number" step="0.001" placeholder="0.000"
+            value={casingVerify} onChange={e => { setCasingVerify(e.target.value); setSaveState('idle'); }}
+            disabled={locked}
+            className={`field-input ${casingVerify ? 'field-input--active' : ''}`}
+            style={{ height: 36, width: 110, paddingRight: 28 }} />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">m</span>
+        </div>
+        {casingVerify && stationCasingHt != null && Math.abs(parseFloat(casingVerify) - stationCasingHt) > 0.005 && (
+          <div className="mt-1.5 text-[11px] text-warning font-medium">
+            ⚠ Differs from station default by {(parseFloat(casingVerify) - stationCasingHt).toFixed(3)}m — update station record.
+          </div>
+        )}
+      </div>
+
+      {/* C — Wellhead condition */}
+      <SectionDivider label="Wellhead condition" />
+
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-2">
+          <div className="text-[12px] font-semibold text-text-dark">Water colour / clarity</div>
+          <span className="text-[10px] text-text-light">Optional</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {WATER_COLOURS.map(({ value, label }) => (
+            <button key={value}
+              data-selected={waterColour === value ? 'true' : undefined}
+              onClick={() => { if (!locked) { setWaterColour(waterColour === value ? null : value); setSaveState('idle'); } }}
+              className="note-chip">
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="form-card">
+        <div className="flex items-baseline justify-between mb-1.5">
+          <div className="text-[12px] font-semibold text-text-dark">Battery voltage</div>
+          <span className="text-[10px] text-text-light">Optional</span>
+        </div>
+        <div className="relative" style={{ display: 'inline-block' }}>
+          <input type="number" step="0.1" placeholder="0.0"
+            value={battery} onChange={e => { setBattery(e.target.value); setSaveState('idle'); }}
+            disabled={locked}
+            className={`field-input ${battery ? 'field-input--active' : ''}`}
+            style={{ height: 36, width: 110, paddingRight: 28 }} />
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">V</span>
+        </div>
+      </div>
+
+      <div className="form-card">
+        <div className="text-[12px] font-semibold text-text-dark mb-2">
+          Site condition <span className="text-warning text-[11px]">*</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {SITE_CONDS.map(({ value, label }) => (
+            <button key={value}
+              data-selected={siteCond === value ? 'true' : undefined}
+              onClick={() => { if (!locked) { setSiteCond(siteCond === value ? null : value); setSaveState('idle'); } }}
+              className="note-chip">
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {saveState === 'error' && (
+        <div className="form-card" style={{ borderColor: 'var(--color-error)' }}>
+          <div className="text-[12px] text-error">Save failed — tap to retry.</div>
+        </div>
+      )}
+      <button
+        onClick={handleSaveAll}
+        disabled={!canSave || saveState === 'saving'}
+        style={{ opacity: (!canSave || saveState === 'saving') ? 0.4 : 1, background: 'var(--color-navy)' }}
+        className="w-full h-12 rounded-xl font-bold text-white transition-colors">
+        {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : 'Save'}
+      </button>
     </>
   );
 }
@@ -1818,7 +2124,7 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
         <div key={formKey}>
           {dataFamily === 'rainfall'    && <RainfallForm    saved={saved} onSave={handleSave} visitId={visitId} stationId={stationId} />}
           {dataFamily === 'groundwater' && isBarologger  && <BarologgerForm  saved={saved} onSave={handleSave} />}
-          {dataFamily === 'groundwater' && !isBarologger && <GroundwaterForm saved={saved} onSave={handleSave} />}
+          {dataFamily === 'groundwater' && !isBarologger && <GroundwaterForm saved={saved} onSave={handleSave} stationId={stationId} />}
           {dataFamily === 'met'         && (
             <MetForm
               saved={saved}
@@ -1843,12 +2149,6 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
             />
           )}
 
-          {dataFamily === 'groundwater' && (
-            <SiteConditionSection
-              existingReading={saved.find(r => r.reading_type === 'overall_site_condition')}
-              onSave={handleSave}
-            />
-          )}
         </div>
 
       </div>

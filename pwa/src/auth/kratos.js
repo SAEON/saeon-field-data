@@ -64,6 +64,7 @@ export async function kratosLogout() {
   if (logout_token) {
     await fetch(`${BASE}/self-service/logout?token=${logout_token}`, {
       credentials: 'include',
+      headers: { Accept: 'application/json' },
     });
   }
 }

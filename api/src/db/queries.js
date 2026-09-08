@@ -6,10 +6,14 @@ const pool = require('./pool');
 
 async function getAllStations() {
   const result = await pool.query(`
-    SELECT id, name, display_name, data_family, region
-    FROM   stations
-    WHERE  active = true
-    ORDER  BY name
+    SELECT s.id, s.name, s.display_name, s.data_family, s.region, s.node,
+           s.is_barologger, s.baro_station_id, s.visit_frequency_days,
+           MAX(fv.visited_at) AS last_visited_at
+    FROM   stations s
+    LEFT JOIN field_visits fv ON fv.station_id = s.id
+    WHERE  s.active = true
+    GROUP  BY s.id
+    ORDER  BY s.name
   `);
   return result.rows;
 }
@@ -56,6 +60,7 @@ async function getAllStationsWithLastVisit(assignedToUserId = null) {
   const result = await pool.query(`
     SELECT s.id, s.name, s.display_name, s.data_family, s.region,
            s.active, s.visit_frequency_days, s.assigned_technician_id,
+           s.is_barologger, s.baro_station_id,
            u.full_name AS assigned_technician_name,
            ST_Y(s.location::geometry) AS latitude,
            ST_X(s.location::geometry) AS longitude,
@@ -76,7 +81,9 @@ async function getAllStationsRegistry() {
     SELECT s.id, s.name, s.display_name, s.data_family, s.region, s.node,
            s.active, s.visit_frequency_days, s.assigned_technician_id,
            u.full_name AS assigned_technician_name,
-           s.elevation_m, s.notes,
+           s.elevation_m, s.notes, s.serial_no,
+           s.is_barologger, s.casing_ht_m, s.baro_station_id,
+           s.well_depth_m, s.survey_method, s.surveyed_at,
            ST_Y(s.location::geometry) AS latitude,
            ST_X(s.location::geometry) AS longitude,
            MAX(fv.visited_at) AS last_visited_at
@@ -174,6 +181,14 @@ async function getBarologgerStations() {
     WHERE  is_barologger = true AND active = true
     ORDER  BY display_name
   `);
+  return result.rows;
+}
+
+async function getStationsByBaroStationId(baroStationId) {
+  const result = await pool.query(`
+    SELECT id FROM stations
+    WHERE  baro_station_id = $1 AND active = true
+  `, [baroStationId]);
   return result.rows;
 }
 
@@ -1193,7 +1208,7 @@ async function getRawGroundwaterForStation(stationId) {
      JOIN   station_data_streams sds ON sds.id = rm.stream_id
      JOIN   phenomena p ON p.id = rm.phenomenon_id
      WHERE  sds.station_id = $1
-       AND  p.name IN ('water_level_smp', 'temp_c', 'conductivity_smp')
+       AND  p.name IN ('water_level_smp', 'water_temp_smp', 'conductivity_smp')
        AND  rm.is_interference = false
      ORDER  BY rm.measured_at`,
     [stationId]
@@ -1560,6 +1575,7 @@ module.exports = {
   // Stations
   getAllStations,
   getBarologgerStations,
+  getStationsByBaroStationId,
   getAllStationsWithLastVisit,
   getAllStationsRegistry,
   getStationById,

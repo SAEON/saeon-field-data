@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getDashboardStations, getFilesWithErrors, deleteFile, getStations } from '../services/api.js';
+import { getDashboardStations, getFilesWithErrors, deleteFile } from '../services/api.js';
 import UserManagement    from './UserManagement.jsx';
-import RainfallDataTable from '../components/RainfallDataTable.jsx';
+import DataTab from './DataTab.jsx';
 import VisitOversight    from './VisitOversight.jsx';
 import StationRegistry   from './StationRegistry.jsx';
 import HistoryTab        from './HistoryTab.jsx';
@@ -302,49 +302,6 @@ export function ErrorsTab({ canDelete = true }) {
   );
 }
 
-// ── Rainfall tab ──────────────────────────────────────────────────────────────
-
-function RainfallTab() {
-  const [stations, setStations] = useState([]);
-  const [selected, setSelected] = useState(null);
-
-  useEffect(() => {
-    getStations()
-      .then(all => {
-        const rf = (all || []).filter(s => s.data_family === 'rainfall');
-        setStations(rf);
-        if (rf.length) setSelected(rf[0].id);
-      })
-      .catch(() => {});
-  }, []);
-
-  const stationName = stations.find(s => s.id === selected)?.display_name;
-
-  return (
-    <div className="flex flex-col flex-1 overflow-hidden">
-      <AppBar title="Rainfall" subtitle={stationName} />
-
-      <main className="flex-1 overflow-y-auto w-full max-w-[var(--max-width)] mx-auto">
-
-        {/* Station selector */}
-        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--color-border)' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Station</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {stations.map(s => (
-              <button key={s.id} onClick={() => setSelected(s.id)}
-                style={{ fontSize: 12, fontWeight: selected === s.id ? 700 : 500, padding: '4px 12px', borderRadius: 20, border: `1.5px solid ${selected === s.id ? '#1565C0' : 'var(--color-border)'}`, background: selected === s.id ? '#EBF2FB' : 'var(--color-surface)', color: selected === s.id ? '#1565C0' : 'var(--color-text-med)', cursor: 'pointer' }}>
-                {s.display_name}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <RainfallDataTable stationId={selected} canReprocess={true} />
-      </main>
-    </div>
-  );
-}
-
 // ── Dashboard shell ───────────────────────────────────────────────────────────
 
 const TABS = [
@@ -353,7 +310,7 @@ const TABS = [
   { id: 'history',  label: 'History',  icon: '≡' },
   { id: 'stations', label: 'Stations', icon: '⊞' },
   { id: 'errors',   label: 'Errors',   icon: '⚠' },
-  { id: 'rainfall', label: 'Rainfall', icon: '≀' },
+  { id: 'data',     label: 'Data',     icon: '≀' },
   { id: 'users',    label: 'Users',    icon: '◎' },
   { id: 'field',    label: 'Field',    icon: '⊕' },
 ];
@@ -379,7 +336,7 @@ export default function ManagerDashboard() {
       )}
       {activeTab === 'stations' && <StationRegistry />}
       {activeTab === 'errors'   && <ErrorsTab />}
-      {activeTab === 'rainfall' && <RainfallTab />}
+      {activeTab === 'data'     && <DataTab />}
       {activeTab === 'users'    && <UserManagement />}
       {activeTab === 'field'    && <FieldApp embedded={true} />}
 

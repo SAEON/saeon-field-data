@@ -298,7 +298,7 @@ async function processGroundwater(stationId) {
   const streamId = levelPts[0].stream_id;
 
   const tempMap = new Map(
-    rawLevel.filter(r => r.phenomenon_name === 'temp_c')
+    rawLevel.filter(r => r.phenomenon_name === 'water_temp_smp')
       .map(r => [new Date(r.measured_at).getTime(), parseFloat(r.value_numeric)])
   );
   const condMap = new Map(

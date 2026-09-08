@@ -66,7 +66,7 @@ function formatDate(iso) {
 
 // ── Station form sheet ───────────────────────────────────────────────────────
 function StationSheet({ station, onClose, onSaved }) {
-  const isNew = !station;
+  const isNew = !station?.id;
   const [createdStation, setCreatedStation] = useState(null); // met stations stay open after create
   const [form, setForm] = useState({
     name:                    station?.name                    ?? '',
@@ -77,7 +77,7 @@ function StationSheet({ station, onClose, onSaved }) {
     latitude:                station?.latitude                ?? '',
     longitude:               station?.longitude               ?? '',
     elevation_m:             station?.elevation_m             ?? '',
-    visit_frequency_days:    station?.visit_frequency_days    ?? 30,
+    visit_frequency_days:    station?.visit_frequency_days    ?? '',
     notes:                   station?.notes                   ?? '',
     serial_no:               station?.serial_no               ?? '',
     active:                  station?.active                  ?? true,
@@ -94,6 +94,7 @@ function StationSheet({ station, onClose, onSaved }) {
   const [nodes,              setNodes]              = useState([]);
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState(null);
+  const [nestedBarologger,   setNestedBarologger]   = useState(false);
 
   useEffect(() => {
     getUsers()
@@ -128,6 +129,10 @@ function StationSheet({ station, onClose, onSaved }) {
       setError('Region is required.');
       return;
     }
+    if (!form.visit_frequency_days || parseInt(form.visit_frequency_days, 10) < 1) {
+      setError('Visit frequency (days) is required.');
+      return;
+    }
     if (form.data_family === 'groundwater' && !form.is_barologger) {
       if (form.elevation_m === '' || form.casing_ht_m === '') {
         setError('Casing elevation (m asl) and casing height are required for groundwater stations.');
@@ -146,7 +151,7 @@ function StationSheet({ station, onClose, onSaved }) {
         latitude:               form.latitude !== '' ? parseFloat(form.latitude) : null,
         longitude:              form.longitude !== '' ? parseFloat(form.longitude) : null,
         elevation_m:            form.elevation_m !== '' ? parseFloat(form.elevation_m) : null,
-        visit_frequency_days:   parseInt(form.visit_frequency_days, 10) || 30,
+        visit_frequency_days:   parseInt(form.visit_frequency_days, 10),
         notes:                  form.notes.trim() || null,
         assigned_technician_id: form.assigned_technician_id ? parseInt(form.assigned_technician_id, 10) : null,
         serial_no:              form.serial_no.trim() || null,
@@ -202,6 +207,7 @@ function StationSheet({ station, onClose, onSaved }) {
   }
 
   return (
+    <>
     <div className="back-sheet-overlay">
       <div className="back-sheet" style={{ maxHeight: '90dvh', overflowY: 'auto', paddingBottom: 24 }}>
         <div className="text-[13px] font-bold text-text-dark mb-3">
@@ -210,13 +216,10 @@ function StationSheet({ station, onClose, onSaved }) {
 
         <div className="flex flex-col gap-3.5">
           <div>
-            <div className={labelCls}>Display name</div>
+            <div className={labelCls}>Name</div>
             <input className={inputCls} value={form.display_name}
               onChange={e => set('display_name', e.target.value)}
               placeholder="e.g. Klein Nuwejaar Groundwater 01" />
-            {isNew && form.name && (
-              <div className="text-[10px] text-text-light mt-0.5 font-mono">ID: {form.name}</div>
-            )}
           </div>
 
           <div className="flex gap-2">
@@ -259,15 +262,17 @@ function StationSheet({ station, onClose, onSaved }) {
           </div>
 
           <div className="flex gap-2">
-            <div className="flex-1">
-              <div className={labelCls}>
-                {form.data_family === 'groundwater' ? 'Casing elevation (m asl) *' : 'Elevation (m)'}
+            {!(form.data_family === 'groundwater' && form.is_barologger) && (
+              <div className="flex-1">
+                <div className={labelCls}>
+                  {form.data_family === 'groundwater' ? 'Casing elevation (m asl)' : 'Elevation (m)'}
+                </div>
+                <input className={inputCls} type="number" step="0.001" value={form.elevation_m}
+                  onChange={e => set('elevation_m', e.target.value)}
+                  placeholder="e.g. 62.0" />
               </div>
-              <input className={inputCls} type="number" step="0.001" value={form.elevation_m}
-                onChange={e => set('elevation_m', e.target.value)}
-                placeholder="e.g. 62.0" />
-            </div>
-            <div className="flex-1">
+            )}
+            <div className={form.data_family === 'groundwater' && form.is_barologger ? 'w-1/2' : 'flex-1'}>
               <div className={labelCls}>Visit frequency (days)</div>
               <input className={inputCls} type="number" min="1" value={form.visit_frequency_days}
                 onChange={e => set('visit_frequency_days', e.target.value)} />
@@ -303,7 +308,6 @@ function StationSheet({ station, onClose, onSaved }) {
                         value={form.casing_ht_m}
                         onChange={e => set('casing_ht_m', e.target.value)}
                         placeholder="e.g. 0.17" />
-
                     </div>
                     <div className="flex-1">
                       <div className={labelCls}>Well depth (m)</div>
@@ -316,27 +320,47 @@ function StationSheet({ station, onClose, onSaved }) {
 
                   <div>
                     <div className={labelCls}>Baro station</div>
-                    <select className={`${inputCls} max-w-[50%]`} value={form.baro_station_id}
-                      onChange={e => set('baro_station_id', e.target.value)}>
-                      <option value="">No baro station</option>
-                      {barologgerStations.map(s => (
-                        <option key={s.id} value={s.id}>{s.display_name}</option>
-                      ))}
-                    </select>
-                    {!form.baro_station_id && (
-                      <div className="text-[10px] text-warning mt-0.5">Processing will be skipped until a baro station is linked</div>
+                    {barologgerStations.length === 0 ? (
+                      <div className="flex items-center gap-3 px-2.5 py-2 rounded-lg bg-surface">
+                        <span className="text-[11px] text-text-light flex-1">No barologgers registered yet.</span>
+                        <button
+                          type="button"
+                          onClick={() => setNestedBarologger(true)}
+                          className="text-[11px] font-semibold text-navy border-none bg-transparent px-0">
+                          + New barologger
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <select className={`${inputCls} flex-1`} value={form.baro_station_id}
+                          onChange={e => set('baro_station_id', e.target.value)}>
+                          <option value="">Select barologger…</option>
+                          {barologgerStations.map(s => (
+                            <option key={s.id} value={s.id}>{s.display_name}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setNestedBarologger(true)}
+                          className="shrink-0 text-[11px] font-semibold text-navy border-none bg-transparent px-0 whitespace-nowrap">
+                          + New
+                        </button>
+                      </div>
+                    )}
+                    {!form.baro_station_id && barologgerStations.length > 0 && (
+                      <div className="text-[10px] text-warning mt-0.5">Processing skipped until a barologger is linked.</div>
                     )}
                   </div>
 
                   <div className="flex gap-2">
                     <div className="flex-1">
-                      <div className={labelCls}>Survey method</div>
+                      <div className={labelCls}>Survey method <span className="normal-case font-normal text-text-light">(optional)</span></div>
                       <input className={inputCls} value={form.survey_method}
                         onChange={e => set('survey_method', e.target.value)}
                         placeholder="e.g. GPS-SRTM" />
                     </div>
                     <div className="flex-1">
-                      <div className={labelCls}>Survey date</div>
+                      <div className={labelCls}>Survey date <span className="normal-case font-normal text-text-light">(optional)</span></div>
                       <input className={inputCls} type="date" value={form.surveyed_at}
                         onChange={e => set('surveyed_at', e.target.value)} />
                     </div>
@@ -425,6 +449,18 @@ function StationSheet({ station, onClose, onSaved }) {
         </div>
       </div>
     </div>
+    {nestedBarologger && (
+      <StationSheet
+        station={{ data_family: 'groundwater', is_barologger: true }}
+        onClose={() => setNestedBarologger(false)}
+        onSaved={(saved) => {
+          setBarologgerStations(prev => [...prev, saved]);
+          set('baro_station_id', String(saved.id));
+          setNestedBarologger(false);
+        }}
+      />
+    )}
+    </>
   );
 }
 
@@ -725,6 +761,73 @@ function MetSensorsSection({ station }) {
   );
 }
 
+// ── Link barologger to level logger(s) after creation ───────────────────────
+function LinkBarologgerSheet({ barologger, stations, onClose, onLinked }) {
+  const unlinked = stations.filter(
+    s => s.data_family === 'groundwater' && !s.is_barologger && !s.baro_station_id && s.active
+  );
+  const [selected, setSelected] = useState(null);
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState(null);
+
+  async function handleLink() {
+    if (!selected) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await updateStation(selected.id, { baro_station_id: barologger.id });
+      onLinked(updated);
+      onClose();
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="back-sheet-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="back-sheet">
+        <div className="text-[13px] font-bold text-text-dark mb-1">Link barologger</div>
+        <div className="text-[11px] text-text-light mb-4">
+          Select a level logger station to link <span className="font-semibold">{barologger.display_name}</span> to.
+        </div>
+        {unlinked.length === 0 ? (
+          <div className="text-[12px] text-text-light py-4 text-center">All level logger stations already have a barologger linked.</div>
+        ) : (
+          <div className="space-y-2 mb-4">
+            {unlinked.map(s => (
+              <button key={s.id}
+                onClick={() => setSelected(s)}
+                className={`w-full text-left px-3 py-2.5 rounded-xl border text-[12px] transition-colors ${
+                  selected?.id === s.id
+                    ? 'border-navy bg-navy/5 font-semibold text-text-dark'
+                    : 'border-border text-text-med'
+                }`}>
+                {s.display_name}
+                {s.region && <span className="ml-2 text-[10px] text-text-light">{s.region}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        {error && <div className="text-[11px] text-error mb-2">{error}</div>}
+        <div className="flex gap-2">
+          <button onClick={onClose} disabled={saving}
+            className="flex-1 h-10 border-[1.5px] border-border rounded-xl bg-white text-text-med text-[12px] font-semibold">
+            Skip
+          </button>
+          {unlinked.length > 0 && (
+            <button onClick={handleLink} disabled={!selected || saving}
+              style={{ opacity: (!selected || saving) ? 0.4 : 1 }}
+              className="flex-1 h-10 rounded-xl bg-navy text-white text-[12px] font-semibold border-none">
+              {saving ? 'Linking…' : 'Link'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Confirm deactivate sheet ─────────────────────────────────────────────────
 function DeactivateSheet({ station, onClose, onDeactivated }) {
   const [saving, setSaving] = useState(false);
@@ -930,7 +1033,6 @@ function CoverageSheet({ station, onClose }) {
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div>
             <div className="text-[15px] font-bold text-text-dark">{station.display_name}</div>
-            <div className="text-[11px] text-text-light mt-0.5 font-mono">{station.name}</div>
           </div>
           <button
             onClick={onClose}
@@ -996,6 +1098,7 @@ export default function StationRegistry() {
   const [deactivateTarget, setDeactivateTarget] = useState(null);
   const [coverageTarget,   setCoverageTarget]   = useState(null);
   const [assignTarget,     setAssignTarget]     = useState(null);
+  const [linkBarologger,   setLinkBarologger]   = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1017,6 +1120,7 @@ export default function StationRegistry() {
       if (isNew) return [saved, ...prev];
       return prev.map(s => s.id === saved.id ? saved : s);
     });
+    if (isNew && saved.is_barologger) setLinkBarologger(saved);
   }
 
   function handleDeactivated(stationId) {
@@ -1161,6 +1265,18 @@ export default function StationRegistry() {
           station={assignTarget}
           onClose={() => setAssignTarget(null)}
           onAssigned={handleAssigned}
+        />
+      )}
+
+      {linkBarologger && (
+        <LinkBarologgerSheet
+          barologger={linkBarologger}
+          stations={stations}
+          onClose={() => setLinkBarologger(null)}
+          onLinked={(updated) => {
+            setStations(prev => prev.map(s => s.id === updated.id ? { ...s, ...updated } : s));
+            setLinkBarologger(null);
+          }}
         />
       )}
     </div>

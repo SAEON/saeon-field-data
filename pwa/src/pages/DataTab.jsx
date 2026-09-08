@@ -1,12 +1,14 @@
-// TechnicianDataTab — read-only rainfall view for the technician's own stations.
-// Mirrors the Manager rainfall view but without Reprocess + with a parse-error
-// banner that surfaces failed files for the selected station.
-
 import { useState, useEffect } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getStations, getFilesWithErrors } from '../services/api.js';
 import RainfallDataTable from '../components/RainfallDataTable.jsx';
+import GroundwaterDataTable from '../components/GroundwaterDataTable.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
+
+const FAMILIES = [
+  { id: 'rainfall',    label: 'Rainfall'    },
+  { id: 'groundwater', label: 'Groundwater' },
+];
 
 function formatDateTime(iso) {
   if (!iso) return '—';
@@ -43,16 +45,12 @@ function ErrorBanner({ errors, onToggle, expanded }) {
             }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-dark)' }}>{file.original_name}</div>
               <div style={{ fontSize: 10, color: 'var(--color-text-light)' }}>{formatDateTime(file.uploaded_at)}</div>
-              <div style={{ fontSize: 10, color: 'var(--color-text-light)', marginTop: 1 }}>
-                {file.error_type === 'rainfall' ? 'Rainfall error' : 'Parse error'}
-              </div>
               <div style={{
                 fontSize: 10, fontFamily: 'monospace', color: '#E65100',
                 marginTop: 4, padding: '4px 6px', borderRadius: 4, background: '#FFF8E1',
                 wordBreak: 'break-word',
               }}>
-                {((file.error_type === 'rainfall' ? file.rainfall_error : file.parse_error) || 'Unknown error').slice(0, 160)}
-                {((file.error_type === 'rainfall' ? file.rainfall_error : file.parse_error) || '').length > 160 && '…'}
+                {((file.parse_error) || 'Unknown error').slice(0, 160)}
               </div>
             </div>
           ))}
@@ -62,29 +60,31 @@ function ErrorBanner({ errors, onToggle, expanded }) {
   );
 }
 
-export default function TechnicianDataTab() {
+export default function DataTab() {
   const auth = useAuth();
   const canReprocess = auth?.hasRole('technician_lead') ?? false;
-  const [stations, setStations] = useState([]);
-  const [selected, setSelected] = useState(null);
-  const [allErrors, setAllErrors] = useState([]);
+
+  const [family,         setFamily]         = useState('rainfall');
+  const [allStations,    setAllStations]    = useState([]);
+  const [selected,       setSelected]       = useState(null);
+  const [allErrors,      setAllErrors]      = useState([]);
   const [errorsExpanded, setErrorsExpanded] = useState(false);
 
   useEffect(() => {
-    getStations()
-      .then(all => {
-        const rf = (all || []).filter(s => s.data_family === 'rainfall');
-        setStations(rf);
-        if (rf.length) setSelected(rf[0].id);
-      })
-      .catch(() => {});
-    getFilesWithErrors()
-      .then(setAllErrors)
-      .catch(() => {});
+    getStations().then(all => setAllStations(all || [])).catch(() => {});
+    getFilesWithErrors().then(setAllErrors).catch(() => {});
   }, []);
 
-  const stationName    = stations.find(s => s.id === selected)?.display_name;
-  const stationErrors  = allErrors.filter(e => e.station_id === selected);
+  const stations    = allStations.filter(s => s.data_family === family);
+  const stationName = stations.find(s => s.id === selected)?.display_name;
+  const errors      = allErrors.filter(e => e.station_id === selected);
+
+  // Auto-select first station when family changes or stations load
+  useEffect(() => {
+    if (stations.length > 0 && !stations.find(s => s.id === selected)) {
+      setSelected(stations[0].id);
+    }
+  }, [family, stations.length]);
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -99,9 +99,24 @@ export default function TechnicianDataTab() {
 
       <main className="flex-1 overflow-y-auto w-full max-w-[var(--max-width)] mx-auto">
 
+        {/* Family tabs */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+          {FAMILIES.map(f => (
+            <button key={f.id} onClick={() => { setFamily(f.id); setErrorsExpanded(false); }}
+              style={{
+                flex: 1, padding: '10px 0', fontSize: 12, fontWeight: family === f.id ? 700 : 500,
+                color: family === f.id ? 'var(--color-navy)' : 'var(--color-text-light)',
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                borderBottom: family === f.id ? '2px solid var(--color-navy)' : '2px solid transparent',
+              }}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+
         {stations.length === 0 && (
           <div style={{ textAlign: 'center', paddingTop: 48, fontSize: 13, color: 'var(--color-text-light)' }}>
-            No rainfall stations assigned to you.
+            No {family} stations available.
           </div>
         )}
 
@@ -113,20 +128,24 @@ export default function TechnicianDataTab() {
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {stations.map(s => (
                   <button key={s.id} onClick={() => { setSelected(s.id); setErrorsExpanded(false); }}
-                    style={{ fontSize: 12, fontWeight: selected === s.id ? 700 : 500, padding: '4px 12px', borderRadius: 20, border: `1.5px solid ${selected === s.id ? '#1565C0' : 'var(--color-border)'}`, background: selected === s.id ? '#EBF2FB' : 'var(--color-surface)', color: selected === s.id ? '#1565C0' : 'var(--color-text-med)', cursor: 'pointer' }}>
+                    style={{
+                      fontSize: 12, fontWeight: selected === s.id ? 700 : 500,
+                      padding: '4px 12px', borderRadius: 20,
+                      border: `1.5px solid ${selected === s.id ? 'var(--color-navy)' : 'var(--color-border)'}`,
+                      background: selected === s.id ? '#EBF2FB' : 'var(--color-surface)',
+                      color: selected === s.id ? 'var(--color-navy)' : 'var(--color-text-med)',
+                      cursor: 'pointer',
+                    }}>
                     {s.display_name}
                   </button>
                 ))}
               </div>
             </div>
 
-            <ErrorBanner
-              errors={stationErrors}
-              expanded={errorsExpanded}
-              onToggle={() => setErrorsExpanded(v => !v)}
-            />
+            <ErrorBanner errors={errors} expanded={errorsExpanded} onToggle={() => setErrorsExpanded(v => !v)} />
 
-            <RainfallDataTable stationId={selected} canReprocess={canReprocess} />
+            {family === 'rainfall'    && <RainfallDataTable    stationId={selected} canReprocess={canReprocess} />}
+            {family === 'groundwater' && <GroundwaterDataTable stationId={selected} />}
           </>
         )}
       </main>

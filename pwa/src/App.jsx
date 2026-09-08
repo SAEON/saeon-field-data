@@ -11,7 +11,7 @@ import UploadFiles    from './pages/UploadFiles.jsx';
 import ManualReadings from './pages/ManualReadings.jsx';
 import QueueTab       from './pages/QueueTab.jsx';
 import HistoryTab     from './pages/HistoryTab.jsx';
-import TechnicianDataTab from './pages/TechnicianDataTab.jsx';
+import DataTab from './pages/DataTab.jsx';
 import LeadDashboard    from './pages/LeadDashboard.jsx';
 import ManagerDashboard, { ErrorsTab } from './pages/ManagerDashboard.jsx';
 
@@ -649,7 +649,7 @@ export function FieldApp({ onExit, embedded = false }) {
       )}
 
       {/* ── Data tab (read-only rainfall + parse errors for own stations) ─ */}
-      {activeTab === 'data' && <TechnicianDataTab />}
+      {activeTab === 'data' && <DataTab />}
 
       {/* ── Errors tab (own stations only, no delete) ───────────────── */}
       {activeTab === 'errors' && <ErrorsTab canDelete={false} />}

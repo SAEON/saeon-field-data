@@ -201,7 +201,17 @@ async function parseInBackground(fileRecord, visitId) {
     // Trigger gap and rainfall processing after a successful parse
     if (visit?.data_family === 'groundwater') {
       processGroundwater(visit.station_id)
-        .then(r  => log.info('[gw] Complete', { station_id: visit.station_id, ...r }))
+        .then(r => {
+          log.info('[gw] Complete', { station_id: visit.station_id, ...r });
+          return db.getStationsByBaroStationId(visit.station_id);
+        })
+        .then(dependents => {
+          for (const { id } of dependents) {
+            processGroundwater(id)
+              .then(r  => log.info('[gw] Cascade complete', { station_id: id, baro_station_id: visit.station_id, ...r }))
+              .catch(e => log.error('[gw] Cascade failed',   { station_id: id, baro_station_id: visit.station_id, error: e.message }));
+          }
+        })
         .catch(e => log.error('[gw] Processing failed', { station_id: visit.station_id, error: e.message }));
     }
 

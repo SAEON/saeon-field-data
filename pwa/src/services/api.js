@@ -253,6 +253,13 @@ export function getStationGaps(stationId) {
   return request(`/api/stations/${stationId}/gaps`);
 }
 
+export function getStationGroundwater(stationId, { from, to } = {}) {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to)   params.set('to',   to);
+  return request(`/api/stations/${stationId}/groundwater?${params}`);
+}
+
 export function getStationRawTips(stationId, { from, to } = {}) {
   const params = new URLSearchParams();
   if (from) params.set('from', from);
