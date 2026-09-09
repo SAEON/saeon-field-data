@@ -1515,19 +1515,24 @@ async function createCalibrationCheck({
   technicianId, remarks,
 }) {
   const result = await pool.query(`
-    INSERT INTO calibration_checks (
-      visit_id, station_sensor_id, transfer_standard_id, parameter,
-      calibration_date, calibration_method,
-      transfer_std_reading, sensor_reading,
-      as_found_error, within_tolerance,
-      correction_applied, offset_applied,
-      station_reading_post_cal, transfer_std_verification_reading,
-      as_left_error, post_cal_within_tolerance,
-      certificate_issued, certificate_number,
-      technician_id, remarks
-    ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
-    ) RETURNING *
+    WITH inserted AS (
+      INSERT INTO calibration_checks (
+        visit_id, station_sensor_id, transfer_standard_id, parameter,
+        calibration_date, calibration_method,
+        transfer_std_reading, sensor_reading,
+        as_found_error, within_tolerance,
+        correction_applied, offset_applied,
+        station_reading_post_cal, transfer_std_verification_reading,
+        as_left_error, post_cal_within_tolerance,
+        certificate_issued, certificate_number,
+        technician_id, remarks
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
+      ) RETURNING *
+    )
+    SELECT i.*, u.full_name AS technician_name
+    FROM   inserted i
+    LEFT   JOIN users u ON u.id = i.technician_id
   `, [
     visitId, stationSensorId, transferStandardId, parameter,
     calibrationDate, calibrationMethod ?? 'Field verification',
@@ -1552,6 +1557,33 @@ async function decommissionSensor(stationSensorId) {
   return result.rows[0] || null;
 }
 
+async function getCalibrationHistoryForStation(stationId) {
+  const result = await pool.query(`
+    SELECT cc.id, cc.parameter, cc.calibration_date,
+           cc.transfer_std_reading, cc.sensor_reading, cc.as_found_error,
+           cc.within_tolerance, cc.correction_applied,
+           cc.as_left_error, cc.post_cal_within_tolerance,
+           cc.remarks,
+           fv.id   AS visit_id,
+           fv.visited_at,
+           mit.label          AS sensor_label,
+           ss.serial_no       AS sensor_serial_no,
+           ts.kit_label,
+           ts.model           AS transfer_std_model,
+           ts.serial_no       AS transfer_std_serial,
+           u.full_name        AS technician_name
+    FROM   calibration_checks cc
+    JOIN   field_visits fv          ON fv.id  = cc.visit_id
+    JOIN   station_sensors ss       ON ss.id  = cc.station_sensor_id
+    JOIN   met_instrument_types mit ON mit.id = ss.instrument_type_id
+    JOIN   transfer_standards ts    ON ts.id  = cc.transfer_standard_id
+    LEFT   JOIN users u             ON u.id   = cc.technician_id
+    WHERE  fv.station_id = $1
+    ORDER  BY cc.calibration_date DESC, mit.label, cc.parameter
+  `, [stationId]);
+  return result.rows;
+}
+
 async function getCalibrationChecksForVisit(visitId) {
   const result = await pool.query(`
     SELECT cc.*,
@@ -1560,11 +1592,13 @@ async function getCalibrationChecksForVisit(visitId) {
            ss.serial_no       AS sensor_serial_no,
            ts.kit_label,
            ts.model           AS transfer_std_model,
-           ts.serial_no       AS transfer_std_serial
+           ts.serial_no       AS transfer_std_serial,
+           u.full_name        AS technician_name
     FROM   calibration_checks cc
-    JOIN   station_sensors ss     ON ss.id  = cc.station_sensor_id
+    JOIN   station_sensors ss       ON ss.id  = cc.station_sensor_id
     JOIN   met_instrument_types mit ON mit.id = ss.instrument_type_id
-    JOIN   transfer_standards ts  ON ts.id  = cc.transfer_standard_id
+    JOIN   transfer_standards ts    ON ts.id  = cc.transfer_standard_id
+    LEFT   JOIN users u             ON u.id   = cc.technician_id
     WHERE  cc.visit_id = $1
     ORDER  BY cc.created_at
   `, [visitId]);
@@ -1677,4 +1711,5 @@ module.exports = {
   getActiveTransferStandards,
   createCalibrationCheck,
   getCalibrationChecksForVisit,
+  getCalibrationHistoryForStation,
 };

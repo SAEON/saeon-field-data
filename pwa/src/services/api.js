@@ -317,6 +317,14 @@ export function getStationSensors(stationId) {
   return request(`/api/stations/${stationId}/sensors`);
 }
 
+export function getStationSensorHistory(stationId) {
+  return request(`/api/stations/${stationId}/sensors/history`);
+}
+
+export function getStationCalibrationHistory(stationId) {
+  return request(`/api/stations/${stationId}/calibration-history`);
+}
+
 export function decommissionSensor(stationId, sensorId) {
   return request(`/api/stations/${stationId}/sensors/${sensorId}/decommission`, { method: 'PATCH' });
 }

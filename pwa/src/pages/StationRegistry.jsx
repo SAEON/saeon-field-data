@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers, getInstrumentHistory, createInstrumentRecord, getVisits, getMetInstrumentTypes, getStationSensors, assignSensor, getBarologgerStations, getDepartments } from '../services/api.js';
+import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers, getInstrumentHistory, createInstrumentRecord, getVisits, getMetInstrumentTypes, getStationSensors, getStationSensorHistory, assignSensor, getBarologgerStations, getDepartments } from '../services/api.js';
 
 const DATA_FAMILY_OPTIONS = [
   { value: 'groundwater', label: 'Groundwater' },
@@ -611,22 +611,31 @@ const CATEGORY_LABEL = {
 };
 
 function MetSensorsSection({ station }) {
-  const [sensors,    setSensors]    = useState(null);
-  const [types,      setTypes]      = useState([]);
-  const [showForm,   setShowForm]   = useState(false);
-  const [typeId,     setTypeId]     = useState('');
-  const [serial,     setSerial]     = useState('');
-  const [sensitivity, setSensitivity] = useState('');
+  const [sensors,       setSensors]       = useState(null);
+  const [types,         setTypes]         = useState([]);
+  const [showForm,      setShowForm]      = useState(false);
+  const [typeId,        setTypeId]        = useState('');
+  const [serial,        setSerial]        = useState('');
+  const [sensitivity,   setSensitivity]   = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState(() => new Date().toISOString().split('T')[0]);
-  const [notes,      setNotes]      = useState('');
-  const [saveState,  setSaveState]  = useState('idle');
-  const [error,      setError]      = useState(null);
+  const [notes,         setNotes]         = useState('');
+  const [saveState,     setSaveState]     = useState('idle');
+  const [error,         setError]         = useState(null);
+  const [historyOpen,   setHistoryOpen]   = useState(false);
+  const [history,       setHistory]       = useState(null);
 
   useEffect(() => {
     if (!station?.id) return;
     getStationSensors(station.id).then(setSensors).catch(() => setSensors([]));
     getMetInstrumentTypes().then(setTypes).catch(() => {});
   }, [station?.id]);
+
+  function toggleHistory() {
+    if (!historyOpen && !history) {
+      getStationSensorHistory(station.id).then(setHistory).catch(() => setHistory([]));
+    }
+    setHistoryOpen(v => !v);
+  }
 
   const selectedType = types.find(t => t.id === parseInt(typeId, 10));
   const needsSerial      = selectedType && !SOIL_CATS.has(selectedType.category);
@@ -649,6 +658,7 @@ function MetSensorsSection({ station }) {
       });
       const updated = await getStationSensors(station.id);
       setSensors(updated);
+      setHistory(null);   // invalidate cached history so next open refetches
       setShowForm(false);
       setTypeId(''); setSerial(''); setSensitivity(''); setNotes('');
       setSaveState('idle');
@@ -738,13 +748,14 @@ function MetSensorsSection({ station }) {
           <div>
             <div className="text-[12px] font-semibold text-text-dark">
               {s.label}
-              {s.serial_no && <span className="ml-2 text-[11px] font-normal text-text-light">Serial: {s.serial_no}</span>}
+              {s.serial_no && <span className="ml-2 text-[11px] font-normal text-text-light">S/N: {s.serial_no}</span>}
             </div>
             {s.sensitivity_value != null && (
               <div className="text-[11px] text-text-light">Sensitivity: {s.sensitivity_value} µV/(W·m⁻²)</div>
             )}
             <div className="text-[11px] text-text-light">
-              Effective {s.effective_from ? new Date(s.effective_from).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+              Deployed {s.effective_from ? new Date(s.effective_from).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+              {s.deployed_by_name && <span className="ml-1">by <span className="font-medium text-text-dark">{s.deployed_by_name}</span></span>}
             </div>
             {s.requires_transfer_std && (
               <div className="text-[10px] mt-0.5" style={{ color: 'var(--color-navy)' }}>
@@ -757,6 +768,39 @@ function MetSensorsSection({ station }) {
           </div>
         </div>
       ))}
+
+      {sensors?.length > 0 && (
+        <div className="mt-2">
+          <button
+            onClick={toggleHistory}
+            className="text-[11px] font-semibold text-navy bg-transparent border-none p-0"
+          >
+            {historyOpen ? '▾ Hide deployment history' : '▸ Show deployment history'}
+          </button>
+          {historyOpen && (
+            <div className="mt-2 rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+              {!history && <div className="text-[11px] text-text-light px-3 py-2">Loading…</div>}
+              {history?.length === 0 && <div className="text-[11px] text-text-light px-3 py-2">No history found.</div>}
+              {history?.map((h, i) => (
+                <div key={h.id} className="px-3 py-2 border-b border-border last:border-0" style={{ background: i % 2 === 0 ? 'transparent' : 'var(--color-surface)' }}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-text-dark">{h.label}</span>
+                    <span className="text-[10px] text-text-light shrink-0">
+                      {h.effective_to ? 'Retired' : <span className="text-success font-semibold">Active</span>}
+                    </span>
+                  </div>
+                  {h.serial_no && <div className="text-[10px] text-text-light">S/N: {h.serial_no}</div>}
+                  <div className="text-[10px] text-text-light">
+                    {new Date(h.effective_from).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    {h.effective_to && <> → {new Date(h.effective_to).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</>}
+                    {h.deployed_by_name && <span className="ml-1">· <span className="font-medium text-text-dark">{h.deployed_by_name}</span></span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -61,6 +61,16 @@ router.get('/stations/:id/sensors/history', async (req, res, next) => {
   }
 });
 
+router.get('/stations/:id/calibration-history', async (req, res, next) => {
+  try {
+    const stationId = parseInt(req.params.id, 10);
+    const history   = await db.getCalibrationHistoryForStation(stationId);
+    res.json(history);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/stations/:id/sensors', async (req, res, next) => {
   try {
     const stationId = parseInt(req.params.id, 10);

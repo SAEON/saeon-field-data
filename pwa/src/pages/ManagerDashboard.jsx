@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getDashboardStations, getFilesWithErrors, deleteFile } from '../services/api.js';
+import { getDashboardStations, getFilesWithErrors, deleteFile, getStationCalibrationHistory } from '../services/api.js';
 import UserManagement    from './UserManagement.jsx';
 import DataTab from './DataTab.jsx';
 import VisitOversight    from './VisitOversight.jsx';
@@ -55,6 +55,70 @@ function formatDateTime(iso) {
   });
 }
 
+// ── Calibration history panel (met stations) ──────────────────────────────────
+
+const CAL_PARAM_UNIT = { temperature: '°C', humidity: '%', pressure: ' hPa' };
+
+function CalibrationHistoryPanel({ stationId }) {
+  const [records, setRecords] = useState(null);
+  const [error,   setError]   = useState(null);
+
+  useEffect(() => {
+    getStationCalibrationHistory(stationId)
+      .then(setRecords)
+      .catch(() => setError('Failed to load calibration history'));
+  }, [stationId]);
+
+  if (error)   return <div className="text-[11px] text-error px-3 py-2">{error}</div>;
+  if (!records) return <div className="text-[11px] text-text-light px-3 py-2">Loading…</div>;
+  if (records.length === 0) return <div className="text-[11px] text-text-light px-3 py-2">No calibration checks recorded yet.</div>;
+
+  return (
+    <div className="rounded-lg overflow-hidden mt-2" style={{ border: '1px solid var(--color-border)' }}>
+      {records.map((r, i) => {
+        const unit      = CAL_PARAM_UNIT[r.parameter] ?? '';
+        const passed    = r.within_tolerance !== false;
+        const corrected = !passed && r.post_cal_within_tolerance;
+        const flagged   = !passed && !r.post_cal_within_tolerance;
+        const outcomeColor  = flagged ? '#E53935' : corrected ? '#FB8C00' : '#43A047';
+        const outcomeLabel  = flagged ? 'Flagged' : corrected ? 'Corrected' : 'Pass';
+        const calDate = r.calibration_date
+          ? new Date(r.calibration_date).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })
+          : '—';
+        return (
+          <div key={r.id} className="px-3 py-2 border-b border-border last:border-0"
+            style={{ background: i % 2 === 0 ? 'transparent' : 'var(--color-surface)' }}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <span className="text-[11px] font-semibold text-text-dark">{r.sensor_label}</span>
+                <span className="text-[10px] text-text-light ml-1.5 capitalize">{r.parameter}</span>
+                {r.sensor_serial_no && <span className="text-[10px] text-text-light ml-1.5">S/N: {r.sensor_serial_no}</span>}
+              </div>
+              <span className="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-full"
+                style={{ background: outcomeColor + '18', color: outcomeColor }}>
+                {outcomeLabel}
+              </span>
+            </div>
+            <div className="text-[10px] text-text-light mt-0.5 flex flex-wrap gap-x-2">
+              {r.as_found_error != null && (
+                <span>Error: {r.as_found_error >= 0 ? '+' : ''}{Number(r.as_found_error).toFixed(3)}{unit}</span>
+              )}
+              <span>{r.kit_label} {r.transfer_std_model} (S/N: {r.transfer_std_serial})</span>
+            </div>
+            <div className="text-[10px] text-text-light mt-0.5">
+              {calDate}
+              {r.technician_name && <span className="ml-1">· <span className="font-medium text-text-dark">{r.technician_name}</span></span>}
+            </div>
+            {r.remarks && (
+              <div className="text-[10px] mt-0.5 italic" style={{ color: '#E53935' }}>Remarks: {r.remarks}</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Network tab ──────────────────────────────────────────────────────────────
 
 function stationHealth(daysSince, frequency) {
@@ -66,9 +130,10 @@ function stationHealth(daysSince, frequency) {
 }
 
 function NetworkTab() {
-  const [stations, setStations] = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState(null);
+  const [stations,       setStations]       = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [error,          setError]          = useState(null);
+  const [calOpenId,      setCalOpenId]      = useState(null);
 
   useEffect(() => {
     getDashboardStations()
@@ -136,6 +201,19 @@ function NetworkTab() {
                           {h.label}
                         </span>
                       </div>
+                      {station.data_family === 'met' && (
+                        <div className="mt-2 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+                          <button
+                            onClick={() => setCalOpenId(id => id === station.id ? null : station.id)}
+                            className="text-[11px] font-semibold text-navy bg-transparent border-none p-0"
+                          >
+                            {calOpenId === station.id ? '▾ Hide calibration history' : '▸ Calibration history'}
+                          </button>
+                          {calOpenId === station.id && (
+                            <CalibrationHistoryPanel stationId={station.id} />
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

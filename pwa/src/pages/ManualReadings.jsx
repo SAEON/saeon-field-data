@@ -1737,6 +1737,9 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
     const outcome = savedCheck.within_tolerance === false
       ? (savedCheck.post_cal_within_tolerance ? 'Corrected — within tolerance' : 'Flagged: outside tolerance')
       : 'Within tolerance';
+    const calDate = savedCheck.calibration_date
+      ? new Date(savedCheck.calibration_date).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })
+      : null;
     return (
       <div className="form-card">
         <div className="flex items-center justify-between mb-1">
@@ -1745,6 +1748,12 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
         </div>
         <div className="text-[11px] text-success font-medium mt-1">✓ Calibration check saved</div>
         <div className="text-[11px] text-text-light mt-0.5">{outcome}</div>
+        {(savedCheck.technician_name || calDate) && (
+          <div className="text-[10px] text-text-light mt-1">
+            {calDate && <span>{calDate}</span>}
+            {savedCheck.technician_name && <span className="ml-1">· <span className="font-medium text-text-dark">{savedCheck.technician_name}</span></span>}
+          </div>
+        )}
       </div>
     );
   }
