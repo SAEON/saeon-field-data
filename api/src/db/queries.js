@@ -98,17 +98,23 @@ async function getAllStationsRegistry() {
 
 async function createStation({ name, displayName, dataFamily, region, node, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId, serialNo, isBarologger, casingHtM, baroStationId, wellDepthM, surveyMethod, surveyedAt }) {
   const result = await pool.query(
-    `INSERT INTO stations
-       (name, display_name, data_family, region, node, location, elevation_m, notes,
-        visit_frequency_days, assigned_technician_id, serial_no,
-        is_barologger, casing_ht_m, baro_station_id,
-        well_depth_m, survey_method, surveyed_at)
-     VALUES ($1, $2, $3, $4, $5,
-       CASE WHEN $6::numeric IS NOT NULL AND $7::numeric IS NOT NULL
-            THEN ST_MakePoint($7, $6)::geography ELSE NULL END,
-       $8, $9, COALESCE($10, 30), $11, $12,
-       $13, $14, $15, $16, $17, $18)
-     RETURNING *`,
+    `WITH inserted AS (
+       INSERT INTO stations
+         (name, display_name, data_family, region, node, location, elevation_m, notes,
+          visit_frequency_days, assigned_technician_id, serial_no,
+          is_barologger, casing_ht_m, baro_station_id,
+          well_depth_m, survey_method, surveyed_at)
+       VALUES ($1, $2, $3, $4, $5,
+         CASE WHEN $6::numeric IS NOT NULL AND $7::numeric IS NOT NULL
+              THEN ST_MakePoint($7, $6)::geography ELSE NULL END,
+         $8, $9, COALESCE($10, 30), $11, $12,
+         $13, $14, $15, $16, $17, $18)
+       RETURNING *
+     )
+     SELECT s.*,
+            ST_Y(s.location::geometry) AS latitude,
+            ST_X(s.location::geometry) AS longitude
+     FROM inserted s`,
     [name, displayName, dataFamily, region ?? null, node ?? null,
      latitude ?? null, longitude ?? null,
      elevationM ?? null, notes ?? null,
@@ -162,7 +168,10 @@ async function updateStation(id, fields) {
     `WITH updated AS (
        UPDATE stations SET ${sets.join(', ')} WHERE id = $1 RETURNING *
      )
-     SELECT s.*, u.full_name AS assigned_technician_name
+     SELECT s.*,
+            ST_Y(s.location::geometry) AS latitude,
+            ST_X(s.location::geometry) AS longitude,
+            u.full_name AS assigned_technician_name
      FROM   updated s
      LEFT JOIN users u ON u.id = s.assigned_technician_id`,
     vals
@@ -1605,6 +1614,43 @@ async function getCalibrationChecksForVisit(visitId) {
   return result.rows;
 }
 
+async function getMetData(stationId, { from, to, phenomena, resolution }) {
+  const isRaw = resolution === 'raw';
+  if (isRaw) {
+    const result = await pool.query(`
+      SELECT rm.measured_at AS period,
+             p.name         AS phenomenon,
+             rm.value::numeric AS value
+      FROM   raw_measurements rm
+      JOIN   station_data_streams sds ON sds.id = rm.stream_id
+      JOIN   phenomena p              ON p.id   = rm.phenomenon_id
+      WHERE  sds.station_id = $1
+        AND  p.name = ANY($2)
+        AND  rm.measured_at >= $3
+        AND  rm.measured_at <= $4
+      ORDER  BY rm.measured_at
+    `, [stationId, phenomena, from, to]);
+    return result.rows;
+  }
+  const result = await pool.query(`
+    SELECT date_trunc($5, rm.measured_at) AS period,
+           p.name                          AS phenomenon,
+           CASE WHEN p.name = 'rain_tot'
+                THEN SUM(rm.value::numeric)
+                ELSE AVG(rm.value::numeric) END AS value
+    FROM   raw_measurements rm
+    JOIN   station_data_streams sds ON sds.id = rm.stream_id
+    JOIN   phenomena p              ON p.id   = rm.phenomenon_id
+    WHERE  sds.station_id = $1
+      AND  p.name = ANY($2)
+      AND  rm.measured_at >= $3
+      AND  rm.measured_at <= $4
+    GROUP  BY period, p.name
+    ORDER  BY period
+  `, [stationId, phenomena, from, to, resolution]);
+  return result.rows;
+}
+
 module.exports = {
   // Stations
   getAllStations,
@@ -1712,4 +1758,6 @@ module.exports = {
   createCalibrationCheck,
   getCalibrationChecksForVisit,
   getCalibrationHistoryForStation,
+  // Met data
+  getMetData,
 };

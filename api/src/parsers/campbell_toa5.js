@@ -16,34 +16,89 @@ const readline = require('readline');
 const fs       = require('fs');
 
 // Map Campbell column names (lowercase) to phenomenon names in the phenomena table.
+// Two naming conventions are in use across SAEON stations:
+//   New standard (five_min/hourly tables): lowercase snake_case — temp_air_avg, humid_rel, ...
+//   Old standard (TableHour/TableDay):     PascalCase          — WSpd_Avg, BPress_Avg, ...
+// Both are normalised to lowercase before lookup.
 const PHEN_NAME_MAP = {
+  // ── Air temperature ──────────────────────────────────────────────────────────
   'airtc_avg':        'air_temp_avg',
   'airtc_min':        'air_temp_min',
   'airtc_max':        'air_temp_max',
   'airtemp_avg':      'air_temp_avg',
-  'air_temp_avg':     'air_temp_avg',
   'airtemp_min':      'air_temp_min',
-  'air_temp_min':     'air_temp_min',
   'airtemp_max':      'air_temp_max',
+  'air_temp_avg':     'air_temp_avg',
+  'air_temp_min':     'air_temp_min',
   'air_temp_max':     'air_temp_max',
+  'temp_air_avg':     'air_temp_avg',
+  'temp_air_min':     'air_temp_min',
+  'temp_air_max':     'air_temp_max',
+
+  // ── Relative humidity ────────────────────────────────────────────────────────
   'rh':               'rh_avg',
   'rh_avg':           'rh_avg',
   'relhumidity':      'rh_avg',
+  'humid_rel':        'rh_avg',
+
+  // ── Wind speed ───────────────────────────────────────────────────────────────
   'ws_ms_s_wvt':      'wind_speed_avg',
   'windspeed_avg':    'wind_speed_avg',
   'wind_speed_avg':   'wind_speed_avg',
+  'wspd_avg':         'wind_speed_avg',
+
+  // ── Wind direction ───────────────────────────────────────────────────────────
   'winddir_d1_wvt':   'wind_dir_avg',
   'winddir_avg':      'wind_dir_avg',
   'wind_dir_avg':     'wind_dir_avg',
+  'wdir_avg':         'wind_dir_avg',
+
+  // ── Solar radiation (shortwave) ──────────────────────────────────────────────
   'slrw_avg':         'solar_rad_avg',
   'solarrad_avg':     'solar_rad_avg',
   'solar_rad_avg':    'solar_rad_avg',
+  'rad_short_in_avg': 'solar_rad_avg',
+
+  // ── Atmospheric pressure ─────────────────────────────────────────────────────
   'bp_kpa':           'atm_pressure_avg',
   'atmpres_avg':      'atm_pressure_avg',
   'atm_pressure_avg': 'atm_pressure_avg',
+  'pressure_atm':     'atm_pressure_avg',
+  'bpress_avg':       'atm_pressure_avg',
+  'bpressure_avg':    'atm_pressure_avg',
+  'bp_mbar_avg':      'atm_pressure_avg',
+
+  // ── Rainfall ─────────────────────────────────────────────────────────────────
   'rain_mm_tot':      'rain_tot',
   'rain_tot':         'rain_tot',
   'rainfall_tot':     'rain_tot',
+
+  // ── UV radiation ─────────────────────────────────────────────────────────────
+  'rad_uv_avg':       'uv_rad_avg',
+  'uv_w_avg':         'uv_rad_avg',
+  'uvslrw_avg':       'uv_rad_avg',
+
+  // ── Soil / ground temperature ─────────────────────────────────────────────────
+  'temp_ground_avg':  'soil_temp_avg',
+  'soiltemp_avg':     'soil_temp_avg',
+  't107_c_avg':       'soil_temp_avg',
+  't108_c_avg':       'soil_temp_avg',
+  't109_c_avg':       'soil_temp_avg',
+
+  // ── Leaf wetness ──────────────────────────────────────────────────────────────
+  'leafwetmv_avg':    'leaf_wetness_mv',
+  'lwmv_avg':         'leaf_wetness_mv',
+
+  // ── Soil moisture ────────────────────────────────────────────────────────────
+  'vw_avg':           'soil_moisture_avg',
+
+  // ── Logger diagnostics ───────────────────────────────────────────────────────
+  'loggertemp_avg':        'temp_c',
+  'loggerbattery_avg':     'batt_v',
+  'loggerbatt_avg':        'batt_v',
+  'battv_min':             'batt_v',
+  'batt_min':              'batt_v',
+  'loggerlithiumbatt_avg': 'batt_v_lithium',
 };
 
 function splitLine(line) {
@@ -60,7 +115,7 @@ function splitLine(line) {
 
 function parseToa5Date(raw) {
   const s = raw.trim().replace(/"/g, '');
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(\.\d+)?$/);
   if (!m) throw new Error(`Unrecognised TOA5 timestamp: "${s}"`);
   const [, yr, mo, dy, hr, mn, sc] = m;
   return new Date(Date.UTC(+yr, +mo - 1, +dy, +hr, +mn, +sc));

@@ -327,7 +327,7 @@ function WindVaneField({ existingReading, onSave }) {
         <span className="text-[10px] text-text-light">Optional</span>
       </div>
       <div className="flex gap-1.5 mb-2.5">
-        {['Yes', 'No', 'Not installed'].map(opt => (
+        {['Yes', 'No', 'N/A'].map(opt => (
           <button
             key={opt}
             onClick={() => !saved && setValue(value === opt ? null : opt)}
@@ -1251,9 +1251,12 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
   const [pyrano,    setPyrano]    = useState(() => normYesNo(ex('pyranometer_clean')?.value_text));
   const [anemo,     setAnemo]     = useState(() => normYesNo(ex('anemometer_spinning')?.value_text));
   const [rainGauge, setRainGauge] = useState(() => normYesNo(ex('rain_gauge_clear')?.value_text));
-  const [battery,   setBattery]   = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
-  const [windVane,  setWindVane]  = useState(ex('wind_vane')?.value_text ?? null);
-  const [logger,    setLogger]    = useState(ex('logger_screen')?.value_numeric != null ? String(ex('logger_screen').value_numeric) : '');
+  const [battery,    setBattery]    = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
+  const [solarPanel, setSolarPanel] = useState(ex('solar_panel_voltage')?.value_numeric != null ? String(ex('solar_panel_voltage').value_numeric) : '');
+  const [chargeCtrl, setChargeCtrl] = useState(ex('charge_controller_voltage')?.value_numeric != null ? String(ex('charge_controller_voltage').value_numeric) : '');
+  const [lithiumBatt,setLithiumBatt]= useState(ex('lithium_battery_voltage')?.value_numeric != null ? String(ex('lithium_battery_voltage').value_numeric) : '');
+  const [windVane,   setWindVane]   = useState(ex('wind_vane')?.value_text ?? null);
+  const [logger,     setLogger]     = useState(ex('logger_screen')?.value_numeric != null ? String(ex('logger_screen').value_numeric) : '');
   const [siteCond,  setSiteCond]  = useState(ex('overall_site_condition')?.value_text ?? null);
 
   const isAlreadySaved = !!(ex('met_activities') && ex('pyranometer_clean') && ex('anemometer_spinning') && ex('rain_gauge_clear') && ex('overall_site_condition'));
@@ -1279,8 +1282,11 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
       ...(pyrano    ? [() => onSave({ reading_type: 'pyranometer_clean',   value_text:    pyrano,                     recorded_at: now })] : []),
       ...(anemo     ? [() => onSave({ reading_type: 'anemometer_spinning', value_text:    anemo,                      recorded_at: now })] : []),
       ...(rainGauge ? [() => onSave({ reading_type: 'rain_gauge_clear',    value_text:    rainGauge,                  recorded_at: now })] : []),
-      ...(battery   ? [() => onSave({ reading_type: 'battery_voltage',     value_numeric: parseFloat(battery), unit: 'V', recorded_at: now })] : []),
-      ...(windVane  ? [() => onSave({ reading_type: 'wind_vane',           value_text:    windVane,                   recorded_at: now })] : []),
+      ...(battery    ? [() => onSave({ reading_type: 'battery_voltage',           value_numeric: parseFloat(battery),    unit: 'V', recorded_at: now })] : []),
+      ...(solarPanel ? [() => onSave({ reading_type: 'solar_panel_voltage',      value_numeric: parseFloat(solarPanel), unit: 'V', recorded_at: now })] : []),
+      ...(chargeCtrl ? [() => onSave({ reading_type: 'charge_controller_voltage',value_numeric: parseFloat(chargeCtrl), unit: 'V', recorded_at: now })] : []),
+      ...(lithiumBatt? [() => onSave({ reading_type: 'lithium_battery_voltage',  value_numeric: parseFloat(lithiumBatt),unit: 'V', recorded_at: now })] : []),
+      ...(windVane   ? [() => onSave({ reading_type: 'wind_vane',                value_text:    windVane,                          recorded_at: now })] : []),
       ...(logger    ? [() => onSave({ reading_type: 'logger_screen',       value_numeric: parseFloat(logger),         recorded_at: now })] : []),
       ...(siteCond  ? [() => onSave({ reading_type: 'overall_site_condition', value_text: siteCond,                   recorded_at: now })] : []),
     ];
@@ -1292,7 +1298,7 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
     }
   }
 
-  const canSave = !locked && metActs.size > 0 && !!pyrano && !!anemo && !!rainGauge && !!siteCond;
+  const canSave = !locked && metActs.size > 0 && !!pyrano && !!anemo && !!rainGauge && !!battery && !!solarPanel && !!chargeCtrl && !!lithiumBatt && !!siteCond;
 
   return (
     <div className="form-card">
@@ -1323,7 +1329,7 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
             {label} <span className="text-warning text-[11px]">*</span>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {[['Yes', 'yes'], ['No', 'no']].map(([lbl, v]) => (
+            {[['Yes', 'yes'], ['No', 'no'], ['N/A', 'n/a']].map(([lbl, v]) => (
               <button key={lbl} onClick={() => !locked && set(val === v ? null : v)} disabled={locked}
                 data-selected={val === v ? 'true' : undefined}
                 className="note-chip"
@@ -1336,18 +1342,29 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
       <div style={{ borderTop: '1px solid var(--color-border)', marginBottom: '0.75rem' }} />
 
       <div className="mb-3">
-        <div className="flex items-baseline justify-between mb-1.5">
-          <div className="text-[12px] font-semibold text-text-dark">Battery voltage</div>
-          <span className="text-[10px] text-text-light">Optional</span>
-        </div>
-        <div className="relative" style={{ display: 'inline-block' }}>
-          <input type="number" step="0.1" min="0" value={battery}
-            onChange={e => { setBattery(e.target.value); setSaveState('idle'); }}
-            disabled={locked} placeholder="12.6"
-            className={`field-input ${battery ? 'field-input--active' : ''}`}
-            style={{ height: '36px', width: 120, paddingRight: '30px' }}
-          />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">V</span>
+        <div className="text-[11px] font-bold text-text-light uppercase tracking-wide mb-2" style={{ letterSpacing: '0.06em' }}>Power system</div>
+        <div className="flex flex-col gap-2">
+          {[
+            { label: 'Battery voltage',     req: true,  val: battery,    set: v => { setBattery(v);    setSaveState('idle'); }, ph: '12.6' },
+            { label: 'Solar panel (OCV)',    req: true,  val: solarPanel, set: v => { setSolarPanel(v); setSaveState('idle'); }, ph: '18.2' },
+            { label: 'Charge controller',   req: true,  val: chargeCtrl, set: v => { setChargeCtrl(v); setSaveState('idle'); }, ph: '13.8' },
+            { label: 'Internal lithium',    req: true,  val: lithiumBatt,set: v => { setLithiumBatt(v);setSaveState('idle'); }, ph: '3.6'  },
+          ].map(({ label, req, val, set, ph }) => (
+            <div key={label} className="flex items-center justify-between gap-3">
+              <div className="text-[12px] font-semibold text-text-dark" style={{ minWidth: 130 }}>
+                {label}{req && <span className="text-warning text-[11px] ml-0.5">*</span>}
+              </div>
+              <div className="relative flex-1" style={{ maxWidth: 120 }}>
+                <input type="number" step="0.01" min="0" value={val}
+                  onChange={e => set(e.target.value)}
+                  disabled={locked} placeholder={ph}
+                  className={`field-input w-full ${val ? 'field-input--active' : ''}`}
+                  style={{ height: '36px', paddingRight: '26px' }}
+                />
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">V</span>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -1357,7 +1374,7 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
           <span className="text-[10px] text-text-light">Optional</span>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {['Yes', 'No', 'Not installed'].map(opt => (
+          {['Yes', 'No', 'N/A'].map(opt => (
             <button key={opt}
               onClick={() => { if (!locked) { setWindVane(windVane === opt ? null : opt); setSaveState('idle'); } }}
               disabled={locked}
@@ -1469,6 +1486,7 @@ function MetSensorConfirmationSection({ stationId, visitId, onAllConfirmed, onSe
         await assignSensor(stationId, {
           instrument_type_id: typeId,
           serial_no:          data.newSerial || null,
+          sensitivity_value:  data.newSensitivity ? parseFloat(data.newSensitivity) : null,
           effective_from:     new Date().toISOString(),
           visit_id:           visitId,
         });
@@ -1517,10 +1535,14 @@ function MetSensorConfirmationSection({ stationId, visitId, onAllConfirmed, onSe
 
         const mode = data.mode || 'swap';
         const selectedType = mode === 'upgrade' ? types.find(t => t.id === parseInt(data.newTypeId)) : null;
+        const swapNeedsSensitivity  = mode === 'swap'    && sensor.requires_sensitivity;
+        const upgNeedsSensitivity   = mode === 'upgrade' && selectedType?.requires_sensitivity;
         const canSave = state !== 'saving' && (
           mode === 'decommission' ||
-          (mode === 'swap'    && data.newSerial?.trim()) ||
-          (mode === 'upgrade' && data.newTypeId && (SOIL_CATS.has(selectedType?.category) || data.newSerial?.trim()))
+          (mode === 'swap'    && data.newSerial?.trim() && (!swapNeedsSensitivity || data.newSensitivity?.trim())) ||
+          (mode === 'upgrade' && data.newTypeId &&
+            (SOIL_CATS.has(selectedType?.category) || data.newSerial?.trim()) &&
+            (!upgNeedsSensitivity || data.newSensitivity?.trim()))
         );
 
         return (
@@ -1551,16 +1573,6 @@ function MetSensorConfirmationSection({ stationId, visitId, onAllConfirmed, onSe
             {state === 'changing' || state === 'saving' || state === 'error' ? (
               <div className="pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
 
-                {mode !== 'decommission' && (
-                  <input
-                    type="text"
-                    placeholder="New serial number"
-                    value={data.newSerial || ''}
-                    onChange={e => setField(sensor.id, 'newSerial', e.target.value)}
-                    className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none mb-3"
-                  />
-                )}
-
                 {mode === 'upgrade' && (
                   <select
                     value={data.newTypeId || ''}
@@ -1576,6 +1588,27 @@ function MetSensorConfirmationSection({ stationId, visitId, onAllConfirmed, onSe
                       </optgroup>
                     ))}
                   </select>
+                )}
+
+                {mode !== 'decommission' && (
+                  <input
+                    type="text"
+                    placeholder="New serial number"
+                    value={data.newSerial || ''}
+                    onChange={e => setField(sensor.id, 'newSerial', e.target.value)}
+                    className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none mb-3"
+                  />
+                )}
+
+                {(swapNeedsSensitivity || upgNeedsSensitivity) && (
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Sensitivity value (µV/W·m⁻²)"
+                    value={data.newSensitivity || ''}
+                    onChange={e => setField(sensor.id, 'newSensitivity', e.target.value)}
+                    className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none mb-3"
+                  />
                 )}
 
                 {mode === 'decommission' && (

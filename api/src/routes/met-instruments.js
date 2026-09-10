@@ -61,6 +61,39 @@ router.get('/stations/:id/sensors/history', async (req, res, next) => {
   }
 });
 
+router.get('/stations/:id/met', async (req, res, next) => {
+  try {
+    const stationId = parseInt(req.params.id, 10);
+    const { from, to, category = 'temperature', resolution = 'hour' } = req.query;
+
+    const CATEGORY_PHENOMENA = {
+      temperature:  ['air_temp_avg', 'air_temp_min', 'air_temp_max', 'rh_avg'],
+      wind:         ['wind_speed_avg', 'wind_dir_avg'],
+      radiation:    ['solar_rad_avg'],
+      uv:           ['uv_rad_avg'],
+      pressure:     ['atm_pressure_avg'],
+      rainfall:     ['rain_tot'],
+      soil_temp:    ['soil_temp_avg'],
+      leaf_wetness: ['leaf_wetness_mv'],
+      soil_moisture:['soil_moisture_avg'],
+    };
+
+    const phenomena = CATEGORY_PHENOMENA[category];
+    if (!phenomena) return res.status(400).json({ error: 'Invalid category' });
+
+    const VALID_RES = ['raw', 'hour', 'day'];
+    if (!VALID_RES.includes(resolution)) return res.status(400).json({ error: 'Invalid resolution' });
+
+    const fromDate = from || new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+    const toDate   = to   || new Date().toISOString();
+
+    const rows = await db.getMetData(stationId, { from: fromDate, to: toDate, phenomena, resolution });
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/stations/:id/calibration-history', async (req, res, next) => {
   try {
     const stationId = parseInt(req.params.id, 10);

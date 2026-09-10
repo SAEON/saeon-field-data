@@ -3,11 +3,13 @@ import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getStations, getFilesWithErrors } from '../services/api.js';
 import RainfallDataTable from '../components/RainfallDataTable.jsx';
 import GroundwaterDataTable from '../components/GroundwaterDataTable.jsx';
+import MetDataTable from '../components/MetDataTable.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 
 const FAMILIES = [
   { id: 'rainfall',    label: 'Rainfall'    },
   { id: 'groundwater', label: 'Groundwater' },
+  { id: 'met',         label: 'Met'         },
 ];
 
 function formatDateTime(iso) {
@@ -146,6 +148,7 @@ export default function DataTab() {
 
             {family === 'rainfall'    && <RainfallDataTable    stationId={selected} canReprocess={canReprocess} />}
             {family === 'groundwater' && <GroundwaterDataTable stationId={selected} />}
+            {family === 'met'         && <MetDataTable         stationId={selected} />}
           </>
         )}
       </main>

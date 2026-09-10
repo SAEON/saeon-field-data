@@ -325,6 +325,13 @@ export function getStationCalibrationHistory(stationId) {
   return request(`/api/stations/${stationId}/calibration-history`);
 }
 
+export function getStationMetData(stationId, { from, to, category = 'temperature', resolution = 'hour' } = {}) {
+  const params = new URLSearchParams({ category, resolution });
+  if (from) params.set('from', from);
+  if (to)   params.set('to',   to);
+  return request(`/api/stations/${stationId}/met?${params}`);
+}
+
 export function decommissionSensor(stationId, sensorId) {
   return request(`/api/stations/${stationId}/sensors/${sensorId}/decommission`, { method: 'PATCH' });
 }
