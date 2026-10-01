@@ -24,6 +24,7 @@ const LOGGER_ACTS = [
   { value: 'logger_decommission', label: 'Decommission' },
   { value: 'logger_program',      label: 'Programmed' },
   { value: 'logger_stopped',      label: 'Stopped' },
+  { value: 'logger_none',         label: 'None' },
 ];
 
 const RAINGAUGE_ACTS = [
@@ -2061,8 +2062,18 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
     if (loggerActsReading?.value_text) {
       try {
         const acts = JSON.parse(loggerActsReading.value_text);
-        isUnavailable = acts.some(a => LOGGER_PROBLEM.has(a));
+        isUnavailable = acts.some(a => LOGGER_PROBLEM.has(a)) || acts.includes('logger_deploy');
       } catch {}
+    }
+    // New rain gauge deployed without a download — no data file to upload
+    if (!isUnavailable) {
+      const rgActsReading = saved.find(r => r.reading_type === 'raingauge_activities');
+      if (rgActsReading?.value_text) {
+        try {
+          const acts = JSON.parse(rgActsReading.value_text);
+          isUnavailable = acts.includes('raingauge_deploy') && !acts.includes('raingauge_download');
+        } catch {}
+      }
     }
     onLoggerUnavailable?.(isUnavailable);
 

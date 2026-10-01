@@ -519,7 +519,7 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
               No file expected for this visit
             </div>
             <div className="text-[12px] leading-relaxed" style={{ color: '#795548' }}>
-              The logger was recorded as missing, stopped, or decommissioned. No download was possible — this visit can be submitted without a file.
+              The logger or instrument was recorded as newly deployed, missing, stopped, or decommissioned. No download was expected — this visit can be submitted without a file.
             </div>
             <div className="text-[11px] font-semibold mt-1" style={{ color: '#9E9E9E' }}>
               If you did manage to download data, you can still add a file below.
