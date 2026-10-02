@@ -518,13 +518,13 @@ async function getStationLoggerSnapshots() {
        FROM raw_measurements rm
        JOIN station_data_streams sds ON sds.id = rm.stream_id
        JOIN phenomena p              ON p.id   = rm.phenomenon_id
-       WHERE p.name IN ('temp_c', 'batt_v')
+       WHERE p.name IN ('temp_logg_avg', 'batt_avg')
        ORDER BY sds.station_id, p.name, rm.measured_at DESC
      )
      SELECT
        station_id,
-       MAX(CASE WHEN name = 'temp_c' THEN value_numeric END) AS last_temp_c,
-       MAX(CASE WHEN name = 'batt_v' THEN value_numeric END) AS last_batt_v,
+       MAX(CASE WHEN name = 'temp_logg_avg' THEN value_numeric END) AS last_temp_c,
+       MAX(CASE WHEN name = 'batt_avg' THEN value_numeric END) AS last_batt_v,
        MAX(measured_at) AS last_logger_at
      FROM latest
      GROUP BY station_id`
@@ -546,7 +546,7 @@ async function getLoggerSnapshotForVisit(visitId) {
      JOIN   raw_measurements rm      ON rm.stream_id   = sds.id
      JOIN   phenomena p              ON p.id           = rm.phenomenon_id
      WHERE  fv.id  = $1
-       AND  p.name IN ('temp_c', 'batt_v')
+       AND  p.name IN ('temp_logg_avg', 'batt_avg')
        AND  rm.measured_at BETWEEN fv.visited_at - INTERVAL '24 hours'
                                 AND fv.visited_at + INTERVAL '1 hour'
      ORDER  BY rm.measured_at DESC`,
@@ -1620,7 +1620,7 @@ async function getMetData(stationId, { from, to, phenomena, resolution }) {
     const result = await pool.query(`
       SELECT rm.measured_at AS period,
              p.name         AS phenomenon,
-             rm.value::numeric AS value
+             rm.value_numeric AS value
       FROM   raw_measurements rm
       JOIN   station_data_streams sds ON sds.id = rm.stream_id
       JOIN   phenomena p              ON p.id   = rm.phenomenon_id
@@ -1636,8 +1636,8 @@ async function getMetData(stationId, { from, to, phenomena, resolution }) {
     SELECT date_trunc($5, rm.measured_at) AS period,
            p.name                          AS phenomenon,
            CASE WHEN p.name = 'rain_tot'
-                THEN SUM(rm.value::numeric)
-                ELSE AVG(rm.value::numeric) END AS value
+                THEN SUM(rm.value_numeric)
+                ELSE AVG(rm.value_numeric) END AS value
     FROM   raw_measurements rm
     JOIN   station_data_streams sds ON sds.id = rm.stream_id
     JOIN   phenomena p              ON p.id   = rm.phenomenon_id

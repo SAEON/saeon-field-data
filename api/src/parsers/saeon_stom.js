@@ -1,33 +1,26 @@
-// parsers/saeon_stom.js
-// SAEON Terrestrial Observation Monitor (STOM) CSV export — streaming version
-// Uses readline to process line-by-line; never loads the full file into memory.
-//
-// Source spec: cs_stom.r (ipayipi package)
-// Variants detected by leading # comment line count:
-//   try1: 2 # comment lines | phen row 3 | units row 4 | data from row 5
-//   try2: 0 # comment lines | phen row 1 | no units    | data from row 2
-//   try3: 1 # comment line  | phen row 2 | units row 3 | data from row 4
-
 'use strict';
 const readline = require('readline');
 const fs       = require('fs');
 
-// Map STOM column names (lowercase) → phenomena table names
 const PHEN_NAME_MAP = {
-  'humid_rel':        'rh_avg',
-  'rad_solar_avg':    'solar_rad_avg',
+  'humid_rel':        'humid_rel_avg',
+  'humid_rel_avg':    'humid_rel_avg',
+  'rh_avg':           'humid_rel_avg',
+  'rad_solar_avg':    'rad_solar_avg',
+  'solar_rad_avg':    'rad_solar_avg',
   'rain_tot':         'rain_tot',
-  'temp_air_avg':     'air_temp_avg',
+  'temp_air_avg':     'temp_air_avg',
+  'temp_air_min':     'temp_air_min',
+  'temp_air_max':     'temp_air_max',
+  'air_temp_avg':     'temp_air_avg',
+  'air_temp_min':     'temp_air_min',
+  'air_temp_max':     'temp_air_max',
   'wind_dir_avg':     'wind_dir_avg',
   'wind_speed_avg':   'wind_speed_avg',
-  'atm_press_avg':    'atm_pressure_avg',
-  'rh_avg':           'rh_avg',
-  'solar_rad_avg':    'solar_rad_avg',
-  'air_temp_avg':     'air_temp_avg',
-  'air_temp_min':     'air_temp_min',
-  'air_temp_max':     'air_temp_max',
   'wind_speed_max':   'wind_speed_max',
-  'atm_pressure_avg': 'atm_pressure_avg',
+  'atm_press_avg':    'pressure_atm_avg',
+  'atm_pressure_avg': 'pressure_atm_avg',
+  'pressure_atm_avg': 'pressure_atm_avg',
 };
 
 function splitCsvLine(line) {
@@ -59,7 +52,7 @@ module.exports = async function parseSaeonStom(filePath) {
       crlfDelay: Infinity,
     });
 
-    let phase  = 'comments'; // → 'header' → 'units_check' → 'data'
+    let phase  = 'comments';
     let tsIdx  = -1;
     let cols   = [];
 
@@ -67,12 +60,11 @@ module.exports = async function parseSaeonStom(filePath) {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
-      // ── Count comment lines, find header ──────────────────────────────────
       if (phase === 'comments') {
         if (trimmed.startsWith('#')) continue;
         const headerRow = splitCsvLine(line);
         tsIdx = headerRow.findIndex(h => h.toLowerCase() === 'timestamp');
-        if (tsIdx === -1) return; // no timestamp column — abort
+        if (tsIdx === -1) return;
 
         for (let i = 0; i < headerRow.length; i++) {
           if (i === tsIdx) continue;
@@ -84,18 +76,15 @@ module.exports = async function parseSaeonStom(filePath) {
         continue;
       }
 
-      // ── Skip units row if first cell is empty ─────────────────────────────
       if (phase === 'units_check') {
         const fields = splitCsvLine(line);
         if (fields[tsIdx] === '' || fields[tsIdx].toLowerCase() === 'unit') {
           phase = 'data';
-          continue; // skip units row
+          continue;
         }
         phase = 'data';
-        // fall through — this line IS a data row
       }
 
-      // ── Parse data row ────────────────────────────────────────────────────
       const fields = splitCsvLine(line);
       if (fields.length < 2) continue;
 

@@ -67,15 +67,15 @@ router.get('/stations/:id/met', async (req, res, next) => {
     const { from, to, category = 'temperature', resolution = 'hour' } = req.query;
 
     const CATEGORY_PHENOMENA = {
-      temperature:  ['air_temp_avg', 'air_temp_min', 'air_temp_max', 'rh_avg'],
+      temperature:  ['temp_air_avg', 'temp_air_min', 'temp_air_max', 'humid_rel_avg'],
       wind:         ['wind_speed_avg', 'wind_dir_avg'],
-      radiation:    ['solar_rad_avg'],
-      uv:           ['uv_rad_avg'],
-      pressure:     ['atm_pressure_avg'],
+      radiation:    ['rad_solar_avg'],
+      uv:           ['rad_uv_avg'],
+      pressure:     ['pressure_atm_avg'],
       rainfall:     ['rain_tot'],
-      soil_temp:    ['soil_temp_avg'],
-      leaf_wetness: ['leaf_wetness_mv'],
-      soil_moisture:['soil_moisture_avg'],
+      soil_temp:    ['temp_soil_avg'],
+      leaf_wetness: ['leaf_wet_avg'],
+      soil_moisture:['moisture_soil_avg'],
     };
 
     const phenomena = CATEGORY_PHENOMENA[category];

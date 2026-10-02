@@ -1,104 +1,74 @@
-// parsers/campbell_toa5.js
-// Campbell Scientific TOA5 meteorological logger — streaming version
-// Uses readline to process line-by-line; never loads the full file into memory.
-//
-// Header structure (confirmed from cs_toa5.rda, data_row=4):
-//   Line 1: "TOA5","StationName","CR1000","SN","OS","Program","Sig","TableName"
-//   Line 2: column names  — "TIMESTAMP","RECORD","AirTemp_Avg",...
-//   Line 3: units         — "TS","RN","degC",...
-//   Line 4: measure types — "","","Avg","Tot","Smp",...
-//   Line 5+: data rows
-//
-// TIMESTAMP column is always first. Format: "YYYY-MM-DD HH:MM:SS"
-
 'use strict';
 const readline = require('readline');
 const fs       = require('fs');
 
-// Map Campbell column names (lowercase) to phenomenon names in the phenomena table.
-// Two naming conventions are in use across SAEON stations:
-//   New standard (five_min/hourly tables): lowercase snake_case — temp_air_avg, humid_rel, ...
-//   Old standard (TableHour/TableDay):     PascalCase          — WSpd_Avg, BPress_Avg, ...
-// Both are normalised to lowercase before lookup.
 const PHEN_NAME_MAP = {
-  // ── Air temperature ──────────────────────────────────────────────────────────
-  'airtc_avg':        'air_temp_avg',
-  'airtc_min':        'air_temp_min',
-  'airtc_max':        'air_temp_max',
-  'airtemp_avg':      'air_temp_avg',
-  'airtemp_min':      'air_temp_min',
-  'airtemp_max':      'air_temp_max',
-  'air_temp_avg':     'air_temp_avg',
-  'air_temp_min':     'air_temp_min',
-  'air_temp_max':     'air_temp_max',
-  'temp_air_avg':     'air_temp_avg',
-  'temp_air_min':     'air_temp_min',
-  'temp_air_max':     'air_temp_max',
-
-  // ── Relative humidity ────────────────────────────────────────────────────────
-  'rh':               'rh_avg',
-  'rh_avg':           'rh_avg',
-  'relhumidity':      'rh_avg',
-  'humid_rel':        'rh_avg',
-
-  // ── Wind speed ───────────────────────────────────────────────────────────────
+  'airtc_avg':        'temp_air_avg',
+  'airtc_min':        'temp_air_min',
+  'airtc_max':        'temp_air_max',
+  'airtemp_avg':      'temp_air_avg',
+  'airtemp_min':      'temp_air_min',
+  'airtemp_max':      'temp_air_max',
+  'air_temp_avg':     'temp_air_avg',
+  'air_temp_min':     'temp_air_min',
+  'air_temp_max':     'temp_air_max',
+  'temp_air_avg':     'temp_air_avg',
+  'temp_air_min':     'temp_air_min',
+  'temp_air_max':     'temp_air_max',
+  'rh':               'humid_rel_avg',
+  'rh_avg':           'humid_rel_avg',
+  'relhumidity':      'humid_rel_avg',
+  'humid_rel':        'humid_rel_avg',
+  'humid_rel_avg':    'humid_rel_avg',
   'ws_ms_s_wvt':      'wind_speed_avg',
   'windspeed_avg':    'wind_speed_avg',
   'wind_speed_avg':   'wind_speed_avg',
   'wspd_avg':         'wind_speed_avg',
-
-  // ── Wind direction ───────────────────────────────────────────────────────────
   'winddir_d1_wvt':   'wind_dir_avg',
   'winddir_avg':      'wind_dir_avg',
   'wind_dir_avg':     'wind_dir_avg',
   'wdir_avg':         'wind_dir_avg',
-
-  // ── Solar radiation (shortwave) ──────────────────────────────────────────────
-  'slrw_avg':         'solar_rad_avg',
-  'solarrad_avg':     'solar_rad_avg',
-  'solar_rad_avg':    'solar_rad_avg',
-  'rad_short_in_avg': 'solar_rad_avg',
-
-  // ── Atmospheric pressure ─────────────────────────────────────────────────────
-  'bp_kpa':           'atm_pressure_avg',
-  'atmpres_avg':      'atm_pressure_avg',
-  'atm_pressure_avg': 'atm_pressure_avg',
-  'pressure_atm':     'atm_pressure_avg',
-  'bpress_avg':       'atm_pressure_avg',
-  'bpressure_avg':    'atm_pressure_avg',
-  'bp_mbar_avg':      'atm_pressure_avg',
-
-  // ── Rainfall ─────────────────────────────────────────────────────────────────
+  'slrw_avg':         'rad_solar_avg',
+  'solarrad_avg':     'rad_solar_avg',
+  'solar_rad_avg':    'rad_solar_avg',
+  'rad_short_in_avg': 'rad_solar_avg',
+  'rad_solar_avg':    'rad_solar_avg',
+  'bp_kpa':           'pressure_atm_avg',
+  'atmpres_avg':      'pressure_atm_avg',
+  'atm_pressure_avg': 'pressure_atm_avg',
+  'pressure_atm':     'pressure_atm_avg',
+  'pressure_atm_avg': 'pressure_atm_avg',
+  'bpress_avg':       'pressure_atm_avg',
+  'bpressure_avg':    'pressure_atm_avg',
+  'bp_mbar_avg':      'pressure_atm_avg',
   'rain_mm_tot':      'rain_tot',
   'rain_tot':         'rain_tot',
   'rainfall_tot':     'rain_tot',
-
-  // ── UV radiation ─────────────────────────────────────────────────────────────
-  'rad_uv_avg':       'uv_rad_avg',
-  'uv_w_avg':         'uv_rad_avg',
-  'uvslrw_avg':       'uv_rad_avg',
-
-  // ── Soil / ground temperature ─────────────────────────────────────────────────
-  'temp_ground_avg':  'soil_temp_avg',
-  'soiltemp_avg':     'soil_temp_avg',
-  't107_c_avg':       'soil_temp_avg',
-  't108_c_avg':       'soil_temp_avg',
-  't109_c_avg':       'soil_temp_avg',
-
-  // ── Leaf wetness ──────────────────────────────────────────────────────────────
-  'leafwetmv_avg':    'leaf_wetness_mv',
-  'lwmv_avg':         'leaf_wetness_mv',
-
-  // ── Soil moisture ────────────────────────────────────────────────────────────
-  'vw_avg':           'soil_moisture_avg',
-
-  // ── Logger diagnostics ───────────────────────────────────────────────────────
-  'loggertemp_avg':        'temp_c',
-  'loggerbattery_avg':     'batt_v',
-  'loggerbatt_avg':        'batt_v',
-  'battv_min':             'batt_v',
-  'batt_min':              'batt_v',
-  'loggerlithiumbatt_avg': 'batt_v_lithium',
+  'rad_uv_avg':       'rad_uv_avg',
+  'uv_w_avg':         'rad_uv_avg',
+  'uvslrw_avg':       'rad_uv_avg',
+  'uv_rad_avg':       'rad_uv_avg',
+  'temp_ground_avg':  'temp_soil_avg',
+  'soiltemp_avg':     'temp_soil_avg',
+  'soil_temp_avg':    'temp_soil_avg',
+  'temp_soil_avg':    'temp_soil_avg',
+  't107_c_avg':       'temp_soil_avg',
+  't108_c_avg':       'temp_soil_avg',
+  't109_c_avg':       'temp_soil_avg',
+  'leafwetmv_avg':    'leaf_wet_avg',
+  'lwmv_avg':         'leaf_wet_avg',
+  'leaf_wet_avg':     'leaf_wet_avg',
+  'vw_avg':           'moisture_soil_avg',
+  'moisture_soil_avg':'moisture_soil_avg',
+  'loggertemp_avg':        'temp_logg_avg',
+  'temp_logg_avg':         'temp_logg_avg',
+  'loggerbattery_avg':     'batt_avg',
+  'loggerbatt_avg':        'batt_avg',
+  'battv_min':             'batt_avg',
+  'batt_min':              'batt_avg',
+  'batt_avg':              'batt_avg',
+  'loggerlithiumbatt_avg': 'batt_lith_avg',
+  'batt_lith_avg':         'batt_lith_avg',
 };
 
 function splitLine(line) {
@@ -121,7 +91,6 @@ function parseToa5Date(raw) {
   return new Date(Date.UTC(+yr, +mo - 1, +dy, +hr, +mn, +sc));
 }
 
-// Read the first N lines of a file without loading the whole file
 function readFirstNLines(filePath, n) {
   return new Promise((resolve, reject) => {
     const lines = [];
@@ -139,14 +108,13 @@ function readFirstNLines(filePath, n) {
 }
 
 module.exports = async function parseCampbellToa5(filePath) {
-  // ── Eagerly read 4-line header ──────────────────────────────────────────────
   const headerLines = await readFirstNLines(filePath, 4);
   if (headerLines.length < 4) throw new Error('TOA5 file too short — expected at least 4 header lines');
 
-  const row0 = splitLine(headerLines[0]); // file info
-  const row1 = splitLine(headerLines[1]); // column names
-  const row2 = splitLine(headerLines[2]); // units
-  const row3 = splitLine(headerLines[3]); // measure types
+  const row0 = splitLine(headerLines[0]);
+  const row1 = splitLine(headerLines[1]);
+  const row2 = splitLine(headerLines[2]);
+  const row3 = splitLine(headerLines[3]);
 
   const streamName = row0[row0.length - 1] || 'raw_met';
 
@@ -177,7 +145,7 @@ module.exports = async function parseCampbellToa5(filePath) {
     let lineNum = 0;
     for await (const line of rl) {
       lineNum++;
-      if (lineNum <= 4) continue; // skip 4-line header
+      if (lineNum <= 4) continue;
       const trimmed = line.trim();
       if (!trimmed) continue;
 

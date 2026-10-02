@@ -46,49 +46,49 @@ const RESOLUTIONS = [
 // Column definitions per category
 const COLUMNS = {
   temperature: [
-    { key: 'air_temp_avg', label: 'Avg (°C)',  dp: 2 },
-    { key: 'air_temp_min', label: 'Min (°C)',  dp: 2 },
-    { key: 'air_temp_max', label: 'Max (°C)',  dp: 2 },
-    { key: 'rh_avg',       label: 'RH (%)',    dp: 1 },
+    { key: 'temp_air_avg',  label: 'Avg (°C)',  dp: 2 },
+    { key: 'temp_air_min',  label: 'Min (°C)',  dp: 2 },
+    { key: 'temp_air_max',  label: 'Max (°C)',  dp: 2 },
+    { key: 'humid_rel_avg', label: 'RH (%)',    dp: 1 },
   ],
   wind: [
-    { key: 'wind_speed_avg', label: 'Speed (m/s)', dp: 2 },
-    { key: 'wind_dir_avg',   label: 'Direction (°)', dp: 1 },
+    { key: 'wind_speed_avg', label: 'Speed (m/s)',    dp: 2 },
+    { key: 'wind_dir_avg',   label: 'Direction (°)',  dp: 1 },
   ],
   radiation: [
-    { key: 'solar_rad_avg', label: 'Solar Rad (W/m²)', dp: 1 },
+    { key: 'rad_solar_avg', label: 'Solar Rad (W/m²)', dp: 1 },
   ],
   uv: [
-    { key: 'uv_rad_avg', label: 'UV Rad (W/m²)', dp: 2 },
+    { key: 'rad_uv_avg', label: 'UV Rad (W/m²)', dp: 2 },
   ],
   pressure: [
-    { key: 'atm_pressure_avg', label: 'Pressure (hPa)', dp: 2 },
+    { key: 'pressure_atm_avg', label: 'Pressure (hPa)', dp: 2 },
   ],
   rainfall: [
     { key: 'rain_tot', label: 'Rain (mm)', dp: 2 },
   ],
   soil_temp: [
-    { key: 'soil_temp_avg', label: 'Soil Temp (°C)', dp: 2 },
+    { key: 'temp_soil_avg', label: 'Soil Temp (°C)', dp: 2 },
   ],
   leaf_wetness: [
-    { key: 'leaf_wetness_mv', label: 'Leaf Wetness (mV)', dp: 1 },
+    { key: 'leaf_wet_avg', label: 'Leaf Wetness (mV)', dp: 1 },
   ],
   soil_moisture: [
-    { key: 'soil_moisture_avg', label: 'VWC (%)', dp: 2 },
+    { key: 'moisture_soil_avg', label: 'VWC (%)', dp: 2 },
   ],
 };
 
 // Primary field used for summary stats
 const PRIMARY_FIELD = {
-  temperature:   'air_temp_avg',
+  temperature:   'temp_air_avg',
   wind:          'wind_speed_avg',
-  radiation:     'solar_rad_avg',
-  uv:            'uv_rad_avg',
-  pressure:      'atm_pressure_avg',
+  radiation:     'rad_solar_avg',
+  uv:            'rad_uv_avg',
+  pressure:      'pressure_atm_avg',
   rainfall:      'rain_tot',
-  soil_temp:     'soil_temp_avg',
-  leaf_wetness:  'leaf_wetness_mv',
-  soil_moisture: 'soil_moisture_avg',
+  soil_temp:     'temp_soil_avg',
+  leaf_wetness:  'leaf_wet_avg',
+  soil_moisture: 'moisture_soil_avg',
 };
 
 const PAGE_SIZES = [25, 50, 100];

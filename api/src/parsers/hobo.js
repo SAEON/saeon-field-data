@@ -95,10 +95,10 @@ function classifyColumn(cleanedHeader) {
     return { phenomenonName: 'rain_tip', isInterference: false, isCumulative: true };
   }
   if (h.includes('temp')) {
-    return { phenomenonName: 'temp_c', isInterference: false, isCumulative: false };
+    return { phenomenonName: 'temp_logg_avg', isInterference: false, isCumulative: false };
   }
   if (h.includes('batt')) {
-    return { phenomenonName: 'batt_v', isInterference: false, isCumulative: false };
+    return { phenomenonName: 'batt_avg', isInterference: false, isCumulative: false };
   }
   const slug = h.replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
   return { phenomenonName: slug || 'unknown', isInterference: false, isCumulative: false };

@@ -1,6 +1,4 @@
-// Inline-SVG line chart for met station time-series data.
-// Receives pivoted rows (one per period) and a category string.
-// Uses the same compact SVG approach as GroundwaterLineChart.
+
 
 const W = 500, H = 100, PL = 8, PR = 8, PT = 8, PB = 14;
 const CW = W - PL - PR;
@@ -11,34 +9,34 @@ const MAX_PTS = 600;
 // Series definitions per category: { field, color, strokeWidth, dash, label, unit }
 const SERIES = {
   temperature: [
-    { field: 'air_temp_avg', color: '#1565C0', sw: 1.2, dash: null,  label: 'Avg temp', unit: '°C' },
-    { field: 'air_temp_min', color: '#90CAF9', sw: 0.8, dash: '3,2', label: 'Min temp', unit: '°C' },
-    { field: 'air_temp_max', color: '#EF9A9A', sw: 0.8, dash: '3,2', label: 'Max temp', unit: '°C' },
-    { field: 'rh_avg',       color: '#F59E0B', sw: 0.8, dash: null,  label: 'RH',       unit: '%', secondary: true },
+    { field: 'temp_air_avg',  color: '#1565C0', sw: 1.2, dash: null,  label: 'Avg temp', unit: '°C' },
+    { field: 'temp_air_min',  color: '#90CAF9', sw: 0.8, dash: '3,2', label: 'Min temp', unit: '°C' },
+    { field: 'temp_air_max',  color: '#EF9A9A', sw: 0.8, dash: '3,2', label: 'Max temp', unit: '°C' },
+    { field: 'humid_rel_avg', color: '#F59E0B', sw: 0.8, dash: null,  label: 'RH',       unit: '%', secondary: true },
   ],
   wind: [
     { field: 'wind_speed_avg', color: '#1565C0', sw: 1.2, dash: null, label: 'Wind speed', unit: 'm/s' },
   ],
   radiation: [
-    { field: 'solar_rad_avg', color: '#F59E0B', sw: 1.2, dash: null, label: 'Solar rad', unit: 'W/m²' },
+    { field: 'rad_solar_avg', color: '#F59E0B', sw: 1.2, dash: null, label: 'Solar rad', unit: 'W/m²' },
   ],
   uv: [
-    { field: 'uv_rad_avg', color: '#7C3AED', sw: 1.2, dash: null, label: 'UV rad', unit: 'W/m²' },
+    { field: 'rad_uv_avg', color: '#7C3AED', sw: 1.2, dash: null, label: 'UV rad', unit: 'W/m²' },
   ],
   pressure: [
-    { field: 'atm_pressure_avg', color: '#059669', sw: 1.2, dash: null, label: 'Pressure', unit: 'hPa' },
+    { field: 'pressure_atm_avg', color: '#059669', sw: 1.2, dash: null, label: 'Pressure', unit: 'hPa' },
   ],
   rainfall: [
     { field: 'rain_tot', color: '#1565C0', sw: 1.2, dash: null, label: 'Rainfall', unit: 'mm', bars: true },
   ],
   soil_temp: [
-    { field: 'soil_temp_avg', color: '#92400E', sw: 1.2, dash: null, label: 'Soil temp', unit: '°C' },
+    { field: 'temp_soil_avg', color: '#92400E', sw: 1.2, dash: null, label: 'Soil temp', unit: '°C' },
   ],
   leaf_wetness: [
-    { field: 'leaf_wetness_mv', color: '#16A34A', sw: 1.2, dash: null, label: 'Leaf wetness', unit: 'mV' },
+    { field: 'leaf_wet_avg', color: '#16A34A', sw: 1.2, dash: null, label: 'Leaf wetness', unit: 'mV' },
   ],
   soil_moisture: [
-    { field: 'soil_moisture_avg', color: '#0369A1', sw: 1.2, dash: null, label: 'Soil moisture', unit: '%' },
+    { field: 'moisture_soil_avg', color: '#0369A1', sw: 1.2, dash: null, label: 'Soil moisture', unit: '%' },
   ],
 };
 
