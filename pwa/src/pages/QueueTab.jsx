@@ -90,9 +90,10 @@ export default function QueueTab({ visitId, files, setFiles, onGoToFiles, statio
           if (!local || local.parseState !== 'pending') continue;
           if (dbFile.parse_status === 'parsed') {
             patchFile(local.localId, {
-              parseState: 'parsed',
-              dateRange:  `${fmtDate(dbFile.date_range_start)} — ${fmtDate(dbFile.date_range_end)}`,
-              records:    dbFile.record_count,
+              parseState:         'parsed',
+              dateRange:          `${fmtDate(dbFile.date_range_start)} — ${fmtDate(dbFile.date_range_end)}`,
+              records:            dbFile.record_count,
+              hasUnmappedColumns: dbFile.has_unmapped_columns ?? false,
             });
           } else if (dbFile.parse_status === 'error') {
             patchFile(local.localId, { parseState: 'error' });
@@ -238,6 +239,14 @@ export default function QueueTab({ visitId, files, setFiles, onGoToFiles, statio
                           {state === 'error' && (
                             <div className="text-[10px] text-error mt-1">
                               {canReparse ? 'Parser failed — tap ↺ to retry' : 'Parser failed — contact your team lead to retry'}
+                            </div>
+                          )}
+                          {state === 'parsed' && file.hasUnmappedColumns && (
+                            <div
+                              className="text-[10px] font-semibold mt-1 rounded px-1.5 py-0.5"
+                              style={{ background: '#FFF8E1', color: '#F57F17', border: '1px solid #F57F1733' }}
+                            >
+                              Unknown column names detected — your Data Manager needs to map them
                             </div>
                           )}
                         </div>

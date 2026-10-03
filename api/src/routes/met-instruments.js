@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db/queries');
 const { requireAuth } = require('../middleware/auth');
+const { parseInBackground } = require('./files');
 
 const SOIL_CATEGORIES = new Set(['soil', 'leaf_wetness']);
 const VALID_PARAMETERS = new Set(['temperature', 'humidity', 'pressure']);
@@ -67,15 +68,16 @@ router.get('/stations/:id/met', async (req, res, next) => {
     const { from, to, category = 'temperature', resolution = 'hour' } = req.query;
 
     const CATEGORY_PHENOMENA = {
-      temperature:  ['temp_air_avg', 'temp_air_min', 'temp_air_max', 'humid_rel_avg'],
-      wind:         ['wind_speed_avg', 'wind_dir_avg'],
+      temperature:  ['temp_air_avg', 'temp_air_min', 'temp_air_max', 'humid_rel_avg', 'temp_dew_avg', 'temp_ground_min'],
+      wind:         ['wind_speed_avg', 'wind_dir_avg', 'wind_dir_sd'],
       radiation:    ['rad_solar_avg'],
       uv:           ['rad_uv_avg'],
-      pressure:     ['pressure_atm_avg'],
+      pressure:     ['pressure_atm_avg', 'pressure_vpd_avg'],
       rainfall:     ['rain_tot'],
       soil_temp:    ['temp_soil_avg'],
       leaf_wetness: ['leaf_wet_avg'],
       soil_moisture:['moisture_soil_avg'],
+      evapo:        ['et_ref_tot'],
     };
 
     const phenomena = CATEGORY_PHENOMENA[category];
@@ -248,6 +250,64 @@ router.post('/visits/:id/calibration-checks', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+router.get('/phenomena', async (req, res, next) => {
+  try {
+    const phenMap = await db.getAllPhenomena();
+    res.json(Object.values(phenMap).sort((a, b) => a.name.localeCompare(b.name)));
+  } catch (err) { next(err); }
+});
+
+router.get('/column-mappings/pending', async (req, res, next) => {
+  try {
+    const rows = await db.getPendingColumnMappings();
+    res.json(rows);
+  } catch (err) { next(err); }
+});
+
+router.post('/column-mappings/:id/resolve', async (req, res, next) => {
+  try {
+    const id          = parseInt(req.params.id, 10);
+    const { phenomenon_id } = req.body;
+    if (!phenomenon_id) return res.status(400).json({ error: 'phenomenon_id required' });
+    const row = await db.resolveColumnMapping(id, { phenomenonId: phenomenon_id, resolvedBy: req.user?.id });
+    if (!row) return res.status(404).json({ error: 'Mapping not found' });
+    if (row.source_file_id) {
+      const fileRecord = await db.getFileById(row.source_file_id);
+      if (fileRecord) {
+        await db.resetFileToPending(fileRecord.id);
+        setImmediate(() => parseInBackground(fileRecord, fileRecord.visit_id));
+      }
+    }
+    res.json(row);
+  } catch (err) { next(err); }
+});
+
+router.post('/column-mappings/:id/ignore', async (req, res, next) => {
+  try {
+    const id  = parseInt(req.params.id, 10);
+    const row = await db.ignoreColumnMapping(id, req.user?.id);
+    if (!row) return res.status(404).json({ error: 'Mapping not found' });
+    res.json(row);
+  } catch (err) { next(err); }
+});
+
+router.get('/column-mappings/active', async (req, res, next) => {
+  try {
+    const rows = await db.getAllActiveMappings();
+    res.json(rows);
+  } catch (err) { next(err); }
+});
+
+router.patch('/column-mappings/:id/nodes', async (req, res, next) => {
+  try {
+    const id   = parseInt(req.params.id, 10);
+    const { arid = false, efteon = false, fynbos = false, gfw = false, ndlovu = false } = req.body;
+    const row  = await db.updateColumnMappingNodes(id, { arid, efteon, fynbos, gfw, ndlovu });
+    if (!row) return res.status(404).json({ error: 'Mapping not found' });
+    res.json(row);
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

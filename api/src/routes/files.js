@@ -60,8 +60,9 @@ async function parseInBackground(fileRecord, visitId) {
   log.info('[parse] Started', { file_id: fileRecord.id, format, file: fileRecord.original_name });
 
   try {
-    const visit   = await db.getVisitById(visitId);
-    const phenMap = await db.getAllPhenomena();
+    const visit          = await db.getVisitById(visitId);
+    const phenMap        = await db.getAllPhenomena();
+    const activeColMaps  = await db.getActiveColumnMappings();
     log.info('[parse] Station context', { file_id: fileRecord.id, station_id: visit?.station_id, data_family: visit?.data_family });
 
     // Streaming parsers receive filePath and return { streamName, stream: AsyncGenerator }.
@@ -69,7 +70,7 @@ async function parseInBackground(fileRecord, visitId) {
     // Both are normalised below into a single async-iterable interface.
     let result;
     if (parser.streaming) {
-      result = await parser(fileRecord.storage_path);
+      result = await parser(fileRecord.storage_path, { extraMappings: activeColMaps });
     } else {
       const buffer = fs.readFileSync(fileRecord.storage_path);
       const parsed = await parser(buffer);
@@ -175,6 +176,27 @@ async function parseInBackground(fileRecord, visitId) {
       to:         resolvedEnd,
       ms:         Date.now() - parseStart,
     });
+
+    // ── Flag unmapped columns ─────────────────────────────────────────────────
+    const unmapped = meta.unmappedColumns || [];
+    if (unmapped.length > 0) {
+      await db.flagFileUnmappedColumns(fileRecord.id);
+      for (const col of unmapped) {
+        const rawName   = typeof col === 'string' ? col : col.name;
+        const uzUnits   = typeof col === 'object' ? col.uz_units   : null;
+        const uzMeasure = typeof col === 'object' ? col.uz_measure : null;
+        await db.upsertPendingColumnMapping(rawName, {
+          dataFamily:   visit.data_family,
+          sourceFileId: fileRecord.id,
+          stationId:    visit.station_id,
+          uzUnits,
+          uzMeasure,
+        });
+      }
+      log.warn('[parse] Unmapped columns flagged', { file_id: fileRecord.id, columns: unmapped });
+    } else {
+      await db.clearFileUnmappedColumns(fileRecord.id);
+    }
 
     // ── Serial mismatch detection ──────────────────────────────────────────
     if (meta.serial) {

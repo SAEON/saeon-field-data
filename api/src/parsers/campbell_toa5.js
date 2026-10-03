@@ -69,6 +69,17 @@ const PHEN_NAME_MAP = {
   'batt_avg':              'batt_avg',
   'loggerlithiumbatt_avg': 'batt_lith_avg',
   'batt_lith_avg':         'batt_lith_avg',
+  'etos':                  'et_ref_tot',
+  'et_ref_tot':            'et_ref_tot',
+  'pressure_vapour_def_avg': 'pressure_vpd_avg',
+  'pressure_vpd_avg':        'pressure_vpd_avg',
+  'vpd_avg':                 'pressure_vpd_avg',
+  'temp_dew_point_avg':    'temp_dew_avg',
+  'temp_dew_avg':          'temp_dew_avg',
+  'dewpoint_avg':          'temp_dew_avg',
+  'temp_ground_min':       'temp_ground_min',
+  'wind_dir_sd':           'wind_dir_sd',
+  'winddir_sd':            'wind_dir_sd',
 };
 
 function splitLine(line) {
@@ -107,7 +118,7 @@ function readFirstNLines(filePath, n) {
   });
 }
 
-module.exports = async function parseCampbellToa5(filePath) {
+module.exports = async function parseCampbellToa5(filePath, { extraMappings = {} } = {}) {
   const headerLines = await readFirstNLines(filePath, 4);
   if (headerLines.length < 4) throw new Error('TOA5 file too short — expected at least 4 header lines');
 
@@ -121,12 +132,18 @@ module.exports = async function parseCampbellToa5(filePath) {
   const tsIdx = row1.findIndex(n => n.toUpperCase() === 'TIMESTAMP');
   if (tsIdx === -1) throw new Error('TOA5 file: no TIMESTAMP column');
 
+  const unmappedColumns = new Map();
   const cols = [];
   for (let i = 0; i < row1.length; i++) {
     if (i === tsIdx) continue;
     const name = row1[i].trim();
     if (!name || name.toUpperCase() === 'RECORD') continue;
-    const phenName = PHEN_NAME_MAP[name.toLowerCase()] || null;
+    const key     = name.toLowerCase();
+    const phenName = PHEN_NAME_MAP[key] || extraMappings[key] || null;
+    if (!phenName) unmappedColumns.set(name, {
+      uz_units:   (row2[i] || '').trim() || null,
+      uz_measure: (row3[i] || '').trim() || null,
+    });
     cols.push({
       index:   i,
       unit:    (row2[i] || '').trim(),
@@ -176,7 +193,7 @@ module.exports = async function parseCampbellToa5(filePath) {
     }
   }
 
-  return { streamName, stream: stream() };
+  return { streamName, stream: stream(), _metadata: { unmappedColumns: [...unmappedColumns.entries()].map(([name, meta]) => ({ name, ...meta })) } };
 };
 
 module.exports.streaming = true;

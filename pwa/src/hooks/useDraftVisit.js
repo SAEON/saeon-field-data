@@ -35,8 +35,9 @@ export async function saveDraft(draft) {
         dateRange:   f.dateRange,
         records:     f.records,
         parseError:  f.parseError  ?? null,
-        hasGap:      f.hasGap      ?? false,
-        gapDays:     f.gapDays     ?? null,
+        hasGap:             f.hasGap             ?? false,
+        gapDays:            f.gapDays            ?? null,
+        hasUnmappedColumns: f.hasUnmappedColumns ?? false,
         // raw, abortController intentionally omitted
       })),
     };

@@ -35,6 +35,7 @@ const CATEGORIES = [
   { id: 'soil_temp',     label: 'Soil Temp'     },
   { id: 'leaf_wetness',  label: 'Leaf Wetness'  },
   { id: 'soil_moisture', label: 'Soil Moisture' },
+  { id: 'evapo',        label: 'ET'            },
 ];
 
 const RESOLUTIONS = [
@@ -46,14 +47,17 @@ const RESOLUTIONS = [
 // Column definitions per category
 const COLUMNS = {
   temperature: [
-    { key: 'temp_air_avg',  label: 'Avg (°C)',  dp: 2 },
-    { key: 'temp_air_min',  label: 'Min (°C)',  dp: 2 },
-    { key: 'temp_air_max',  label: 'Max (°C)',  dp: 2 },
-    { key: 'humid_rel_avg', label: 'RH (%)',    dp: 1 },
+    { key: 'temp_air_avg',    label: 'Avg (°C)',       dp: 2 },
+    { key: 'temp_air_min',    label: 'Min (°C)',       dp: 2 },
+    { key: 'temp_air_max',    label: 'Max (°C)',       dp: 2 },
+    { key: 'humid_rel_avg',   label: 'Humidity (%)',   dp: 1 },
+    { key: 'temp_dew_avg',    label: 'Dew point (°C)', dp: 2 },
+    { key: 'temp_ground_min', label: 'Ground min (°C)',dp: 2 },
   ],
   wind: [
-    { key: 'wind_speed_avg', label: 'Speed (m/s)',    dp: 2 },
-    { key: 'wind_dir_avg',   label: 'Direction (°)',  dp: 1 },
+    { key: 'wind_speed_avg', label: 'Speed (m/s)',   dp: 2 },
+    { key: 'wind_dir_avg',   label: 'Direction (°)', dp: 1 },
+    { key: 'wind_dir_sd',    label: 'Dir SD (°)',    dp: 1 },
   ],
   radiation: [
     { key: 'rad_solar_avg', label: 'Solar Rad (W/m²)', dp: 1 },
@@ -63,6 +67,7 @@ const COLUMNS = {
   ],
   pressure: [
     { key: 'pressure_atm_avg', label: 'Pressure (hPa)', dp: 2 },
+    { key: 'pressure_vpd_avg', label: 'VPD (kPa)',       dp: 3 },
   ],
   rainfall: [
     { key: 'rain_tot', label: 'Rain (mm)', dp: 2 },
@@ -75,6 +80,9 @@ const COLUMNS = {
   ],
   soil_moisture: [
     { key: 'moisture_soil_avg', label: 'VWC (%)', dp: 2 },
+  ],
+  evapo: [
+    { key: 'et_ref_tot', label: 'ET ref (mm)', dp: 3 },
   ],
 };
 
@@ -89,6 +97,7 @@ const PRIMARY_FIELD = {
   soil_temp:     'temp_soil_avg',
   leaf_wetness:  'leaf_wet_avg',
   soil_moisture: 'moisture_soil_avg',
+  evapo:         'et_ref_tot',
 };
 
 const PAGE_SIZES = [25, 50, 100];

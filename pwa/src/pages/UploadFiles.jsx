@@ -271,7 +271,7 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-export default function UploadFiles({ visitId, stationId, files, setFiles, dataFamily, loggerUnavailable = false }) {
+export default function UploadFiles({ visitId, stationId, files, setFiles, dataFamily, loggerUnavailable = false, onGoToColumns, onUnmappedDetected }) {
   const acceptedFormats = Object.entries(FORMAT_MAP)
     .filter(([, v]) => !dataFamily || v.families.includes(dataFamily))
     .reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {});
@@ -349,14 +349,17 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
       if (!dbFile) return;
 
       if (dbFile.parse_status === 'parsed') {
+        const hasUnmapped = dbFile.has_unmapped_columns ?? false;
         patchFile(localId, {
-          parseState:  'parsed',
-          dateRange:   `${fmtDate(dbFile.date_range_start)} — ${fmtDate(dbFile.date_range_end)}`,
-          records:     dbFile.record_count,
-          hasGap:      dbFile.has_gap  ?? false,
-          gapDays:     dbFile.gap_days ?? null,
-          parseError:  null,
+          parseState:         'parsed',
+          dateRange:          `${fmtDate(dbFile.date_range_start)} — ${fmtDate(dbFile.date_range_end)}`,
+          records:            dbFile.record_count,
+          hasGap:             dbFile.has_gap  ?? false,
+          gapDays:            dbFile.gap_days ?? null,
+          hasUnmappedColumns: hasUnmapped,
+          parseError:         null,
         });
+        if (hasUnmapped) onUnmappedDetected?.();
       } else if (dbFile.parse_status === 'error') {
         patchFile(localId, { parseState: 'error', parseError: dbFile.parse_error || 'Unknown parse error' });
       } else {
@@ -742,6 +745,25 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
                       >
                         Gap detected — {file.gapDays ?? '?'} day{file.gapDays !== 1 ? 's' : ''} of missing data before this file
                       </div>
+                    )}
+
+                    {isParsed && file.hasUnmappedColumns && (
+                      onGoToColumns ? (
+                        <button
+                          onClick={onGoToColumns}
+                          className="mt-2 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-left cursor-pointer w-full"
+                          style={{ background: '#FFF8E1', color: '#F57F17', border: '1px solid #F57F1733' }}
+                        >
+                          Unknown column names detected — click here to map
+                        </button>
+                      ) : (
+                        <div
+                          className="mt-2 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold"
+                          style={{ background: '#FFF8E1', color: '#F57F17', border: '1px solid #F57F1733' }}
+                        >
+                          Unknown column names detected — your Data Manager needs to map them
+                        </div>
+                      )
                     )}
                   </div>
                 );

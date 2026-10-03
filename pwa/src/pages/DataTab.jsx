@@ -9,7 +9,7 @@ import { useAuth } from '../auth/AuthContext.jsx';
 const FAMILIES = [
   { id: 'rainfall',    label: 'Rainfall'    },
   { id: 'groundwater', label: 'Groundwater' },
-  { id: 'met',         label: 'Met'         },
+  { id: 'met',         label: 'Meteorological' },
 ];
 
 function formatDateTime(iso) {

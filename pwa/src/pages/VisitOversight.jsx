@@ -266,7 +266,7 @@ function AssignStationSheet({ station, technicians, onClose, onAssigned }) {
   );
 }
 
-export default function VisitOversight() {
+export default function VisitOversight({ onGoToColumns }) {
   const [visits,          setVisits]          = useState([]);
   const [overdueStations, setOverdueStations] = useState([]);
   const [technicians,     setTechnicians]     = useState([]);
@@ -578,6 +578,15 @@ export default function VisitOversight() {
                                     {f.date_range_start && ` · ${new Date(f.date_range_start).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' })}`}
                                   </div>
                                   {f.parse_error && <div className="text-[10px] text-error mt-0.5">{f.parse_error}</div>}
+                                  {f.has_unmapped_columns && (
+                                    <button
+                                      onClick={() => onGoToColumns?.()}
+                                      className="text-[10px] font-semibold mt-0.5 text-left bg-transparent border-none p-0 cursor-pointer"
+                                      style={{ color: '#F57F17', textDecoration: 'underline dotted' }}
+                                    >
+                                      Unknown column names detected — click here to map
+                                    </button>
+                                  )}
                                   {f.rainfall_status && (
                                     <div className="text-[10px] mt-0.5" style={{
                                       color: f.rainfall_status === 'done' ? '#2E7D32' : f.rainfall_status === 'error' ? '#C62828' : '#757575'

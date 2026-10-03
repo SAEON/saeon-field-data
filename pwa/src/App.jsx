@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { loadDraft, saveDraft, clearDraft } from './hooks/useDraftVisit.js';
-import { createVisit, submitVisit, abandonVisit } from './services/api.js';
+import { createVisit, submitVisit, abandonVisit, getVisit } from './services/api.js';
 import { useAuth } from './auth/AuthContext.jsx';
 import ProfileButton from './auth/ProfileSheet.jsx';
 import LoginPage from './pages/LoginPage.jsx';
@@ -262,7 +262,7 @@ function SubmitSheet({ draftVisit, visitFiles, hasReadings, onKeep, onConfirm, s
 }
 
 // ── Field PWA (shared by technicians, leads, and managers) ────────────────
-export function FieldApp({ onExit, embedded = false }) {
+export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDetected }) {
   const [activeTab,    setActiveTab]    = useState('stations');
   const [visitSection, setVisitSection] = useState('details');
   const [draftVisit,   setDraftVisit]   = useState(null);   // { visitId, station }
@@ -343,13 +343,39 @@ export function FieldApp({ onExit, embedded = false }) {
   // Save timer for debounced IDB writes
   const saveTimer = useRef(null);
 
-  // ── On mount: restore draft from IndexedDB ──────────────────────────────
   useEffect(() => {
-    loadDraft().then(draft => {
+    loadDraft().then(async draft => {
       if (draft) {
         setDraftVisit({ visitId: draft.visitId, station: draft.station });
         setFormState(draft.formState || null);
-        setVisitFiles(draft.files || []);
+        const restoredFiles = draft.files || [];
+        // Re-sync any already-uploaded files so hasUnmappedColumns + parseState are current
+        if (restoredFiles.some(f => f.dbId)) {
+          try {
+            const visit   = await getVisit(draft.visitId);
+            const dbFiles = visit.files || [];
+            const synced  = restoredFiles.map(f => {
+              if (!f.dbId) return f;
+              const db = dbFiles.find(d => d.id === f.dbId);
+              if (!db) return f;
+              return {
+                ...f,
+                parseState:         db.parse_status === 'parsed' ? 'parsed' : db.parse_status === 'error' ? 'error' : 'pending',
+                hasUnmappedColumns: db.has_unmapped_columns ?? false,
+                dateRange:          db.date_range_start ? `${db.date_range_start} — ${db.date_range_end}` : f.dateRange,
+                records:            db.record_count ?? f.records,
+                parseError:         db.parse_error  ?? null,
+                hasGap:             db.has_gap       ?? false,
+                gapDays:            db.gap_days      ?? null,
+              };
+            });
+            setVisitFiles(synced);
+          } catch {
+            setVisitFiles(restoredFiles);
+          }
+        } else {
+          setVisitFiles(restoredFiles);
+        }
         setActiveTab('visit');
       }
       setDraftLoading(false);
@@ -419,8 +445,6 @@ export function FieldApp({ onExit, embedded = false }) {
     try {
       await abandonVisit(draftVisit.visitId);
     } catch {
-      // If server call fails (e.g. offline), still clear locally —
-      // a stale draft visit on the server is preferable to a stuck UI.
     } finally {
       setAbandoning(false);
     }
@@ -459,11 +483,12 @@ export function FieldApp({ onExit, embedded = false }) {
   const visitBadge    = draftVisit ? 1 : 0;  // dot indicator when draft exists
 
   // Section completion
-  const detailsDone = detailsAllDone;
-  const filesDone   = hasFiles || loggerUnavailable;
-  const completionMap = { details: detailsDone, files: filesDone, readings: readingsDone };
+  const detailsDone      = detailsAllDone;
+  const filesDone        = hasFiles || loggerUnavailable;
+  const hasUnmappedFiles = visitFiles.some(f => f.hasUnmappedColumns);
+  const completionMap    = { details: detailsDone, files: filesDone, readings: readingsDone };
 
-  const canSubmit = draftVisit && detailsDone && filesDone && readingsDone;
+  const canSubmit = draftVisit && detailsDone && filesDone && readingsDone && !hasUnmappedFiles;
 
   if (draftLoading) {
     return (
@@ -589,6 +614,8 @@ export function FieldApp({ onExit, embedded = false }) {
                     setFiles={setVisitFiles}
                     dataFamily={draftVisit.station.data_family}
                     loggerUnavailable={loggerUnavailable}
+                    onGoToColumns={onGoToColumns}
+                    onUnmappedDetected={onUnmappedDetected}
                   />
                 )}
               </main>
@@ -600,10 +627,11 @@ export function FieldApp({ onExit, embedded = false }) {
                   disabled={!canSubmit}
                   className="cta-btn"
                 >
-                  {canSubmit ? 'Review & submit visit →'
-                    : !detailsDone   ? 'Complete site notes to continue'
-                    : !readingsDone  ? 'Complete manual readings to continue'
-                    : 'Upload a logger file to continue'  /* only shown when !loggerUnavailable */}
+                  {canSubmit       ? 'Review & submit visit →'
+                    : !detailsDone  ? 'Complete site notes to continue'
+                    : !readingsDone ? 'Complete manual readings to continue'
+                    : hasUnmappedFiles ? 'Map unknown column names before submitting'
+                    : 'Upload a logger file to continue'}
                 </button>
               </div>
             </>

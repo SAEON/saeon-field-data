@@ -277,7 +277,7 @@ async function getVisitFiles(visitId) {
     `SELECT id, original_name, file_format, parse_status, parse_error,
             date_range_start, date_range_end, record_count,
             has_gap, gap_days, stream_name, uploaded_at,
-            rainfall_status, rainfall_error
+            rainfall_status, rainfall_error, has_unmapped_columns
      FROM   uploaded_files
      WHERE  visit_id = $1
      ORDER  BY uploaded_at`,
@@ -1651,6 +1651,116 @@ async function getMetData(stationId, { from, to, phenomena, resolution }) {
   return result.rows;
 }
 
+async function getActiveColumnMappings() {
+  const result = await pool.query(`
+    SELECT cnm.raw_name, p.name AS phenomenon_name
+    FROM column_name_mappings cnm
+    JOIN phenomena p ON p.id = cnm.phenomenon_id
+    WHERE cnm.status = 'active'
+  `);
+  return Object.fromEntries(result.rows.map(r => [r.raw_name, r.phenomenon_name]));
+}
+
+async function upsertPendingColumnMapping(rawName, { dataFamily, sourceFileId, stationId, uzUnits, uzMeasure }) {
+  await pool.query(`
+    INSERT INTO column_name_mappings (raw_name, status, data_family, source_file_id, station_id, uz_units, uz_measure)
+    VALUES ($1, 'pending', $2, $3, $4, $5, $6)
+    ON CONFLICT (raw_name) DO UPDATE
+      SET source_file_id = EXCLUDED.source_file_id,
+          station_id     = EXCLUDED.station_id,
+          uz_units       = COALESCE(EXCLUDED.uz_units,   column_name_mappings.uz_units),
+          uz_measure     = COALESCE(EXCLUDED.uz_measure, column_name_mappings.uz_measure)
+      WHERE column_name_mappings.status = 'pending'
+  `, [rawName, dataFamily || null, sourceFileId || null, stationId || null, uzUnits || null, uzMeasure || null]);
+}
+
+async function flagFileUnmappedColumns(fileId) {
+  await pool.query(
+    `UPDATE uploaded_files SET has_unmapped_columns = true WHERE id = $1`,
+    [fileId]
+  );
+}
+
+async function clearFileUnmappedColumns(fileId) {
+  await pool.query(
+    `UPDATE uploaded_files SET has_unmapped_columns = false WHERE id = $1`,
+    [fileId]
+  );
+}
+
+async function getPendingColumnMappings() {
+  const result = await pool.query(`
+    SELECT cnm.id, cnm.raw_name, cnm.data_family, cnm.uz_units, cnm.uz_measure, cnm.created_at,
+           s.display_name AS station_name,
+           uf.original_name AS source_file_name
+    FROM column_name_mappings cnm
+    LEFT JOIN stations s        ON s.id  = cnm.station_id
+    LEFT JOIN uploaded_files uf ON uf.id = cnm.source_file_id
+    WHERE cnm.status = 'pending'
+    ORDER BY cnm.created_at DESC
+  `);
+  return result.rows;
+}
+
+async function resolveColumnMapping(id, { phenomenonId, resolvedBy }) {
+  const result = await pool.query(`
+    UPDATE column_name_mappings
+    SET status = 'active', phenomenon_id = $2, resolved_by = $3, resolved_at = NOW()
+    WHERE id = $1
+    RETURNING *
+  `, [id, phenomenonId, resolvedBy || null]);
+  return result.rows[0];
+}
+
+async function ignoreColumnMapping(id, resolvedBy) {
+  const result = await pool.query(`
+    UPDATE column_name_mappings
+    SET status = 'ignored', resolved_by = $2, resolved_at = NOW()
+    WHERE id = $1
+    RETURNING *
+  `, [id, resolvedBy || null]);
+  return result.rows[0];
+}
+
+async function getAllActiveMappings() {
+  const result = await pool.query(`
+    SELECT cnm.id, cnm.raw_name, cnm.data_family, cnm.uz_units, cnm.uz_measure,
+           cnm.node_arid, cnm.node_efteon, cnm.node_fynbos, cnm.node_gfw, cnm.node_ndlovu,
+           cnm.resolved_at, cnm.source_file_id,
+           p.id AS phenomenon_id, p.name AS phenomenon_name, p.display_name AS phenomenon_display,
+           p.phen_type, p.unit, p.measure,
+           s.display_name AS station_name,
+           u.display_name AS resolved_by_name
+    FROM column_name_mappings cnm
+    JOIN phenomena p ON p.id = cnm.phenomenon_id
+    LEFT JOIN stations s ON s.id = cnm.station_id
+    LEFT JOIN users u ON u.id = cnm.resolved_by
+    WHERE cnm.status = 'active'
+    ORDER BY cnm.raw_name
+  `);
+  return result.rows;
+}
+
+async function updateColumnMappingNodes(id, nodes) {
+  const result = await pool.query(`
+    UPDATE column_name_mappings
+    SET node_arid    = $2,
+        node_efteon  = $3,
+        node_fynbos  = $4,
+        node_gfw     = $5,
+        node_ndlovu  = $6
+    WHERE id = $1
+    RETURNING *
+  `, [id,
+    nodes.arid    ?? false,
+    nodes.efteon  ?? false,
+    nodes.fynbos  ?? false,
+    nodes.gfw     ?? false,
+    nodes.ndlovu  ?? false,
+  ]);
+  return result.rows[0];
+}
+
 module.exports = {
   // Stations
   getAllStations,
@@ -1760,4 +1870,14 @@ module.exports = {
   getCalibrationHistoryForStation,
   // Met data
   getMetData,
+  // Column name mappings
+  getActiveColumnMappings,
+  upsertPendingColumnMapping,
+  flagFileUnmappedColumns,
+  clearFileUnmappedColumns,
+  getPendingColumnMappings,
+  resolveColumnMapping,
+  ignoreColumnMapping,
+  getAllActiveMappings,
+  updateColumnMappingNodes,
 };

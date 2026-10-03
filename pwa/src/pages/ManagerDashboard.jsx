@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getDashboardStations, getFilesWithErrors, deleteFile, getStationCalibrationHistory } from '../services/api.js';
+import { getDashboardStations, getFilesWithErrors, deleteFile, getStationCalibrationHistory, getPendingColumnMappings, resolveColumnMapping, ignoreColumnMapping, getAllPhenomena, getActiveMappings, updateColumnMappingNodes } from '../services/api.js';
 import UserManagement    from './UserManagement.jsx';
 import DataTab from './DataTab.jsx';
 import VisitOversight    from './VisitOversight.jsx';
@@ -380,6 +380,663 @@ export function ErrorsTab({ canDelete = true }) {
   );
 }
 
+// ── Pheno Standard panel ──────────────────────────────────────────────────────
+
+const NODES = ['arid', 'efteon', 'fynbos', 'gfw', 'ndlovu'];
+const NODE_LABELS = { arid: 'Arid', efteon: 'EFTEON', fynbos: 'Fynbos', gfw: 'GFW', ndlovu: 'Ndlovu' };
+const PANEL_TABS = [
+  { id: 'pending',  label: 'Pending'        },
+  { id: 'active',   label: 'Active Mappings' },
+  { id: 'phenomena', label: 'Phenomena'      },
+];
+
+function NodeToggle({ label, active, onChange }) {
+  return (
+    <button
+      onClick={() => onChange(!active)}
+      style={{
+        fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 10,
+        border: `1.5px solid ${active ? 'var(--color-navy)' : 'var(--color-border)'}`,
+        background: active ? 'var(--color-navy)' : 'transparent',
+        color: active ? 'white' : 'var(--color-text-light)',
+        cursor: 'pointer', whiteSpace: 'nowrap',
+      }}
+    >{label}</button>
+  );
+}
+
+const AM_PAGE_SIZES = [25, 50, 100];
+
+function NodeCheck({ active, onChange }) {
+  return (
+    <button
+      onClick={() => onChange(!active)}
+      title={active ? 'Remove node' : 'Assign node'}
+      style={{
+        width: 18, height: 18, borderRadius: 4, cursor: 'pointer',
+        border: `1.5px solid ${active ? 'var(--color-navy)' : 'var(--color-border)'}`,
+        background: active ? 'var(--color-navy)' : 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+      }}
+    >
+      {active && <span style={{ color: 'white', fontSize: 10, lineHeight: 1 }}>✓</span>}
+    </button>
+  );
+}
+
+const FAMILY_LABELS = { met: 'Meteorological', groundwater: 'Groundwater', rainfall: 'Rainfall' };
+function familyLabel(f) { return FAMILY_LABELS[f] || f || '—'; }
+
+function downloadCSV(rows) {
+  const headers = ['raw_name', 'phenomenon_name', 'data_family', 'uz_units', 'uz_measure', 'nodes', 'mapped_date'];
+  const lines = [
+    headers.join(','),
+    ...rows.map(r => {
+      const activeNodes = NODES.filter(n => r[`node_${n}`]).map(n => NODE_LABELS[n]).join(', ');
+      return [
+        r.raw_name, r.phenomenon_name, familyLabel(r.data_family),
+        r.uz_units || '', r.uz_measure || '',
+        activeNodes,
+        r.resolved_at ? new Date(r.resolved_at).toLocaleDateString('en-ZA') : '',
+      ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+    }),
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `pheno_standard_synonyms_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function ActiveMappingsTable({ rows, onNodeChange, onNodeSave, getNodeState, nodeEdits, saving }) {
+  const [search,   setSearch]   = useState('');
+  const [family,   setFamily]   = useState('all');
+  const [nodeFilter, setNodeFilter] = useState('all');
+  const [page,     setPage]     = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  const families = ['all', ...Array.from(new Set(rows.map(r => r.data_family).filter(Boolean))).sort()];
+
+  const filtered = rows.filter(r => {
+    if (family !== 'all' && r.data_family !== family) return false;
+    if (nodeFilter !== 'all' && !r[`node_${nodeFilter}`]) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return r.raw_name.toLowerCase().includes(q) || r.phenomenon_name.toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pageRows  = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+  function handleFilterChange(fn) {
+    fn();
+    setPage(1);
+  }
+
+  const thStyle = {
+    padding: '6px 8px', textAlign: 'left', fontSize: 10, fontWeight: 700,
+    color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.05em',
+    borderBottom: '1.5px solid var(--color-border)', whiteSpace: 'nowrap', background: 'var(--color-surface)',
+  };
+  const tdStyle = { padding: '6px 8px', fontSize: 12, borderBottom: '1px solid var(--color-border)', verticalAlign: 'middle' };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+      {/* Info banner */}
+      <div style={{
+        background: '#EBF2FB', border: '1px solid #C5D9F1', borderRadius: 8,
+        padding: '8px 12px', fontSize: 12, color: '#1A3A5C', lineHeight: 1.5,
+      }}>
+        These column names are recognised automatically in all future uploads.
+        {rows.length > 0 && <span style={{ marginLeft: 6, fontWeight: 600 }}>{rows.length} synonym{rows.length !== 1 ? 's' : ''} active.</span>}
+        <span style={{ display: 'block', marginTop: 2, fontSize: 11, color: '#4A7AB5' }}>
+          Use the node checkboxes to mark which SAEON research nodes use each synonym.
+        </span>
+      </div>
+
+      {/* Toolbar */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="text" placeholder="Search synonyms…" value={search}
+          onChange={e => handleFilterChange(() => setSearch(e.target.value))}
+          style={{
+            fontSize: 12, padding: '5px 10px', borderRadius: 8, flex: '0 1 220px',
+            border: '1.5px solid var(--color-border)', background: 'var(--color-surface)',
+            color: 'var(--color-text-dark)',
+          }}
+        />
+        <select value={family} onChange={e => handleFilterChange(() => setFamily(e.target.value))}
+          style={{ fontSize: 12, padding: '5px 8px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text-dark)' }}>
+          <option value="all">All families</option>
+          {families.filter(f => f !== 'all').map(f => <option key={f} value={f}>{familyLabel(f)}</option>)}
+        </select>
+        <select value={nodeFilter} onChange={e => handleFilterChange(() => setNodeFilter(e.target.value))}
+          style={{ fontSize: 12, padding: '5px 8px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text-dark)' }}>
+          <option value="all">All nodes</option>
+          {NODES.map(n => <option key={n} value={n}>{NODE_LABELS[n]}</option>)}
+        </select>
+        <button
+          onClick={() => downloadCSV(filtered)}
+          style={{
+            fontSize: 11, fontWeight: 600, padding: '5px 12px', borderRadius: 8,
+            border: '1.5px solid var(--color-border)', background: 'var(--color-surface)',
+            color: 'var(--color-text-med)', cursor: 'pointer', whiteSpace: 'nowrap',
+          }}
+        >↓ Export CSV</button>
+      </div>
+
+      {rows.length === 0 && (
+        <div style={{ textAlign: 'center', paddingTop: 40, fontSize: 13, color: 'var(--color-text-light)' }}>
+          No active mappings yet
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <>
+          <div style={{ overflowX: 'auto', borderRadius: 10, border: '1px solid var(--color-border)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Raw name (in file)</th>
+                  <th style={thStyle}>Standard name</th>
+                  <th style={thStyle}>Family</th>
+                  <th style={thStyle}>Units</th>
+                  <th style={thStyle}>Measure</th>
+                  {NODES.map(n => (
+                    <th key={n} style={{ ...thStyle, textAlign: 'center', minWidth: 52 }}>{NODE_LABELS[n]}</th>
+                  ))}
+                  <th style={thStyle}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.length === 0 && (
+                  <tr>
+                    <td colSpan={10} style={{ ...tdStyle, textAlign: 'center', color: 'var(--color-text-light)', padding: '24px 8px' }}>
+                      No results match your filters
+                    </td>
+                  </tr>
+                )}
+                {pageRows.map(row => {
+                  const isDirty  = !!nodeEdits[row.id];
+                  const isSaving = saving[`node_${row.id}`];
+                  return (
+                    <tr key={row.id} style={{ background: isDirty ? '#F0F4FF' : 'transparent' }}>
+                      <td style={tdStyle}>
+                        <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--color-navy)' }}>{row.raw_name}</span>
+                      </td>
+                      <td style={tdStyle}>
+                        <span style={{ fontFamily: 'monospace', color: 'var(--color-text-dark)' }}>{row.phenomenon_name}</span>
+                      </td>
+                      <td style={{ ...tdStyle, color: 'var(--color-text-med)' }}>
+                        {familyLabel(row.data_family)}
+                      </td>
+                      <td style={{ ...tdStyle, fontFamily: 'monospace', color: 'var(--color-text-light)' }}>{row.uz_units || '—'}</td>
+                      <td style={{ ...tdStyle, fontFamily: 'monospace', color: 'var(--color-text-light)' }}>{row.uz_measure || '—'}</td>
+                      {NODES.map(n => (
+                        <td key={n} style={{ ...tdStyle, textAlign: 'center' }}>
+                          <NodeCheck
+                            active={getNodeState(row, n)}
+                            onChange={v => onNodeChange(row, n, v)}
+                          />
+                        </td>
+                      ))}
+                      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+                        {isDirty && (
+                          <button
+                            disabled={isSaving}
+                            onClick={() => onNodeSave(row)}
+                            style={{
+                              fontSize: 10, fontWeight: 700, padding: '2px 10px', borderRadius: 6,
+                              background: 'var(--color-navy)', color: 'white',
+                              border: 'none', cursor: 'pointer', opacity: isSaving ? 0.6 : 1,
+                            }}
+                          >{isSaving ? '…' : 'Save'}</button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              {page > 1 && (
+                <button onClick={() => setPage(p => p - 1)} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, border: '1.5px solid var(--color-border)', background: 'white', cursor: 'pointer' }}>‹ Prev</button>
+              )}
+              <span style={{ fontSize: 11, color: 'var(--color-text-light)' }}>
+                {filtered.length === 0 ? '0' : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, filtered.length)}`} of {filtered.length}
+              </span>
+              {page < pageCount && (
+                <button onClick={() => setPage(p => p + 1)} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, border: '1.5px solid var(--color-border)', background: 'white', cursor: 'pointer' }}>Next ›</button>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {AM_PAGE_SIZES.map(s => (
+                <button key={s} onClick={() => { setPageSize(s); setPage(1); }} style={{
+                  fontSize: 11, padding: '3px 10px', borderRadius: 20,
+                  border: `1.5px solid ${pageSize === s ? 'var(--color-navy)' : 'var(--color-border)'}`,
+                  background: pageSize === s ? 'var(--color-navy)' : 'white',
+                  color: pageSize === s ? 'white' : 'var(--color-text-med)', cursor: 'pointer',
+                }}>{s}</button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const MEASURE_LABELS = { avg: 'Average', tot: 'Total', min: 'Minimum', max: 'Maximum', smp: 'Sample', sd: 'Std dev' };
+
+function PhenomenaTable({ rows }) {
+  const [search,    setSearch]    = useState('');
+  const [famFilter, setFamFilter] = useState('all');
+  const [page,      setPage]      = useState(1);
+  const [pageSize,  setPageSize]  = useState(25);
+
+  const families = ['all', ...Array.from(new Set(rows.map(r => r.data_family).filter(Boolean))).sort()];
+
+  const filtered = rows.filter(r => {
+    if (famFilter !== 'all' && r.data_family !== famFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return r.name.toLowerCase().includes(q) ||
+             (r.display_name || '').toLowerCase().includes(q) ||
+             (r.phen_type || '').toLowerCase().includes(q);
+    }
+    return true;
+  }).sort((a, b) => (a.phen_type || '').localeCompare(b.phen_type || '') || a.name.localeCompare(b.name));
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pageRows  = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+  const byType = pageRows.reduce((acc, p) => {
+    const key = p.phen_type || 'Other';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(p);
+    return acc;
+  }, {});
+
+  const isFiltered = !!(search || famFilter !== 'all');
+
+  function handleFilterChange(fn) { fn(); setPage(1); }
+
+  const thStyle = {
+    padding: '6px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700,
+    color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.05em',
+    borderBottom: '1.5px solid var(--color-border)', background: 'var(--color-surface)',
+    whiteSpace: 'nowrap',
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+      {/* Toolbar */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="text" placeholder="Search phenomena…" value={search}
+          onChange={e => handleFilterChange(() => setSearch(e.target.value))}
+          style={{
+            fontSize: 12, padding: '5px 10px', borderRadius: 8, flex: '0 1 220px',
+            border: '1.5px solid var(--color-border)', background: 'var(--color-surface)',
+            color: 'var(--color-text-dark)',
+          }}
+        />
+        <select value={famFilter} onChange={e => handleFilterChange(() => setFamFilter(e.target.value))}
+          style={{ fontSize: 12, padding: '5px 8px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text-dark)' }}>
+          <option value="all">All families</option>
+          {families.filter(f => f !== 'all').map(f => <option key={f} value={f}>{familyLabel(f)}</option>)}
+        </select>
+        {isFiltered && (
+          <button onClick={() => { setSearch(''); setFamFilter('all'); setPage(1); }}
+            style={{ fontSize: 11, color: 'var(--color-navy)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+            Clear
+          </button>
+        )}
+        <button
+          onClick={() => {
+            const headers = ['name', 'display_name', 'phen_type', 'data_family', 'unit', 'measure'];
+            const lines = [
+              headers.join(','),
+              ...filtered.map(p => [
+                p.name, p.display_name || '', p.phen_type || '',
+                familyLabel(p.data_family), p.unit || '', MEASURE_LABELS[p.measure] || p.measure || '',
+              ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')),
+            ];
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `phenomena_standard_${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+          }}
+          style={{
+            fontSize: 11, fontWeight: 600, padding: '5px 12px', borderRadius: 8,
+            border: '1.5px solid var(--color-border)', background: 'var(--color-surface)',
+            color: 'var(--color-text-med)', cursor: 'pointer', whiteSpace: 'nowrap',
+          }}
+        >↓ Export CSV</button>
+      </div>
+
+      {filtered.length === 0 && (
+        <div style={{ textAlign: 'center', paddingTop: 32, fontSize: 13, color: 'var(--color-text-light)' }}>
+          No phenomena match your search
+        </div>
+      )}
+
+      {filtered.length > 0 && (
+        <div style={{ overflowX: 'auto', borderRadius: 10, border: '1px solid var(--color-border)', marginBottom: 2 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Name</th>
+                <th style={thStyle}>Label</th>
+                <th style={thStyle}>Family</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>Unit</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>Measure</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(byType).sort(([a], [b]) => a.localeCompare(b)).map(([type, phens]) => (
+                <>
+                  {/* Group header row */}
+                  <tr key={`grp_${type}`}>
+                    <td colSpan={5} style={{
+                      padding: '6px 12px', background: '#F2F4F8',
+                      borderTop: '1px solid var(--color-border)',
+                      borderBottom: '1px solid var(--color-border)',
+                      fontSize: 10, fontWeight: 700, color: 'var(--color-text-light)',
+                      textTransform: 'uppercase', letterSpacing: '0.06em',
+                    }}>
+                      {type}
+                    </td>
+                  </tr>
+                  {/* Phenomenon rows */}
+                  {phens.sort((a, b) => a.name.localeCompare(b.name)).map((p, i) => (
+                    <tr key={p.id} style={{ background: i % 2 === 0 ? 'white' : '#FAFBFC' }}>
+                      <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-navy)', whiteSpace: 'nowrap' }}>
+                        {p.name}
+                      </td>
+                      <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-med)' }}>
+                        {p.display_name || '—'}
+                      </td>
+                      <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-light)', fontSize: 11 }}>
+                        {familyLabel(p.data_family)}
+                      </td>
+                      <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', textAlign: 'right', color: 'var(--color-text-med)', fontFamily: 'monospace', fontSize: 11 }}>
+                        {p.unit || '—'}
+                      </td>
+                      <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', textAlign: 'right', color: 'var(--color-text-light)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                        {MEASURE_LABELS[p.measure] || p.measure || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Pagination */}
+      {filtered.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            {page > 1 && (
+              <button onClick={() => setPage(p => p - 1)} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, border: '1.5px solid var(--color-border)', background: 'white', cursor: 'pointer' }}>‹ Prev</button>
+            )}
+            <span style={{ fontSize: 11, color: 'var(--color-text-light)' }}>
+              {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filtered.length)} of {filtered.length}
+            </span>
+            {page < pageCount && (
+              <button onClick={() => setPage(p => p + 1)} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, border: '1.5px solid var(--color-border)', background: 'white', cursor: 'pointer' }}>Next ›</button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {AM_PAGE_SIZES.map(s => (
+              <button key={s} onClick={() => { setPageSize(s); setPage(1); }} style={{
+                fontSize: 11, padding: '3px 10px', borderRadius: 20,
+                border: `1.5px solid ${pageSize === s ? 'var(--color-navy)' : 'var(--color-border)'}`,
+                background: pageSize === s ? 'var(--color-navy)' : 'white',
+                color: pageSize === s ? 'white' : 'var(--color-text-med)', cursor: 'pointer',
+              }}>{s}</button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PhenoStandardPanel({ onCountChange }) {
+  const [panelTab,   setPanelTab]   = useState('pending');
+  const [pending,    setPending]    = useState([]);
+  const [active,     setActive]     = useState([]);
+  const [phenomena,  setPhenomena]  = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [selected,   setSelected]   = useState({});
+  const [saving,     setSaving]     = useState({});
+  const [nodeEdits,  setNodeEdits]  = useState({});
+
+  function reload() {
+    setLoading(true);
+    Promise.all([getPendingColumnMappings(), getActiveMappings(), getAllPhenomena()])
+      .then(([pend, act, phens]) => {
+        setPending(pend);
+        setActive(act);
+        setPhenomena(phens);
+        onCountChange?.(pend.length);
+      })
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => { reload(); }, []);
+
+  function removePending(id) {
+    setPending(r => {
+      const next = r.filter(row => row.id !== id);
+      onCountChange?.(next.length);
+      return next;
+    });
+  }
+
+  async function handleResolve(id) {
+    const phenId = selected[id];
+    if (!phenId) return;
+    setSaving(s => ({ ...s, [id]: true }));
+    try {
+      await resolveColumnMapping(id, parseInt(phenId, 10));
+      removePending(id);
+      reload();
+    } finally {
+      setSaving(s => ({ ...s, [id]: false }));
+    }
+  }
+
+  async function handleIgnore(id) {
+    setSaving(s => ({ ...s, [id]: true }));
+    try {
+      await ignoreColumnMapping(id);
+      removePending(id);
+    } finally {
+      setSaving(s => ({ ...s, [id]: false }));
+    }
+  }
+
+  async function handleNodeSave(row) {
+    const edits = nodeEdits[row.id];
+    if (!edits) return;
+    setSaving(s => ({ ...s, [`node_${row.id}`]: true }));
+    try {
+      const updated = await updateColumnMappingNodes(row.id, edits);
+      setActive(a => a.map(r => r.id === row.id ? { ...r, ...updated } : r));
+      setNodeEdits(e => { const n = { ...e }; delete n[row.id]; return n; });
+    } finally {
+      setSaving(s => ({ ...s, [`node_${row.id}`]: false }));
+    }
+  }
+
+  function getNodeState(row, node) {
+    return nodeEdits[row.id]
+      ? (nodeEdits[row.id][node] ?? false)
+      : (row[`node_${node}`] ?? false);
+  }
+
+  function setNode(row, node, val) {
+    const current = NODES.reduce((acc, n) => ({
+      ...acc, [n]: nodeEdits[row.id]?.[n] ?? row[`node_${n}`] ?? false,
+    }), {});
+    setNodeEdits(e => ({ ...e, [row.id]: { ...current, [node]: val } }));
+  }
+
+  const cardStyle = {
+    background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+    borderRadius: 12, padding: '12px 14px', marginBottom: 10,
+  };
+
+  const subLabelStyle = { fontSize: 10, color: 'var(--color-text-light)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 };
+
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <AppBar title="Phenomenon Standard" subtitle={pending.length > 0 ? `${pending.length} pending` : 'All mapped'} />
+
+      {/* Panel tab strip */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface)', flexShrink: 0 }}>
+        {PANEL_TABS.map(t => (
+          <button key={t.id} onClick={() => setPanelTab(t.id)} style={{
+            flex: 1, padding: '9px 0', fontSize: 12,
+            fontWeight: panelTab === t.id ? 700 : 500,
+            color: panelTab === t.id ? 'var(--color-navy)' : 'var(--color-text-light)',
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            borderBottom: panelTab === t.id ? '2px solid var(--color-navy)' : '2px solid transparent',
+            position: 'relative',
+          }}>
+            {t.label}
+            {t.id === 'pending' && pending.length > 0 && (
+              <span style={{
+                position: 'absolute', top: 4, right: 6,
+                background: '#C62828', color: 'white',
+                fontSize: 9, fontWeight: 700, lineHeight: 1,
+                padding: '2px 4px', borderRadius: 8, minWidth: 14, textAlign: 'center',
+              }}>{pending.length}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto" style={{ padding: '12px 16px' }}>
+        {loading && <p style={{ fontSize: 13, color: 'var(--color-text-light)' }}>Loading…</p>}
+
+        {/* ── Pending tab ─────────────────────────────────────────────────── */}
+        {!loading && panelTab === 'pending' && (
+          <>
+            {pending.length === 0 && (
+              <div style={{ textAlign: 'center', paddingTop: 40, fontSize: 13, color: 'var(--color-text-light)' }}>
+                All column names are recognised
+              </div>
+            )}
+            {pending.map(row => (
+              <div key={row.id} style={cardStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                  <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--color-navy)' }}>
+                    {row.raw_name}
+                  </span>
+                  {row.data_family && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 8,
+                      background: '#FFF3E0', color: '#E65100',
+                    }}>{row.data_family}</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-light)', marginBottom: 6 }}>
+                  {row.station_name && <span>{row.station_name}</span>}
+                  {row.source_file_name && <span style={{ marginLeft: 8, opacity: 0.7 }}>· {row.source_file_name}</span>}
+                </div>
+                {(row.uz_units || row.uz_measure) && (
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+                    {row.uz_units && (
+                      <div>
+                        <div style={subLabelStyle}>Units (in file)</div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--color-text-dark)' }}>{row.uz_units}</div>
+                      </div>
+                    )}
+                    {row.uz_measure && (
+                      <div>
+                        <div style={subLabelStyle}>Measure (in file)</div>
+                        <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--color-text-dark)' }}>{row.uz_measure}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <select
+                    value={selected[row.id] || ''}
+                    onChange={e => setSelected(s => ({ ...s, [row.id]: e.target.value }))}
+                    style={{
+                      flex: 1, fontSize: 12, padding: '4px 8px', borderRadius: 8,
+                      border: '1.5px solid var(--color-border)', background: 'var(--color-surface)',
+                      color: 'var(--color-text-dark)',
+                    }}
+                  >
+                    <option value="">Select phenomenon…</option>
+                    {phenomena.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}{p.phen_type ? ` — ${p.phen_type}` : ''}</option>
+                    ))}
+                  </select>
+                  <button
+                    disabled={!selected[row.id] || saving[row.id]}
+                    onClick={() => handleResolve(row.id)}
+                    style={{
+                      padding: '4px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                      background: selected[row.id] ? 'var(--color-navy)' : 'var(--color-border)',
+                      color: selected[row.id] ? 'white' : 'var(--color-text-light)',
+                      border: 'none', cursor: selected[row.id] ? 'pointer' : 'default',
+                    }}
+                  >Map</button>
+                  <button
+                    disabled={saving[row.id]}
+                    onClick={() => handleIgnore(row.id)}
+                    style={{
+                      padding: '4px 10px', borderRadius: 8, fontSize: 12,
+                      background: 'transparent', color: 'var(--color-text-light)',
+                      border: '1px solid var(--color-border)', cursor: 'pointer',
+                    }}
+                  >Ignore</button>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* ── Active Mappings tab ──────────────────────────────────────────── */}
+        {!loading && panelTab === 'active' && (
+          <ActiveMappingsTable
+            rows={active}
+            onNodeChange={(row, node, val) => setNode(row, node, val)}
+            onNodeSave={handleNodeSave}
+            getNodeState={getNodeState}
+            nodeEdits={nodeEdits}
+            saving={saving}
+          />
+        )}
+
+        {/* ── Phenomena tab ────────────────────────────────────────────────── */}
+        {!loading && panelTab === 'phenomena' && (
+          <PhenomenaTable rows={phenomena} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Dashboard shell ───────────────────────────────────────────────────────────
 
 const TABS = [
@@ -388,18 +1045,26 @@ const TABS = [
   { id: 'history',  label: 'History',  icon: '≡' },
   { id: 'stations', label: 'Stations', icon: '⊞' },
   { id: 'errors',   label: 'Errors',   icon: '⚠' },
+  { id: 'columns',  label: 'Pheno Std', icon: '⌗' },
   { id: 'data',     label: 'Data',     icon: '≀' },
   { id: 'users',    label: 'Users',    icon: '◎' },
   { id: 'field',    label: 'Field',    icon: '⊕' },
 ];
 
 export default function ManagerDashboard() {
-  const [activeTab, setActiveTab] = useState('network');
+  const [activeTab,        setActiveTab]        = useState('network');
+  const [pendingColCount,  setPendingColCount]  = useState(null);
+
+  useEffect(() => {
+    getPendingColumnMappings()
+      .then(rows => setPendingColCount(rows.length))
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="flex flex-col min-h-dvh app-layout">
       {activeTab === 'network'  && <NetworkTab />}
-      {activeTab === 'visits'   && <VisitOversight />}
+      {activeTab === 'visits'   && <VisitOversight onGoToColumns={() => setActiveTab('columns')} />}
       {activeTab === 'history'  && (
         <div className="flex flex-col flex-1 overflow-hidden">
           <header className="bg-navy h-14 flex items-center px-4 shrink-0">
@@ -414,9 +1079,10 @@ export default function ManagerDashboard() {
       )}
       {activeTab === 'stations' && <StationRegistry />}
       {activeTab === 'errors'   && <ErrorsTab />}
+      {activeTab === 'columns'  && <PhenoStandardPanel onCountChange={setPendingColCount} />}
       {activeTab === 'data'     && <DataTab />}
       {activeTab === 'users'    && <UserManagement />}
-      {activeTab === 'field'    && <FieldApp embedded={true} />}
+      {activeTab === 'field'    && <FieldApp embedded={true} onGoToColumns={() => setActiveTab('columns')} onUnmappedDetected={() => getPendingColumnMappings().then(r => setPendingColCount(r.length)).catch(() => {})} />}
 
       <nav className="bottom-tab-bar shrink-0">
         <div className="sidebar-brand">
@@ -432,9 +1098,21 @@ export default function ManagerDashboard() {
             onClick={() => setActiveTab(tab.id)}
             data-active={activeTab === tab.id ? 'true' : undefined}
             className="tab-btn"
+            style={{ position: 'relative' }}
           >
             <span className="tab-icon">{tab.icon}</span>
             <span>{tab.label}</span>
+            {tab.id === 'columns' && pendingColCount > 0 && (
+              <span style={{
+                position: 'absolute', top: 4, right: 4,
+                background: '#C62828', color: 'white',
+                fontSize: 9, fontWeight: 700, lineHeight: 1,
+                padding: '2px 4px', borderRadius: 8,
+                minWidth: 14, textAlign: 'center',
+              }}>
+                {pendingColCount}
+              </span>
+            )}
           </button>
         ))}
       </nav>

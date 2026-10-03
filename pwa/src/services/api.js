@@ -355,3 +355,37 @@ export function createCalibrationCheck(visitId, data) {
 export function getCalibrationChecks(visitId) {
   return request(`/api/visits/${visitId}/calibration-checks`);
 }
+
+export function getAllPhenomena() {
+  return request('/api/phenomena');
+}
+
+export function getPendingColumnMappings() {
+  return request('/api/column-mappings/pending');
+}
+
+export function resolveColumnMapping(id, phenomenonId) {
+  return request(`/api/column-mappings/${id}/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phenomenon_id: phenomenonId }),
+  });
+}
+
+export function ignoreColumnMapping(id) {
+  return request(`/api/column-mappings/${id}/ignore`, {
+    method: 'POST',
+  });
+}
+
+export function getActiveMappings() {
+  return request('/api/column-mappings/active');
+}
+
+export function updateColumnMappingNodes(id, nodes) {
+  return request(`/api/column-mappings/${id}/nodes`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(nodes),
+  });
+}
