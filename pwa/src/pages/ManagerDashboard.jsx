@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getDashboardStations, getFilesWithErrors, deleteFile, getStationCalibrationHistory, getPendingColumnMappings, resolveColumnMapping, ignoreColumnMapping, getAllPhenomena, getActiveMappings, updateColumnMappingNodes } from '../services/api.js';
+import { getDashboardStations, getFilesWithErrors, deleteFile, getStationCalibrationHistory, getPendingColumnMappings, resolveColumnMapping, ignoreColumnMapping, getAllPhenomena, getActiveMappings, updateColumnMappingNodes, createPhenomenon } from '../services/api.js';
 import UserManagement    from './UserManagement.jsx';
 import DataTab from './DataTab.jsx';
 import VisitOversight    from './VisitOversight.jsx';
@@ -385,9 +385,9 @@ export function ErrorsTab({ canDelete = true }) {
 const NODES = ['arid', 'efteon', 'fynbos', 'gfw', 'ndlovu'];
 const NODE_LABELS = { arid: 'Arid', efteon: 'EFTEON', fynbos: 'Fynbos', gfw: 'GFW', ndlovu: 'Ndlovu' };
 const PANEL_TABS = [
-  { id: 'pending',  label: 'Pending'        },
-  { id: 'active',   label: 'Active Mappings' },
   { id: 'phenomena', label: 'Phenomena'      },
+  { id: 'pending',   label: 'Pending'        },
+  { id: 'active',    label: 'Active Mappings' },
 ];
 
 function NodeToggle({ label, active, onChange }) {
@@ -634,13 +634,87 @@ function ActiveMappingsTable({ rows, onNodeChange, onNodeSave, getNodeState, nod
   );
 }
 
-const MEASURE_LABELS = { avg: 'Average', tot: 'Total', min: 'Minimum', max: 'Maximum', smp: 'Sample', sd: 'Std dev' };
+const MEASURE_LABELS = { avg: 'Average', cumm: 'Cumulative', event: 'Event', logi: 'Logical', max: 'Maximum', min: 'Minimum', mode: 'Mode', sd: 'Std dev', smp: 'Sample', text: 'Text', tot: 'Total' };
 
-function PhenomenaTable({ rows }) {
+const PHEN_TYPES = [
+  'Albedo',
+  'Battery level',
+  'Bowen ratio',
+  'Carbon dioxide',
+  'Daytime',
+  'Electroconductivity',
+  'Evapotranspiration',
+  'Humidity, relative',
+  'Interference event',
+  'Latitude',
+  'Leaf wetness',
+  'Logger serial number',
+  'Longitude',
+  'Moisture, soil',
+  'Moisture, soil, pulse time',
+  'Ping duration',
+  'Precipitation',
+  'Pressure, ambient vapour',
+  'Pressure, atmosphere',
+  'Pressure, saturation vapour',
+  'Pressure, vapour deficit',
+  'Program name',
+  'Program signature',
+  'Radiation, long wave incoming',
+  'Radiation, long wave outgoing',
+  'Radiation, net',
+  'Radiation, short wave incoming',
+  'Radiation, short wave outgoing',
+  'Radiation, solar',
+  'Radiation, ultra violet',
+  'Radiation, ultra violet dose',
+  'Radiation, ultra violet index',
+  'Record identification',
+  'Scan, count',
+  'Signal strength',
+  'Temperature, air',
+  'Temperature, dew point',
+  'Temperature, ground level',
+  'Temperature, logger',
+  'Temperature, soil',
+  'Temperature, water',
+  'Timestamp',
+  'Water level',
+  'Water vapour, density',
+  'Water vapour, mass density',
+  'Water vapour, mix ratio',
+  'Water vapour, mole fraction',
+  'Wind direction',
+  'Wind speed',
+];
+
+const UNITS = [
+  '°C', '%', 'hPa', 'W/m²', 'µW/cm²', 'm/s', '°', 'mm', 'm',
+  'm³/m³', 'µS/cm', 'mV', 'V', 'mm/hr', 'kPa', '-',
+];
+
+const VAR_TYPES = [
+  { code: 'chr',      label: 'Character string' },
+  { code: 'difftime', label: 'Difference in time' },
+  { code: 'fac',      label: 'Factor' },
+  { code: 'int',      label: 'Integer' },
+  { code: 'logi',     label: 'Logical' },
+  { code: 'num',      label: 'Numeric' },
+  { code: 'posix',    label: 'Date / time (POSIX)' },
+  { code: 'text',     label: 'Text' },
+];
+
+const BLANK_ADD_FORM = { name: '', display_name: '', phen_type: '', data_family: 'met', unit: '°C', measure: 'avg', var_type: 'num' };
+
+function PhenomenaTable({ rows, onAdd }) {
   const [search,    setSearch]    = useState('');
   const [famFilter, setFamFilter] = useState('all');
   const [page,      setPage]      = useState(1);
   const [pageSize,  setPageSize]  = useState(25);
+  const [showAdd,   setShowAdd]   = useState(false);
+  const [addForm,   setAddForm]   = useState(BLANK_ADD_FORM);
+  const [addErr,    setAddErr]    = useState(null);
+  const [addSaving, setAddSaving] = useState(false);
 
   const families = ['all', ...Array.from(new Set(rows.map(r => r.data_family).filter(Boolean))).sort()];
 
@@ -668,6 +742,24 @@ function PhenomenaTable({ rows }) {
   const isFiltered = !!(search || famFilter !== 'all');
 
   function handleFilterChange(fn) { fn(); setPage(1); }
+
+  async function handleAddSave() {
+    setAddErr(null);
+    if (!addForm.name.trim()) { setAddErr('Name is required.'); return; }
+    if (!/^[a-z][a-z0-9_]*_[a-z0-9]+$/.test(addForm.name)) { setAddErr('Name must be lowercase with underscores — e.g. temp_air_avg.'); return; }
+    if (!addForm.display_name.trim()) { setAddErr('Label is required.'); return; }
+    setAddSaving(true);
+    try {
+      const row = await createPhenomenon(addForm);
+      onAdd(row);
+      setAddForm(BLANK_ADD_FORM);
+      setShowAdd(false);
+    } catch (err) {
+      setAddErr(err.message || 'Failed to save');
+    } finally {
+      setAddSaving(false);
+    }
+  }
 
   const thStyle = {
     padding: '6px 12px', textAlign: 'left', fontSize: 10, fontWeight: 700,
@@ -724,7 +816,92 @@ function PhenomenaTable({ rows }) {
             color: 'var(--color-text-med)', cursor: 'pointer', whiteSpace: 'nowrap',
           }}
         >↓ Export CSV</button>
+        <button
+          onClick={() => { setShowAdd(v => !v); setAddErr(null); setAddForm(BLANK_ADD_FORM); }}
+          style={{
+            fontSize: 12, fontWeight: 700, padding: '5px 14px', borderRadius: 8,
+            border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', marginLeft: 'auto',
+            background: showAdd ? 'var(--color-text-med)' : 'var(--color-navy)',
+            color: 'white',
+          }}
+        >{showAdd ? '✕ Cancel' : '+ Add Phenomenon'}</button>
       </div>
+
+      {/* Add Phenomenon form */}
+      {showAdd && (
+        <div style={{
+          border: '1.5px solid var(--color-navy)', borderRadius: 10,
+          padding: '14px 16px', background: '#F8F9FB', display: 'flex', flexDirection: 'column', gap: 12,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-navy)' }}>Add Phenomenon</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 14px' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+              <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Label</span>
+              <input type="text" value={addForm.display_name}
+                onChange={e => setAddForm(f => ({ ...f, display_name: e.target.value }))}
+                placeholder="e.g. Air Temperature Average"
+                style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+              <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Name</span>
+              <input type="text" value={addForm.name}
+                onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. temp_air_avg"
+                style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white', fontFamily: 'monospace' }} />
+              {addForm.name && !/^[a-z][a-z0-9_]*_[a-z0-9]+$/.test(addForm.name) && (
+                <span style={{ fontSize: 10, color: '#C0392B' }}>Must be lowercase with underscores — e.g. temp_air_avg</span>
+              )}
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+              <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Type</span>
+              <select value={addForm.phen_type} onChange={e => setAddForm(f => ({ ...f, phen_type: e.target.value }))}
+                style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }}>
+                <option value="">— select type —</option>
+                {PHEN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+              <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Family</span>
+              <select value={addForm.data_family} onChange={e => setAddForm(f => ({ ...f, data_family: e.target.value }))}
+                style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }}>
+                {['met', 'groundwater', 'rainfall', 'all'].map(fam => <option key={fam} value={fam}>{familyLabel(fam)}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+              <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Unit</span>
+              <select value={addForm.unit} onChange={e => setAddForm(f => ({ ...f, unit: e.target.value }))}
+                style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }}>
+                {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+              <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Measure</span>
+              <select value={addForm.measure} onChange={e => setAddForm(f => ({ ...f, measure: e.target.value }))}
+                style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }}>
+                {Object.entries(MEASURE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+              <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Value type</span>
+              <select value={addForm.var_type} onChange={e => setAddForm(f => ({ ...f, var_type: e.target.value }))}
+                style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }}>
+                {VAR_TYPES.map(t => <option key={t.code} value={t.code}>{t.label}</option>)}
+              </select>
+            </label>
+          </div>
+          {addErr && <div style={{ fontSize: 11, color: '#C0392B' }}>{addErr}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleAddSave} disabled={addSaving}
+              style={{ fontSize: 12, fontWeight: 700, padding: '7px 18px', borderRadius: 8, background: addSaving ? 'var(--color-border)' : 'var(--color-navy)', color: 'white', border: 'none', cursor: addSaving ? 'default' : 'pointer' }}>
+              {addSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => { setShowAdd(false); setAddErr(null); setAddForm(BLANK_ADD_FORM); }}
+              style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'white', color: 'var(--color-text-med)', cursor: 'pointer' }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {filtered.length === 0 && (
         <div style={{ textAlign: 'center', paddingTop: 32, fontSize: 13, color: 'var(--color-text-light)' }}>
@@ -812,12 +989,13 @@ function PhenomenaTable({ rows }) {
           </div>
         </div>
       )}
+
     </div>
   );
 }
 
 function PhenoStandardPanel({ onCountChange }) {
-  const [panelTab,   setPanelTab]   = useState('pending');
+  const [panelTab,   setPanelTab]   = useState('phenomena');
   const [pending,    setPending]    = useState([]);
   const [active,     setActive]     = useState([]);
   const [phenomena,  setPhenomena]  = useState([]);
@@ -1030,7 +1208,7 @@ function PhenoStandardPanel({ onCountChange }) {
 
         {/* ── Phenomena tab ────────────────────────────────────────────────── */}
         {!loading && panelTab === 'phenomena' && (
-          <PhenomenaTable rows={phenomena} />
+          <PhenomenaTable rows={phenomena} onAdd={row => setPhenomena(prev => [...prev, row])} />
         )}
       </div>
     </div>
@@ -1045,7 +1223,7 @@ const TABS = [
   { id: 'history',  label: 'History',  icon: '≡' },
   { id: 'stations', label: 'Stations', icon: '⊞' },
   { id: 'errors',   label: 'Errors',   icon: '⚠' },
-  { id: 'columns',  label: 'Pheno Std', icon: '⌗' },
+  { id: 'columns',  label: 'Pheno', icon: '⌗' },
   { id: 'data',     label: 'Data',     icon: '≀' },
   { id: 'users',    label: 'Users',    icon: '◎' },
   { id: 'field',    label: 'Field',    icon: '⊕' },

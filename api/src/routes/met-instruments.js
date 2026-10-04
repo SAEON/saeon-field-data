@@ -259,6 +259,33 @@ router.get('/phenomena', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+router.post('/phenomena', async (req, res, next) => {
+  try {
+    if (!['data_manager', 'technician_lead'].includes(req.user?.roles?.[0]))
+      return res.status(403).json({ error: 'Forbidden' });
+    const { name, display_name, data_family, unit, measure, var_type, phen_type } = req.body;
+    if (!name || !display_name || !data_family || !unit || !measure || !var_type)
+      return res.status(400).json({ error: 'name, display_name, data_family, unit, measure, var_type are required' });
+    const VALID = {
+      data_family: ['met', 'groundwater', 'rainfall', 'all'],
+      measure:     ['avg', 'cumm', 'event', 'logi', 'max', 'min', 'mode', 'sd', 'smp', 'text', 'tot'],
+      var_type:    ['chr', 'difftime', 'fac', 'int', 'logi', 'num', 'posix', 'text'],
+    };
+    for (const [field, allowed] of Object.entries(VALID)) {
+      if (!allowed.includes(req.body[field]))
+        return res.status(400).json({ error: `Invalid ${field}` });
+    }
+    const row = await db.createPhenomenon({
+      name, displayName: display_name, dataFamily: data_family,
+      unit, measure, varType: var_type, phenType: phen_type ?? null,
+    });
+    res.status(201).json(row);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'A phenomenon with that name already exists' });
+    next(err);
+  }
+});
+
 router.get('/column-mappings/pending', async (req, res, next) => {
   try {
     const rows = await db.getPendingColumnMappings();

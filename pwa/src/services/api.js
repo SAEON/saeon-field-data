@@ -360,6 +360,14 @@ export function getAllPhenomena() {
   return request('/api/phenomena');
 }
 
+export function createPhenomenon(data) {
+  return request('/api/phenomena', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
 export function getPendingColumnMappings() {
   return request('/api/column-mappings/pending');
 }

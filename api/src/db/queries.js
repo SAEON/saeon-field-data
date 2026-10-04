@@ -980,6 +980,16 @@ async function getPhenomenonByName(name) {
   return result.rows[0] || null;
 }
 
+async function createPhenomenon({ name, displayName, dataFamily, unit, measure, varType, phenType }) {
+  const result = await pool.query(
+    `INSERT INTO phenomena (name, display_name, data_family, unit, measure, var_type, phen_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [name, displayName, dataFamily, unit, measure, varType, phenType ?? null]
+  );
+  return result.rows[0];
+}
+
 // Returns a map keyed by phenomenon name — load once at parser startup
 async function getAllPhenomena() {
   const result = await pool.query(`SELECT * FROM phenomena ORDER BY name`);
@@ -1818,6 +1828,7 @@ module.exports = {
   getMeasurementsByStream,
   getMeasurementCount,
   // Lookups
+  createPhenomenon,
   getPhenomenonByName,
   getAllPhenomena,
   getOrCreateStream,
