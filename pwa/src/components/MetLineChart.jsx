@@ -9,34 +9,34 @@ const MAX_PTS = 600;
 // Series definitions per category: { field, color, strokeWidth, dash, label, unit }
 const SERIES = {
   temperature: [
-    { field: 'temp_air_avg',  color: '#1565C0', sw: 1.2, dash: null,  label: 'Avg temp', unit: '°C' },
-    { field: 'temp_air_min',  color: '#90CAF9', sw: 0.8, dash: '3,2', label: 'Min temp', unit: '°C' },
-    { field: 'temp_air_max',  color: '#EF9A9A', sw: 0.8, dash: '3,2', label: 'Max temp', unit: '°C' },
-    { field: 'humid_rel_avg', color: '#F59E0B', sw: 0.8, dash: null,  label: 'RH',       unit: '%', secondary: true },
+    { field: 'temp_air_avg',  color: '#1565C0', sw: 1.2, dash: null,  label: 'temp_air_avg (°C)',  unit: '°C' },
+    { field: 'temp_air_min',  color: '#90CAF9', sw: 0.8, dash: '3,2', label: 'temp_air_min (°C)',  unit: '°C' },
+    { field: 'temp_air_max',  color: '#EF9A9A', sw: 0.8, dash: '3,2', label: 'temp_air_max (°C)',  unit: '°C' },
+    { field: 'humid_rel_avg', color: '#F59E0B', sw: 0.8, dash: null,  label: 'humid_rel_avg (%)',  unit: '%', secondary: true },
   ],
   wind: [
-    { field: 'wind_speed_avg', color: '#1565C0', sw: 1.2, dash: null, label: 'Wind speed', unit: 'm/s' },
+    { field: 'wind_speed_avg', color: '#1565C0', sw: 1.2, dash: null, label: 'wind_speed_avg (m/s)', unit: 'm/s' },
   ],
   radiation: [
-    { field: 'rad_solar_avg', color: '#F59E0B', sw: 1.2, dash: null, label: 'Solar rad', unit: 'W/m²' },
+    { field: 'rad_solar_avg', color: '#F59E0B', sw: 1.2, dash: null, label: 'rad_solar_avg (W/m²)', unit: 'W/m²' },
   ],
   uv: [
-    { field: 'rad_uv_avg', color: '#7C3AED', sw: 1.2, dash: null, label: 'UV rad', unit: 'W/m²' },
+    { field: 'rad_uv_avg', color: '#7C3AED', sw: 1.2, dash: null, label: 'rad_uv_avg (W/m²)', unit: 'W/m²' },
   ],
   pressure: [
-    { field: 'pressure_atm_avg', color: '#059669', sw: 1.2, dash: null, label: 'Pressure', unit: 'hPa' },
+    { field: 'pressure_atm_avg', color: '#059669', sw: 1.2, dash: null, label: 'pressure_atm_avg (hPa)', unit: 'hPa' },
   ],
   rainfall: [
-    { field: 'rain_tot', color: '#1565C0', sw: 1.2, dash: null, label: 'Rainfall', unit: 'mm', bars: true },
+    { field: 'rain_tot', color: '#1565C0', sw: 1.2, dash: null, label: 'rain_tot (mm)', unit: 'mm', bars: true },
   ],
   soil_temp: [
-    { field: 'temp_soil_avg', color: '#92400E', sw: 1.2, dash: null, label: 'Soil temp', unit: '°C' },
+    { field: 'temp_soil_avg', color: '#92400E', sw: 1.2, dash: null, label: 'temp_soil_avg (°C)', unit: '°C' },
   ],
   leaf_wetness: [
-    { field: 'leaf_wet_avg', color: '#16A34A', sw: 1.2, dash: null, label: 'Leaf wetness', unit: 'mV' },
+    { field: 'leaf_wet_avg', color: '#16A34A', sw: 1.2, dash: null, label: 'leaf_wet_avg (mV)', unit: 'mV' },
   ],
   soil_moisture: [
-    { field: 'moisture_soil_avg', color: '#0369A1', sw: 1.2, dash: null, label: 'Soil moisture', unit: '%' },
+    { field: 'moisture_soil_avg', color: '#0369A1', sw: 1.2, dash: null, label: 'moisture_soil_avg (%)', unit: '%' },
   ],
 };
 
@@ -166,7 +166,7 @@ export default function MetLineChart({ data, category }) {
             return (
               <span key={s.field} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 9, color: '#6B7280' }}>
                 <span style={{ width: 10, height: 10, background: s.color, display: 'inline-block', opacity: 0.6 }} />
-                {s.label} ({s.unit})
+                {s.label}
               </span>
             );
           }
@@ -177,7 +177,7 @@ export default function MetLineChart({ data, category }) {
                 width: 14, height: 2, background: s.color, display: 'inline-block',
                 opacity: s.secondary ? 0.5 : 1,
               }} />
-              {s.label} ({s.unit}){s.secondary ? ' — right scale' : ''}
+              {s.label}{s.secondary ? ' — right scale' : ''}
             </span>
           );
         })}

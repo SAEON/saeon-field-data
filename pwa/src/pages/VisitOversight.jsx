@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getVisits, getStations, getUsers, assignVisit, getOverdueStations, updateStation, getVisitDetail, reparseFile } from '../services/api.js';
+import { getVisits, getStations, getUsers, assignVisit, getOverdueStations, updateStation, getVisitDetail, reparseFile, updateVisit } from '../services/api.js';
 
 function AppBar({ title }) {
   return (
@@ -275,17 +275,31 @@ export default function VisitOversight({ onGoToColumns }) {
   const [error,           setError]           = useState(null);
   const [assignTarget,    setAssignTarget]    = useState(null);
   const [expandedVisit,   setExpandedVisit]   = useState(null);
-  const [visitDetails,    setVisitDetails]    = useState({});   // visitId -> { files, loading, reparsing: Set }
+  const [visitDetails,    setVisitDetails]    = useState({});   // visitId -> { files, loading, reparsing: Set, notes, notesSaving }
+  const noteTimers = useRef({});
 
   function handleExpandVisit(visitId) {
     if (expandedVisit === visitId) { setExpandedVisit(null); return; }
     setExpandedVisit(visitId);
     if (!visitDetails[visitId]) {
-      setVisitDetails(prev => ({ ...prev, [visitId]: { files: [], loading: true, reparsing: new Set() } }));
+      setVisitDetails(prev => ({ ...prev, [visitId]: { files: [], loading: true, reparsing: new Set(), notes: '', notesSaving: false } }));
       getVisitDetail(visitId)
-        .then(d => setVisitDetails(prev => ({ ...prev, [visitId]: { files: d.files || [], loading: false, reparsing: new Set() } })))
-        .catch(() => setVisitDetails(prev => ({ ...prev, [visitId]: { files: [], loading: false, reparsing: new Set() } })));
+        .then(d => setVisitDetails(prev => ({ ...prev, [visitId]: { files: d.files || [], loading: false, reparsing: new Set(), notes: d.notes || '', notesSaving: false } })))
+        .catch(() => setVisitDetails(prev => ({ ...prev, [visitId]: { files: [], loading: false, reparsing: new Set(), notes: '', notesSaving: false } })));
     }
+  }
+
+  function handleNotesChange(visitId, value) {
+    setVisitDetails(prev => ({ ...prev, [visitId]: { ...prev[visitId], notes: value, notesSaving: false } }));
+    clearTimeout(noteTimers.current[visitId]);
+    noteTimers.current[visitId] = setTimeout(async () => {
+      setVisitDetails(prev => ({ ...prev, [visitId]: { ...prev[visitId], notesSaving: true } }));
+      try {
+        await updateVisit(visitId, { notes: value });
+      } finally {
+        setVisitDetails(prev => ({ ...prev, [visitId]: { ...prev[visitId], notesSaving: false } }));
+      }
+    }, 800);
   }
 
   async function handleReparseFile(visitId, fileId) {
@@ -613,6 +627,21 @@ export default function VisitOversight({ onGoToColumns }) {
                       ) : (
                         <div className="text-[11px] text-text-light">No files</div>
                       )}
+
+                      <div className="mt-2.5">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] font-semibold text-text-light uppercase tracking-wide">Visit notes</span>
+                          {vd?.notesSaving && <span className="text-[10px] text-text-light">Saving…</span>}
+                        </div>
+                        <textarea
+                          value={vd?.notes ?? ''}
+                          onChange={e => handleNotesChange(visit.id, e.target.value)}
+                          placeholder="Add or edit visit notes…"
+                          rows={3}
+                          className="notes-textarea w-full"
+                          style={{ fontSize: 12 }}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>

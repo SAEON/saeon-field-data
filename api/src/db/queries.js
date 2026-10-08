@@ -276,7 +276,7 @@ async function getVisitFiles(visitId) {
   const result = await pool.query(
     `SELECT id, original_name, file_format, parse_status, parse_error,
             date_range_start, date_range_end, record_count,
-            has_gap, gap_days, stream_name, uploaded_at,
+            has_gap, gap_days, has_overlap, overlap_days, stream_name, uploaded_at,
             rainfall_status, rainfall_error, has_unmapped_columns
      FROM   uploaded_files
      WHERE  visit_id = $1
@@ -403,6 +403,20 @@ async function markFileGap(fileId, gapDays) {
 async function clearFileGap(fileId) {
   await pool.query(
     `UPDATE uploaded_files SET has_gap = false, gap_days = NULL WHERE id = $1`,
+    [fileId]
+  );
+}
+
+async function markFileOverlap(fileId, overlapDays) {
+  await pool.query(
+    `UPDATE uploaded_files SET has_overlap = true, overlap_days = $2 WHERE id = $1`,
+    [fileId, overlapDays]
+  );
+}
+
+async function clearFileOverlap(fileId) {
+  await pool.query(
+    `UPDATE uploaded_files SET has_overlap = false, overlap_days = NULL WHERE id = $1`,
     [fileId]
   );
 }
@@ -988,6 +1002,17 @@ async function createPhenomenon({ name, displayName, dataFamily, unit, measure, 
     [name, displayName, dataFamily, unit, measure, varType, phenType ?? null]
   );
   return result.rows[0];
+}
+
+async function updatePhenomenon(id, { displayName, phenType, dataFamily, unit, measure, varType }) {
+  const result = await pool.query(
+    `UPDATE phenomena
+     SET display_name = $2, phen_type = $3, data_family = $4, unit = $5, measure = $6, var_type = $7
+     WHERE id = $1
+     RETURNING *`,
+    [id, displayName, phenType ?? null, dataFamily, unit, measure, varType]
+  );
+  return result.rows[0] ?? null;
 }
 
 // Returns a map keyed by phenomenon name — load once at parser startup
@@ -1665,23 +1690,26 @@ async function getActiveColumnMappings() {
   const result = await pool.query(`
     SELECT cnm.raw_name, p.name AS phenomenon_name
     FROM column_name_mappings cnm
-    JOIN phenomena p ON p.id = cnm.phenomenon_id
+    LEFT JOIN phenomena p ON p.id = cnm.phenomenon_id
     WHERE cnm.status = 'active'
+      AND p.name IS NOT NULL
   `);
-  return Object.fromEntries(result.rows.map(r => [r.raw_name, r.phenomenon_name]));
+  return Object.fromEntries(result.rows.map(r => [r.raw_name.toLowerCase(), r.phenomenon_name]));
 }
 
 async function upsertPendingColumnMapping(rawName, { dataFamily, sourceFileId, stationId, uzUnits, uzMeasure }) {
+  const normalizedName = rawName.toLowerCase();
   await pool.query(`
     INSERT INTO column_name_mappings (raw_name, status, data_family, source_file_id, station_id, uz_units, uz_measure)
     VALUES ($1, 'pending', $2, $3, $4, $5, $6)
     ON CONFLICT (raw_name) DO UPDATE
-      SET source_file_id = EXCLUDED.source_file_id,
-          station_id     = EXCLUDED.station_id,
-          uz_units       = COALESCE(EXCLUDED.uz_units,   column_name_mappings.uz_units),
-          uz_measure     = COALESCE(EXCLUDED.uz_measure, column_name_mappings.uz_measure)
-      WHERE column_name_mappings.status = 'pending'
-  `, [rawName, dataFamily || null, sourceFileId || null, stationId || null, uzUnits || null, uzMeasure || null]);
+      SET status         = 'pending',
+          source_file_id = COALESCE(column_name_mappings.source_file_id, EXCLUDED.source_file_id),
+          station_id     = COALESCE(column_name_mappings.station_id,     EXCLUDED.station_id),
+          uz_units       = COALESCE(column_name_mappings.uz_units,       EXCLUDED.uz_units),
+          uz_measure     = COALESCE(column_name_mappings.uz_measure,     EXCLUDED.uz_measure)
+      WHERE column_name_mappings.status != 'active'
+  `, [normalizedName, dataFamily || null, sourceFileId || null, stationId || null, uzUnits || null, uzMeasure || null]);
 }
 
 async function flagFileUnmappedColumns(fileId) {
@@ -1751,6 +1779,33 @@ async function getAllActiveMappings() {
   return result.rows;
 }
 
+async function getParsedFilesForDataFamily(dataFamily) {
+  const result = await pool.query(
+    `SELECT uf.*
+     FROM uploaded_files uf
+     JOIN field_visits fv ON fv.id = uf.visit_id
+     WHERE fv.data_family = $1
+       AND uf.parse_status = 'parsed'
+     ORDER BY uf.date_range_start ASC`,
+    [dataFamily]
+  );
+  return result.rows;
+}
+
+async function getFlaggedFilesForDataFamily(dataFamily) {
+  const result = await pool.query(
+    `SELECT uf.*
+     FROM uploaded_files uf
+     JOIN field_visits fv ON fv.id = uf.visit_id
+     WHERE fv.data_family = $1
+       AND uf.parse_status = 'parsed'
+       AND uf.has_unmapped_columns = true
+     ORDER BY uf.date_range_start ASC`,
+    [dataFamily]
+  );
+  return result.rows;
+}
+
 async function updateColumnMappingNodes(id, nodes) {
   const result = await pool.query(`
     UPDATE column_name_mappings
@@ -1802,6 +1857,8 @@ module.exports = {
   getPriorCoverageEnd,
   markFileGap,
   clearFileGap,
+  markFileOverlap,
+  clearFileOverlap,
   getFilesWithGaps,
   getFileById,
   getUnparsedFiles,
@@ -1829,6 +1886,7 @@ module.exports = {
   getMeasurementCount,
   // Lookups
   createPhenomenon,
+  updatePhenomenon,
   getPhenomenonByName,
   getAllPhenomena,
   getOrCreateStream,
@@ -1891,4 +1949,6 @@ module.exports = {
   ignoreColumnMapping,
   getAllActiveMappings,
   updateColumnMappingNodes,
+  getParsedFilesForDataFamily,
+  getFlaggedFilesForDataFamily,
 };

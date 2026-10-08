@@ -1,9 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getDashboardStations, getFilesWithErrors, deleteFile, getStationCalibrationHistory, getPendingColumnMappings, resolveColumnMapping, ignoreColumnMapping, getAllPhenomena, getActiveMappings, updateColumnMappingNodes, createPhenomenon } from '../services/api.js';
+import { getDashboardStations, getFilesWithErrors, deleteFile, getStationCalibrationHistory, getPendingColumnMappings, resolveColumnMapping, ignoreColumnMapping, getAllPhenomena, getActiveMappings, updateColumnMappingNodes, createPhenomenon, updatePhenomenon, reassignColumnMapping } from '../services/api.js';
 import UserManagement    from './UserManagement.jsx';
 import DataTab from './DataTab.jsx';
-import VisitOversight    from './VisitOversight.jsx';
 import StationRegistry   from './StationRegistry.jsx';
 import HistoryTab        from './HistoryTab.jsx';
 import { FieldApp }      from '../App.jsx';
@@ -449,12 +448,47 @@ function downloadCSV(rows) {
   URL.revokeObjectURL(a.href);
 }
 
-function ActiveMappingsTable({ rows, onNodeChange, onNodeSave, getNodeState, nodeEdits, saving }) {
+function ActiveMappingsTable({ rows, onNodeChange, onNodeSave, getNodeState, nodeEdits, saving, phenomena, onReassign }) {
   const [search,   setSearch]   = useState('');
   const [family,   setFamily]   = useState('all');
   const [nodeFilter, setNodeFilter] = useState('all');
   const [page,     setPage]     = useState(1);
   const [pageSize, setPageSize] = useState(25);
+
+  const [reassigningId,   setReassigningId]   = useState(null);
+  const [reassignQuery,   setReassignQuery]    = useState('');
+  const [reassignSelId,   setReassignSelId]    = useState(null);
+  const [reassignSaving,  setReassignSaving]   = useState(false);
+  const [reassignError,   setReassignError]    = useState(null);
+
+  async function handleReassign(row) {
+    if (!reassignSelId || reassignSelId === row.phenomenon_id) return;
+    setReassignSaving(true);
+    setReassignError(null);
+    try {
+      const updated = await reassignColumnMapping(row.id, reassignSelId);
+      const selPhen = phenomena?.find(p => p.id === reassignSelId);
+      onReassign?.({
+        ...updated,
+        phenomenon_id:   reassignSelId,
+        phenomenon_name: selPhen?.name ?? updated.phenomenon_name,
+      });
+      setReassigningId(null);
+      setReassignQuery('');
+      setReassignSelId(null);
+    } catch {
+      setReassignError('Failed to reassign — please try again.');
+    } finally {
+      setReassignSaving(false);
+    }
+  }
+
+  function openReassign(row) {
+    setReassigningId(row.id);
+    setReassignQuery('');
+    setReassignSelId(null);
+    setReassignError(null);
+  }
 
   const families = ['all', ...Array.from(new Set(rows.map(r => r.data_family).filter(Boolean))).sort()];
 
@@ -561,43 +595,153 @@ function ActiveMappingsTable({ rows, onNodeChange, onNodeSave, getNodeState, nod
                   </tr>
                 )}
                 {pageRows.map(row => {
-                  const isDirty  = !!nodeEdits[row.id];
-                  const isSaving = saving[`node_${row.id}`];
+                  const isDirty    = !!nodeEdits[row.id];
+                  const isSaving   = saving[`node_${row.id}`];
+                  const isOpen     = reassigningId === row.id;
+                  const phenQuery  = reassignQuery.toLowerCase();
+                  const phenMatches = isOpen && phenomena
+                    ? phenomena.filter(p =>
+                        p.name.toLowerCase().includes(phenQuery) ||
+                        (p.display_name || '').toLowerCase().includes(phenQuery)
+                      ).slice(0, 8)
+                    : [];
                   return (
-                    <tr key={row.id} style={{ background: isDirty ? '#F0F4FF' : 'transparent' }}>
-                      <td style={tdStyle}>
-                        <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--color-navy)' }}>{row.raw_name}</span>
-                      </td>
-                      <td style={tdStyle}>
-                        <span style={{ fontFamily: 'monospace', color: 'var(--color-text-dark)' }}>{row.phenomenon_name}</span>
-                      </td>
-                      <td style={{ ...tdStyle, color: 'var(--color-text-med)' }}>
-                        {familyLabel(row.data_family)}
-                      </td>
-                      <td style={{ ...tdStyle, fontFamily: 'monospace', color: 'var(--color-text-light)' }}>{row.uz_units || '—'}</td>
-                      <td style={{ ...tdStyle, fontFamily: 'monospace', color: 'var(--color-text-light)' }}>{row.uz_measure || '—'}</td>
-                      {NODES.map(n => (
-                        <td key={n} style={{ ...tdStyle, textAlign: 'center' }}>
-                          <NodeCheck
-                            active={getNodeState(row, n)}
-                            onChange={v => onNodeChange(row, n, v)}
-                          />
+                    <React.Fragment key={row.id}>
+                      <tr style={{ background: isOpen ? '#FFFDE7' : isDirty ? '#F0F4FF' : 'transparent' }}>
+                        <td style={tdStyle}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--color-navy)' }}>{row.raw_name}</span>
                         </td>
-                      ))}
-                      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
-                        {isDirty && (
-                          <button
-                            disabled={isSaving}
-                            onClick={() => onNodeSave(row)}
-                            style={{
-                              fontSize: 10, fontWeight: 700, padding: '2px 10px', borderRadius: 6,
-                              background: 'var(--color-navy)', color: 'white',
-                              border: 'none', cursor: 'pointer', opacity: isSaving ? 0.6 : 1,
-                            }}
-                          >{isSaving ? '…' : 'Save'}</button>
-                        )}
-                      </td>
-                    </tr>
+                        <td style={tdStyle}>
+                          <span style={{ fontFamily: 'monospace', color: 'var(--color-text-dark)' }}>{row.phenomenon_name}</span>
+                        </td>
+                        <td style={{ ...tdStyle, color: 'var(--color-text-med)' }}>
+                          {familyLabel(row.data_family)}
+                        </td>
+                        <td style={{ ...tdStyle, fontFamily: 'monospace', color: 'var(--color-text-light)' }}>{row.uz_units || '—'}</td>
+                        <td style={{ ...tdStyle, fontFamily: 'monospace', color: 'var(--color-text-light)' }}>{row.uz_measure || '—'}</td>
+                        {NODES.map(n => (
+                          <td key={n} style={{ ...tdStyle, textAlign: 'center' }}>
+                            <NodeCheck
+                              active={getNodeState(row, n)}
+                              onChange={v => onNodeChange(row, n, v)}
+                            />
+                          </td>
+                        ))}
+                        <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                            {isDirty && (
+                              <button
+                                disabled={isSaving}
+                                onClick={() => onNodeSave(row)}
+                                style={{
+                                  fontSize: 10, fontWeight: 700, padding: '2px 10px', borderRadius: 6,
+                                  background: 'var(--color-navy)', color: 'white',
+                                  border: 'none', cursor: 'pointer', opacity: isSaving ? 0.6 : 1,
+                                }}
+                              >{isSaving ? '…' : 'Save'}</button>
+                            )}
+                            <button
+                              onClick={() => openReassign(row)}
+                              style={{
+                                fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 6,
+                                background: 'transparent', color: 'var(--color-text-med)',
+                                border: '1px solid var(--color-border)',
+                                cursor: 'pointer',
+                              }}
+                            >Reassign</button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr key={`reassign_${row.id}`}>
+                          <td colSpan={10} style={{ padding: '0 8px 10px 8px', background: '#FFFDE7' }}>
+                            <div style={{
+                              padding: '10px 12px', borderRadius: 8,
+                              background: '#FFFFF0', border: '1px solid #F9A825',
+                            }}>
+                              <div style={{ fontSize: 12, marginBottom: 6, color: 'var(--color-text-dark)' }}>
+                                Reassign{' '}
+                                <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{row.raw_name}</span>
+                                {' '}from{' '}
+                                <span style={{ fontFamily: 'monospace', color: 'var(--color-text-light)', textDecoration: 'line-through' }}>{row.phenomenon_name}</span>
+                                {' '}to:
+                              </div>
+                              <div style={{ position: 'relative', marginBottom: 6 }}>
+                                <input
+                                  type="text"
+                                  placeholder="Type to search phenomena…"
+                                  value={reassignQuery}
+                                  onChange={e => { setReassignQuery(e.target.value); setReassignSelId(null); }}
+                                  onBlur={() => { if (!reassignSelId) setReassignQuery(''); }}
+                                  style={{
+                                    width: '100%', boxSizing: 'border-box',
+                                    fontSize: 12, padding: '5px 10px', borderRadius: 6,
+                                    border: `1.5px solid ${reassignSelId ? 'var(--color-navy)' : 'var(--color-border)'}`,
+                                    background: 'white', color: 'var(--color-text-dark)',
+                                  }}
+                                />
+                                {reassignQuery && !reassignSelId && (
+                                  <div
+                                    onMouseDown={e => e.preventDefault()}
+                                    style={{
+                                      position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20,
+                                      background: 'white', border: '1.5px solid var(--color-border)',
+                                      borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.10)',
+                                      maxHeight: 180, overflowY: 'auto',
+                                    }}>
+                                    {phenMatches.length === 0 && (
+                                      <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--color-text-light)' }}>No match</div>
+                                    )}
+                                    {phenMatches.map(p => (
+                                      <div
+                                        key={p.id}
+                                        onClick={() => { setReassignSelId(p.id); setReassignQuery(p.name); }}
+                                        style={{
+                                          padding: '7px 10px', cursor: 'pointer', fontSize: 12,
+                                          borderBottom: '1px solid var(--color-border)',
+                                          display: 'flex', alignItems: 'baseline', gap: 6,
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.background = '#F0F4FF'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                                      >
+                                        <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--color-navy)' }}>{p.name}</span>
+                                        <span style={{ fontSize: 10, color: 'var(--color-text-light)' }}>{p.display_name}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              <div style={{ fontSize: 11, color: '#856404', marginBottom: 6 }}>
+                                All data files across all stations will be reparsed in the background to re-attribute measurements to the column reassignment.
+                              </div>
+                              {reassignError && (
+                                <div style={{ fontSize: 11, color: '#C62828', marginBottom: 6 }}>{reassignError}</div>
+                              )}
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <button
+                                  disabled={!reassignSelId || reassignSelId === row.phenomenon_id || reassignSaving}
+                                  onClick={() => handleReassign(row)}
+                                  style={{
+                                    fontSize: 11, fontWeight: 700, padding: '5px 14px', borderRadius: 6,
+                                    background: (!reassignSelId || reassignSelId === row.phenomenon_id || reassignSaving) ? 'var(--color-border)' : 'var(--color-navy)',
+                                    color: (!reassignSelId || reassignSelId === row.phenomenon_id || reassignSaving) ? 'var(--color-text-light)' : 'white',
+                                    border: 'none', cursor: (!reassignSelId || reassignSaving) ? 'not-allowed' : 'pointer',
+                                  }}
+                                >{reassignSaving ? 'Reassigning…' : 'Reassign'}</button>
+                                <button
+                                  onClick={() => setReassigningId(null)}
+                                  style={{
+                                    fontSize: 11, padding: '5px 12px', borderRadius: 6,
+                                    background: 'transparent', color: 'var(--color-text-med)',
+                                    border: '1px solid var(--color-border)', cursor: 'pointer',
+                                  }}
+                                >Cancel</button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -706,7 +850,7 @@ const VAR_TYPES = [
 
 const BLANK_ADD_FORM = { name: '', display_name: '', phen_type: '', data_family: 'met', unit: '°C', measure: 'avg', var_type: 'num' };
 
-function PhenomenaTable({ rows, onAdd }) {
+function PhenomenaTable({ rows, onAdd, onEdit }) {
   const [search,    setSearch]    = useState('');
   const [famFilter, setFamFilter] = useState('all');
   const [page,      setPage]      = useState(1);
@@ -715,6 +859,38 @@ function PhenomenaTable({ rows, onAdd }) {
   const [addForm,   setAddForm]   = useState(BLANK_ADD_FORM);
   const [addErr,    setAddErr]    = useState(null);
   const [addSaving, setAddSaving] = useState(false);
+  const [editOpenId, setEditOpenId] = useState(null);
+  const [editForm,   setEditForm]   = useState({});
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError,  setEditError]  = useState(null);
+
+  function openEdit(p) {
+    setEditOpenId(p.id);
+    setEditForm({
+      display_name: p.display_name || '',
+      phen_type:    p.phen_type    || '',
+      data_family:  p.data_family  || 'met',
+      unit:         p.unit         || '°C',
+      measure:      p.measure      || 'avg',
+      var_type:     p.var_type     || 'num',
+    });
+    setEditError(null);
+  }
+
+  async function handleEditSave(phenId) {
+    if (!editForm.display_name.trim()) { setEditError('Label is required.'); return; }
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const row = await updatePhenomenon(phenId, editForm);
+      onEdit?.(row);
+      setEditOpenId(null);
+    } catch (err) {
+      setEditError(err.message || 'Failed to save');
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   const families = ['all', ...Array.from(new Set(rows.map(r => r.data_family).filter(Boolean))).sort()];
 
@@ -919,14 +1095,15 @@ function PhenomenaTable({ rows, onAdd }) {
                 <th style={thStyle}>Family</th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>Unit</th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>Measure</th>
+                <th style={thStyle}></th>
               </tr>
             </thead>
             <tbody>
               {Object.entries(byType).sort(([a], [b]) => a.localeCompare(b)).map(([type, phens]) => (
-                <>
+                <React.Fragment key={type}>
                   {/* Group header row */}
-                  <tr key={`grp_${type}`}>
-                    <td colSpan={5} style={{
+                  <tr>
+                    <td colSpan={6} style={{
                       padding: '6px 12px', background: '#F2F4F8',
                       borderTop: '1px solid var(--color-border)',
                       borderBottom: '1px solid var(--color-border)',
@@ -938,25 +1115,101 @@ function PhenomenaTable({ rows, onAdd }) {
                   </tr>
                   {/* Phenomenon rows */}
                   {phens.sort((a, b) => a.name.localeCompare(b.name)).map((p, i) => (
-                    <tr key={p.id} style={{ background: i % 2 === 0 ? 'white' : '#FAFBFC' }}>
-                      <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-navy)', whiteSpace: 'nowrap' }}>
-                        {p.name}
-                      </td>
-                      <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-med)' }}>
-                        {p.display_name || '—'}
-                      </td>
-                      <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-light)', fontSize: 11 }}>
-                        {familyLabel(p.data_family)}
-                      </td>
-                      <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', textAlign: 'right', color: 'var(--color-text-med)', fontFamily: 'monospace', fontSize: 11 }}>
-                        {p.unit || '—'}
-                      </td>
-                      <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', textAlign: 'right', color: 'var(--color-text-light)', fontSize: 11, whiteSpace: 'nowrap' }}>
-                        {MEASURE_LABELS[p.measure] || p.measure || '—'}
-                      </td>
-                    </tr>
+                    <React.Fragment key={p.id}>
+                      <tr style={{ background: editOpenId === p.id ? '#F0F4FF' : i % 2 === 0 ? 'white' : '#FAFBFC' }}>
+                        <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-navy)', whiteSpace: 'nowrap' }}>
+                          {p.name}
+                        </td>
+                        <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-med)' }}>
+                          {p.display_name || '—'}
+                        </td>
+                        <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-light)', fontSize: 11 }}>
+                          {familyLabel(p.data_family)}
+                        </td>
+                        <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', textAlign: 'right', color: 'var(--color-text-med)', fontFamily: 'monospace', fontSize: 11 }}>
+                          {p.unit || '—'}
+                        </td>
+                        <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', textAlign: 'right', color: 'var(--color-text-light)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                          {MEASURE_LABELS[p.measure] || p.measure || '—'}
+                        </td>
+                        <td style={{ padding: '6px 12px', borderBottom: '1px solid var(--color-border)', textAlign: 'right' }}>
+                          <button
+                            onClick={() => editOpenId === p.id ? setEditOpenId(null) : openEdit(p)}
+                            style={{
+                              fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 6,
+                              background: 'transparent', color: 'var(--color-text-med)',
+                              border: '1px solid var(--color-border)', cursor: 'pointer',
+                            }}
+                          >{editOpenId === p.id ? '✕' : 'Edit'}</button>
+                        </td>
+                      </tr>
+                      {editOpenId === p.id && (
+                        <tr>
+                          <td colSpan={6} style={{ padding: '10px 14px 14px', background: '#F0F4FF', borderBottom: '1px solid var(--color-border)' }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-navy)', marginBottom: 10 }}>
+                              Edit <span style={{ fontFamily: 'monospace' }}>{p.name}</span>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 14px', marginBottom: 10 }}>
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+                                <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Label</span>
+                                <input type="text" value={editForm.display_name}
+                                  onChange={e => setEditForm(f => ({ ...f, display_name: e.target.value }))}
+                                  style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }} />
+                              </label>
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+                                <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Type</span>
+                                <select value={editForm.phen_type} onChange={e => setEditForm(f => ({ ...f, phen_type: e.target.value }))}
+                                  style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }}>
+                                  <option value="">— none —</option>
+                                  {PHEN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                              </label>
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+                                <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Family</span>
+                                <select value={editForm.data_family} onChange={e => setEditForm(f => ({ ...f, data_family: e.target.value }))}
+                                  style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }}>
+                                  {['met', 'groundwater', 'rainfall', 'all'].map(fam => <option key={fam} value={fam}>{familyLabel(fam)}</option>)}
+                                </select>
+                              </label>
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+                                <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Unit</span>
+                                <select value={editForm.unit} onChange={e => setEditForm(f => ({ ...f, unit: e.target.value }))}
+                                  style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }}>
+                                  {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                                </select>
+                              </label>
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+                                <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Measure</span>
+                                <select value={editForm.measure} onChange={e => setEditForm(f => ({ ...f, measure: e.target.value }))}
+                                  style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }}>
+                                  {Object.entries(MEASURE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                                </select>
+                              </label>
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11 }}>
+                                <span style={{ fontWeight: 600, color: 'var(--color-text-med)' }}>Value type</span>
+                                <select value={editForm.var_type} onChange={e => setEditForm(f => ({ ...f, var_type: e.target.value }))}
+                                  style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--color-border)', background: 'white' }}>
+                                  {VAR_TYPES.map(t => <option key={t.code} value={t.code}>{t.label}</option>)}
+                                </select>
+                              </label>
+                            </div>
+                            {editError && <div style={{ fontSize: 11, color: '#C0392B', marginBottom: 8 }}>{editError}</div>}
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button onClick={() => handleEditSave(p.id)} disabled={editSaving}
+                                style={{ fontSize: 12, fontWeight: 700, padding: '6px 16px', borderRadius: 8, background: editSaving ? 'var(--color-border)' : 'var(--color-navy)', color: 'white', border: 'none', cursor: editSaving ? 'default' : 'pointer' }}>
+                                {editSaving ? 'Saving…' : 'Save'}
+                              </button>
+                              <button onClick={() => { setEditOpenId(null); setEditError(null); }}
+                                style={{ fontSize: 12, padding: '6px 14px', borderRadius: 8, border: '1.5px solid var(--color-border)', background: 'white', color: 'var(--color-text-med)', cursor: 'pointer' }}>
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
-                </>
+                </React.Fragment>
               ))}
             </tbody>
           </table>
@@ -1002,6 +1255,8 @@ function PhenoStandardPanel({ onCountChange }) {
   const [loading,    setLoading]    = useState(true);
   const [selected,   setSelected]   = useState({});
   const [saving,     setSaving]     = useState({});
+  const [resolved,   setResolved]   = useState({});
+  const [resolveErr, setResolveErr] = useState({});
   const [nodeEdits,  setNodeEdits]  = useState({});
 
   function reload() {
@@ -1030,22 +1285,30 @@ function PhenoStandardPanel({ onCountChange }) {
     const phenId = selected[id];
     if (!phenId) return;
     setSaving(s => ({ ...s, [id]: true }));
+    setResolveErr(e => ({ ...e, [id]: null }));
     try {
       await resolveColumnMapping(id, parseInt(phenId, 10));
-      removePending(id);
-      reload();
-    } finally {
       setSaving(s => ({ ...s, [id]: false }));
+      setResolved(r => ({ ...r, [id]: true }));
+      reload();
+      setTimeout(() => removePending(id), 900);
+    } catch {
+      setSaving(s => ({ ...s, [id]: false }));
+      setResolveErr(e => ({ ...e, [id]: 'Failed to save — please try again.' }));
     }
   }
 
   async function handleIgnore(id) {
     setSaving(s => ({ ...s, [id]: true }));
+    setResolveErr(e => ({ ...e, [id]: null }));
     try {
       await ignoreColumnMapping(id);
-      removePending(id);
-    } finally {
       setSaving(s => ({ ...s, [id]: false }));
+      setResolved(r => ({ ...r, [id]: 'ignored' }));
+      setTimeout(() => removePending(id), 700);
+    } catch {
+      setSaving(s => ({ ...s, [id]: false }));
+      setResolveErr(e => ({ ...e, [id]: 'Failed — please try again.' }));
     }
   }
 
@@ -1121,76 +1384,100 @@ function PhenoStandardPanel({ onCountChange }) {
                 All column names are recognised
               </div>
             )}
-            {pending.map(row => (
-              <div key={row.id} style={cardStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                  <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--color-navy)' }}>
-                    {row.raw_name}
-                  </span>
-                  {row.data_family && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 8,
-                      background: '#FFF3E0', color: '#E65100',
-                    }}>{row.data_family}</span>
-                  )}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-light)', marginBottom: 6 }}>
-                  {row.station_name && <span>{row.station_name}</span>}
-                  {row.source_file_name && <span style={{ marginLeft: 8, opacity: 0.7 }}>· {row.source_file_name}</span>}
-                </div>
-                {(row.uz_units || row.uz_measure) && (
-                  <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
-                    {row.uz_units && (
-                      <div>
-                        <div style={subLabelStyle}>Units (in file)</div>
-                        <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--color-text-dark)' }}>{row.uz_units}</div>
-                      </div>
-                    )}
-                    {row.uz_measure && (
-                      <div>
-                        <div style={subLabelStyle}>Measure (in file)</div>
-                        <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--color-text-dark)' }}>{row.uz_measure}</div>
-                      </div>
+            {pending.map(row => {
+              const isResolved = resolved[row.id] === true;
+              const isIgnored  = resolved[row.id] === 'ignored';
+              const isSaving   = saving[row.id];
+              const err        = resolveErr[row.id];
+
+              if (isResolved || isIgnored) {
+                return (
+                  <div key={row.id} style={{ ...cardStyle, background: isResolved ? '#F1F8E9' : 'var(--color-surface)', border: `1px solid ${isResolved ? '#C5E1A5' : 'var(--color-border)'}` }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: isResolved ? '#388E3C' : 'var(--color-text-light)' }}>
+                        {row.raw_name}
+                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: isResolved ? '#388E3C' : 'var(--color-text-light)' }}>
+                        {isResolved ? 'Mapped' : 'Ignored'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={row.id} style={cardStyle}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--color-navy)' }}>
+                      {row.raw_name}
+                    </span>
+                    {row.data_family && (
+                      <span style={{
+                        fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 8,
+                        background: '#FFF3E0', color: '#E65100',
+                      }}>{row.data_family}</span>
                     )}
                   </div>
-                )}
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <select
-                    value={selected[row.id] || ''}
-                    onChange={e => setSelected(s => ({ ...s, [row.id]: e.target.value }))}
-                    style={{
-                      flex: 1, fontSize: 12, padding: '4px 8px', borderRadius: 8,
-                      border: '1.5px solid var(--color-border)', background: 'var(--color-surface)',
-                      color: 'var(--color-text-dark)',
-                    }}
-                  >
-                    <option value="">Select phenomenon…</option>
-                    {phenomena.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}{p.phen_type ? ` — ${p.phen_type}` : ''}</option>
-                    ))}
-                  </select>
-                  <button
-                    disabled={!selected[row.id] || saving[row.id]}
-                    onClick={() => handleResolve(row.id)}
-                    style={{
-                      padding: '4px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-                      background: selected[row.id] ? 'var(--color-navy)' : 'var(--color-border)',
-                      color: selected[row.id] ? 'white' : 'var(--color-text-light)',
-                      border: 'none', cursor: selected[row.id] ? 'pointer' : 'default',
-                    }}
-                  >Map</button>
-                  <button
-                    disabled={saving[row.id]}
-                    onClick={() => handleIgnore(row.id)}
-                    style={{
-                      padding: '4px 10px', borderRadius: 8, fontSize: 12,
-                      background: 'transparent', color: 'var(--color-text-light)',
-                      border: '1px solid var(--color-border)', cursor: 'pointer',
-                    }}
-                  >Ignore</button>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-light)', marginBottom: 6 }}>
+                    {row.station_name && <span>{row.station_name}</span>}
+                    {row.source_file_name && <span style={{ marginLeft: 8, opacity: 0.7 }}>· {row.source_file_name}</span>}
+                  </div>
+                  {(row.uz_units || row.uz_measure) && (
+                    <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+                      {row.uz_units && (
+                        <div>
+                          <div style={subLabelStyle}>Units (in file)</div>
+                          <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--color-text-dark)' }}>{row.uz_units}</div>
+                        </div>
+                      )}
+                      {row.uz_measure && (
+                        <div>
+                          <div style={subLabelStyle}>Measure (in file)</div>
+                          <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--color-text-dark)' }}>{row.uz_measure}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <select
+                      value={selected[row.id] || ''}
+                      onChange={e => setSelected(s => ({ ...s, [row.id]: e.target.value }))}
+                      style={{
+                        flex: 1, fontSize: 12, padding: '4px 8px', borderRadius: 8,
+                        border: '1.5px solid var(--color-border)', background: 'var(--color-surface)',
+                        color: 'var(--color-text-dark)',
+                      }}
+                    >
+                      <option value="">Select phenomenon…</option>
+                      {phenomena.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}{p.phen_type ? ` — ${p.phen_type}` : ''}</option>
+                      ))}
+                    </select>
+                    <button
+                      disabled={!selected[row.id] || isSaving}
+                      onClick={() => handleResolve(row.id)}
+                      style={{
+                        padding: '4px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                        background: selected[row.id] && !isSaving ? 'var(--color-navy)' : 'var(--color-border)',
+                        color: selected[row.id] && !isSaving ? 'white' : 'var(--color-text-light)',
+                        border: 'none', cursor: selected[row.id] && !isSaving ? 'pointer' : 'default',
+                        minWidth: 60,
+                      }}
+                    >{isSaving ? 'Saving…' : 'Map'}</button>
+                    <button
+                      disabled={isSaving}
+                      onClick={() => handleIgnore(row.id)}
+                      style={{
+                        padding: '4px 10px', borderRadius: 8, fontSize: 12,
+                        background: 'transparent', color: 'var(--color-text-light)',
+                        border: '1px solid var(--color-border)', cursor: 'pointer',
+                      }}
+                    >Ignore</button>
+                  </div>
+                  {err && <div style={{ fontSize: 11, color: '#C0392B', marginTop: 6 }}>{err}</div>}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </>
         )}
 
@@ -1203,12 +1490,18 @@ function PhenoStandardPanel({ onCountChange }) {
             getNodeState={getNodeState}
             nodeEdits={nodeEdits}
             saving={saving}
+            phenomena={phenomena}
+            onReassign={updated => setActive(a => a.map(r => r.id === updated.id ? { ...r, phenomenon_name: updated.phenomenon_name, phenomenon_id: updated.phenomenon_id } : r))}
           />
         )}
 
         {/* ── Phenomena tab ────────────────────────────────────────────────── */}
         {!loading && panelTab === 'phenomena' && (
-          <PhenomenaTable rows={phenomena} onAdd={row => setPhenomena(prev => [...prev, row])} />
+          <PhenomenaTable
+            rows={phenomena}
+            onAdd={row => setPhenomena(prev => [...prev, row])}
+            onEdit={row => setPhenomena(prev => prev.map(p => p.id === row.id ? row : p))}
+          />
         )}
       </div>
     </div>
@@ -1219,11 +1512,10 @@ function PhenoStandardPanel({ onCountChange }) {
 
 const TABS = [
   { id: 'network',  label: 'Network',  icon: '◉' },
-  { id: 'visits',   label: 'Visits',   icon: '☑' },
   { id: 'history',  label: 'History',  icon: '≡' },
   { id: 'stations', label: 'Stations', icon: '⊞' },
   { id: 'errors',   label: 'Errors',   icon: '⚠' },
-  { id: 'columns',  label: 'Pheno', icon: '⌗' },
+  { id: 'columns',  label: 'Pheno',    icon: '⌗' },
   { id: 'data',     label: 'Data',     icon: '≀' },
   { id: 'users',    label: 'Users',    icon: '◎' },
   { id: 'field',    label: 'Field',    icon: '⊕' },
@@ -1242,7 +1534,6 @@ export default function ManagerDashboard() {
   return (
     <div className="flex flex-col min-h-dvh app-layout">
       {activeTab === 'network'  && <NetworkTab />}
-      {activeTab === 'visits'   && <VisitOversight onGoToColumns={() => setActiveTab('columns')} />}
       {activeTab === 'history'  && (
         <div className="flex flex-col flex-1 overflow-hidden">
           <header className="bg-navy h-14 flex items-center px-4 shrink-0">
@@ -1251,7 +1542,7 @@ export default function ManagerDashboard() {
             </div>
           </header>
           <div className="flex-1 flex flex-col overflow-hidden w-full max-w-[var(--max-width)] mx-auto">
-            <HistoryTab />
+            <HistoryTab defaultScope="all" onGoToColumns={() => setActiveTab('columns')} />
           </div>
         </div>
       )}

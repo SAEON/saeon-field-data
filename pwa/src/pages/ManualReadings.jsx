@@ -6,7 +6,7 @@ const REQUIRED_TYPES = {
   rainfall:           ['logger_activities', 'raingauge_activities', 'gauge_condition', 'overall_site_condition'],
   groundwater_level:  ['logger_activities', 'dipper_depth', 'dipper_time', 'overall_site_condition'],
   groundwater_baro:   ['logger_activities', 'overall_site_condition'],
-  met:                ['met_activities', 'pyranometer_clean', 'anemometer_spinning', 'rain_gauge_clear', 'overall_site_condition'],
+  met:                ['met_activities', 'temp_rh_condition', 'pyranometer_clean', 'uv_radiometer_condition', 'anemometer_spinning', 'wind_vane', 'rain_gauge_clear', 'charge_controller_condition', 'cables_condition', 'overall_site_condition'],
 };
 
 const MET_ACTS = [
@@ -1249,18 +1249,21 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
     if (!r?.value_text) return new Set();
     try { return new Set(JSON.parse(r.value_text)); } catch { return new Set(); }
   });
-  const [pyrano,    setPyrano]    = useState(() => normYesNo(ex('pyranometer_clean')?.value_text));
-  const [anemo,     setAnemo]     = useState(() => normYesNo(ex('anemometer_spinning')?.value_text));
-  const [rainGauge, setRainGauge] = useState(() => normYesNo(ex('rain_gauge_clear')?.value_text));
+  const [tempRhCond,  setTempRhCond]  = useState(() => normYesNo(ex('temp_rh_condition')?.value_text));
+  const [pyrano,      setPyrano]      = useState(() => normYesNo(ex('pyranometer_clean')?.value_text));
+  const [uvRadCond,   setUvRadCond]   = useState(() => normYesNo(ex('uv_radiometer_condition')?.value_text));
+  const [anemo,       setAnemo]       = useState(() => normYesNo(ex('anemometer_spinning')?.value_text));
+  const [rainGauge,   setRainGauge]   = useState(() => normYesNo(ex('rain_gauge_clear')?.value_text));
+  const [chgCtrlCond, setChgCtrlCond] = useState(() => normYesNo(ex('charge_controller_condition')?.value_text));
+  const [cablesCond,  setCablesCond]  = useState(() => normYesNo(ex('cables_condition')?.value_text));
   const [battery,    setBattery]    = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
   const [solarPanel, setSolarPanel] = useState(ex('solar_panel_voltage')?.value_numeric != null ? String(ex('solar_panel_voltage').value_numeric) : '');
   const [chargeCtrl, setChargeCtrl] = useState(ex('charge_controller_voltage')?.value_numeric != null ? String(ex('charge_controller_voltage').value_numeric) : '');
   const [lithiumBatt,setLithiumBatt]= useState(ex('lithium_battery_voltage')?.value_numeric != null ? String(ex('lithium_battery_voltage').value_numeric) : '');
   const [windVane,   setWindVane]   = useState(ex('wind_vane')?.value_text ?? null);
-  const [logger,     setLogger]     = useState(ex('logger_screen')?.value_numeric != null ? String(ex('logger_screen').value_numeric) : '');
   const [siteCond,  setSiteCond]  = useState(ex('overall_site_condition')?.value_text ?? null);
 
-  const isAlreadySaved = !!(ex('met_activities') && ex('pyranometer_clean') && ex('anemometer_spinning') && ex('rain_gauge_clear') && ex('overall_site_condition'));
+  const isAlreadySaved = !!(ex('met_activities') && ex('temp_rh_condition') && ex('pyranometer_clean') && ex('uv_radiometer_condition') && ex('anemometer_spinning') && ex('wind_vane') && ex('rain_gauge_clear') && ex('charge_controller_condition') && ex('cables_condition') && ex('overall_site_condition'));
   const [saveState, setSaveState] = useState(isAlreadySaved ? 'saved' : 'idle');
   const locked = saveState === 'saved';
 
@@ -1280,15 +1283,18 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
     const now = new Date().toISOString();
     const saves = [
       () => onSave({ reading_type: 'met_activities',    value_text:    JSON.stringify([...metActs]),        recorded_at: now }),
-      ...(pyrano    ? [() => onSave({ reading_type: 'pyranometer_clean',   value_text:    pyrano,                     recorded_at: now })] : []),
-      ...(anemo     ? [() => onSave({ reading_type: 'anemometer_spinning', value_text:    anemo,                      recorded_at: now })] : []),
-      ...(rainGauge ? [() => onSave({ reading_type: 'rain_gauge_clear',    value_text:    rainGauge,                  recorded_at: now })] : []),
+      ...(tempRhCond  ? [() => onSave({ reading_type: 'temp_rh_condition',          value_text: tempRhCond,  recorded_at: now })] : []),
+      ...(pyrano      ? [() => onSave({ reading_type: 'pyranometer_clean',           value_text: pyrano,      recorded_at: now })] : []),
+      ...(uvRadCond   ? [() => onSave({ reading_type: 'uv_radiometer_condition',     value_text: uvRadCond,   recorded_at: now })] : []),
+      ...(anemo       ? [() => onSave({ reading_type: 'anemometer_spinning',         value_text: anemo,       recorded_at: now })] : []),
+      ...(rainGauge   ? [() => onSave({ reading_type: 'rain_gauge_clear',            value_text: rainGauge,   recorded_at: now })] : []),
+      ...(chgCtrlCond ? [() => onSave({ reading_type: 'charge_controller_condition', value_text: chgCtrlCond, recorded_at: now })] : []),
+      ...(cablesCond  ? [() => onSave({ reading_type: 'cables_condition',            value_text: cablesCond,  recorded_at: now })] : []),
       ...(battery    ? [() => onSave({ reading_type: 'battery_voltage',           value_numeric: parseFloat(battery),    unit: 'V', recorded_at: now })] : []),
       ...(solarPanel ? [() => onSave({ reading_type: 'solar_panel_voltage',      value_numeric: parseFloat(solarPanel), unit: 'V', recorded_at: now })] : []),
       ...(chargeCtrl ? [() => onSave({ reading_type: 'charge_controller_voltage',value_numeric: parseFloat(chargeCtrl), unit: 'V', recorded_at: now })] : []),
       ...(lithiumBatt? [() => onSave({ reading_type: 'lithium_battery_voltage',  value_numeric: parseFloat(lithiumBatt),unit: 'V', recorded_at: now })] : []),
       ...(windVane   ? [() => onSave({ reading_type: 'wind_vane',                value_text:    windVane,                          recorded_at: now })] : []),
-      ...(logger    ? [() => onSave({ reading_type: 'logger_screen',       value_numeric: parseFloat(logger),         recorded_at: now })] : []),
       ...(siteCond  ? [() => onSave({ reading_type: 'overall_site_condition', value_text: siteCond,                   recorded_at: now })] : []),
     ];
     try {
@@ -1299,7 +1305,7 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
     }
   }
 
-  const canSave = !locked && metActs.size > 0 && !!pyrano && !!anemo && !!rainGauge && !!battery && !!solarPanel && !!chargeCtrl && !!lithiumBatt && !!siteCond;
+  const canSave = !locked && metActs.size > 0 && !!tempRhCond && !!pyrano && !!uvRadCond && !!anemo && !!windVane && !!rainGauge && !!chgCtrlCond && !!cablesCond && !!battery && !!solarPanel && !!chargeCtrl && !!lithiumBatt && !!siteCond;
 
   return (
     <div className="form-card">
@@ -1321,9 +1327,14 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
       <div style={{ borderTop: '1px solid var(--color-border)', marginBottom: '0.75rem' }} />
 
       {[
-        { key: 'pyr', label: 'Pyranometer clean?',  val: pyrano,    set: v => { setPyrano(v);    setSaveState('idle'); } },
-        { key: 'ane', label: 'Anemometer spinning?', val: anemo,     set: v => { setAnemo(v);     setSaveState('idle'); } },
-        { key: 'rg',  label: 'Rain gauge clear?',    val: rainGauge, set: v => { setRainGauge(v); setSaveState('idle'); } },
+        { key: 'trh', label: 'Temp & RH sensor clean?',      val: tempRhCond,  set: v => { setTempRhCond(v);  setSaveState('idle'); } },
+        { key: 'pyr', label: 'Pyranometer clean?',            val: pyrano,      set: v => { setPyrano(v);      setSaveState('idle'); } },
+        { key: 'uv',  label: 'UV radiometer clean?',          val: uvRadCond,   set: v => { setUvRadCond(v);   setSaveState('idle'); } },
+        { key: 'ane', label: 'Anemometer spinning?',          val: anemo,       set: v => { setAnemo(v);       setSaveState('idle'); } },
+        { key: 'wdv', label: 'Wind direction sensor ok?',     val: windVane,    set: v => { setWindVane(v);    setSaveState('idle'); } },
+        { key: 'rg',  label: 'Rain gauge clear?',             val: rainGauge,   set: v => { setRainGauge(v);   setSaveState('idle'); } },
+        { key: 'cc',  label: 'Charge controller ok?',         val: chgCtrlCond, set: v => { setChgCtrlCond(v); setSaveState('idle'); } },
+        { key: 'cab', label: 'Cables intact?',                val: cablesCond,  set: v => { setCablesCond(v);  setSaveState('idle'); } },
       ].map(({ key, label, val, set }) => (
         <div key={key} className="mb-3">
           <div className="text-[12px] font-semibold text-text-dark mb-1.5">
@@ -1367,36 +1378,6 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
             </div>
           ))}
         </div>
-      </div>
-
-      <div className="mb-3">
-        <div className="flex items-baseline justify-between mb-1.5">
-          <div className="text-[12px] font-semibold text-text-dark">Wind vane readable?</div>
-          <span className="text-[10px] text-text-light">Optional</span>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {['Yes', 'No', 'N/A'].map(opt => (
-            <button key={opt}
-              onClick={() => { if (!locked) { setWindVane(windVane === opt ? null : opt); setSaveState('idle'); } }}
-              disabled={locked}
-              data-selected={windVane === opt ? 'true' : undefined}
-              className="note-chip"
-            >{opt}</button>
-          ))}
-        </div>
-      </div>
-
-      <div className="mb-3">
-        <div className="flex items-baseline justify-between mb-1.5">
-          <div className="text-[12px] font-semibold text-text-dark">Logger screen reading</div>
-          <span className="text-[10px] text-text-light">Optional</span>
-        </div>
-        <input type="number" step="1" min="0" value={logger}
-          onChange={e => { setLogger(e.target.value); setSaveState('idle'); }}
-          disabled={locked} placeholder="e.g. 1024"
-          className={`field-input ${logger ? 'field-input--active' : ''}`}
-          style={{ height: '36px', width: 120 }}
-        />
       </div>
 
       <div style={{ borderTop: '1px solid var(--color-border)', marginBottom: '0.75rem' }} />

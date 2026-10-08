@@ -368,6 +368,14 @@ export function createPhenomenon(data) {
   });
 }
 
+export function updatePhenomenon(id, data) {
+  return request(`/api/phenomena/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
 export function getPendingColumnMappings() {
   return request('/api/column-mappings/pending');
 }
@@ -395,5 +403,13 @@ export function updateColumnMappingNodes(id, nodes) {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(nodes),
+  });
+}
+
+export function reassignColumnMapping(id, phenomenonId) {
+  return request(`/api/column-mappings/${id}/reassign`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phenomenon_id: phenomenonId }),
   });
 }

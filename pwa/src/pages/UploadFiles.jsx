@@ -354,8 +354,10 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
           parseState:         'parsed',
           dateRange:          `${fmtDate(dbFile.date_range_start)} — ${fmtDate(dbFile.date_range_end)}`,
           records:            dbFile.record_count,
-          hasGap:             dbFile.has_gap  ?? false,
-          gapDays:            dbFile.gap_days ?? null,
+          hasGap:             dbFile.has_gap      ?? false,
+          gapDays:            dbFile.gap_days     ?? null,
+          hasOverlap:         dbFile.has_overlap  ?? false,
+          overlapDays:        dbFile.overlap_days ?? null,
           hasUnmappedColumns: hasUnmapped,
           parseError:         null,
         });
@@ -744,6 +746,15 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
                         style={{ background: '#FFF3E0', color: '#E65100', border: '1px solid #E6510033' }}
                       >
                         Gap detected — {file.gapDays ?? '?'} day{file.gapDays !== 1 ? 's' : ''} of missing data before this file
+                      </div>
+                    )}
+
+                    {isParsed && file.hasOverlap && (
+                      <div
+                        className="mt-2 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold"
+                        style={{ background: '#E3F2FD', color: '#1565C0', border: '1px solid #1565C033' }}
+                      >
+                        Overlap — {file.overlapDays ?? '?'} day{file.overlapDays !== 1 ? 's' : ''} of duplicate data replaced
                       </div>
                     )}
 

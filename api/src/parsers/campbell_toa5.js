@@ -94,12 +94,14 @@ function splitLine(line) {
   return fields;
 }
 
+const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
+
 function parseToa5Date(raw) {
   const s = raw.trim().replace(/"/g, '');
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(\.\d+)?$/);
   if (!m) throw new Error(`Unrecognised TOA5 timestamp: "${s}"`);
   const [, yr, mo, dy, hr, mn, sc] = m;
-  return new Date(Date.UTC(+yr, +mo - 1, +dy, +hr, +mn, +sc));
+  return new Date(Date.UTC(+yr, +mo - 1, +dy, +hr, +mn, +sc) - SAST_OFFSET_MS);
 }
 
 function readFirstNLines(filePath, n) {

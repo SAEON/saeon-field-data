@@ -45,35 +45,64 @@ function parseStomDate(raw) {
   throw new Error(`Unrecognised STOM timestamp: "${s}"`);
 }
 
-module.exports = async function parseSaeonStom(filePath) {
+function readHeaderLine(filePath) {
+  return new Promise((resolve, reject) => {
+    const rl = readline.createInterface({ input: fs.createReadStream(filePath), crlfDelay: Infinity });
+    let found = false;
+    rl.on('line', line => {
+      if (found) return;
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#')) {
+        found = true;
+        rl.close();
+        resolve(line);
+      }
+    });
+    rl.on('close', () => { if (!found) resolve(null); });
+    rl.on('error', reject);
+  });
+}
+
+module.exports = async function parseSaeonStom(filePath, { extraMappings = {} } = {}) {
+  const headerLine = await readHeaderLine(filePath);
+  if (!headerLine) throw new Error('STOM file: no header row found');
+
+  const headerRow = splitCsvLine(headerLine);
+  const tsIdx = headerRow.findIndex(h => h.toLowerCase() === 'timestamp');
+  if (tsIdx === -1) throw new Error('STOM file: no TIMESTAMP column');
+
+  const unmappedColumns = [];
+  const cols = [];
+  for (let i = 0; i < headerRow.length; i++) {
+    if (i === tsIdx) continue;
+    const name = headerRow[i].trim();
+    if (!name) continue;
+    const key      = name.toLowerCase();
+    const phenName = PHEN_NAME_MAP[key] || extraMappings[key] || null;
+    if (phenName) {
+      cols.push({ index: i, phenName });
+    } else {
+      unmappedColumns.push({ name });
+    }
+  }
+
   async function* stream() {
     const rl = readline.createInterface({
       input:     fs.createReadStream(filePath),
       crlfDelay: Infinity,
     });
 
-    let phase  = 'comments';
-    let tsIdx  = -1;
-    let cols   = [];
+    let phase = 'comments';
 
     for await (const line of rl) {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
+      // Skip comment lines and the header row (already parsed above)
       if (phase === 'comments') {
         if (trimmed.startsWith('#')) continue;
-        const headerRow = splitCsvLine(line);
-        tsIdx = headerRow.findIndex(h => h.toLowerCase() === 'timestamp');
-        if (tsIdx === -1) return;
-
-        for (let i = 0; i < headerRow.length; i++) {
-          if (i === tsIdx) continue;
-          const name = headerRow[i].trim();
-          const phenName = PHEN_NAME_MAP[name.toLowerCase()] || null;
-          if (name && phenName) cols.push({ index: i, phenName });
-        }
         phase = 'units_check';
-        continue;
+        continue; // this is the header line — skip it
       }
 
       if (phase === 'units_check') {
@@ -112,7 +141,7 @@ module.exports = async function parseSaeonStom(filePath) {
     }
   }
 
-  return { streamName: 'raw_stom', stream: stream() };
+  return { streamName: 'raw_stom', stream: stream(), _metadata: { unmappedColumns } };
 };
 
 module.exports.streaming = true;

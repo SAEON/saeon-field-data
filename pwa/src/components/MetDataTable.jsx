@@ -47,42 +47,42 @@ const RESOLUTIONS = [
 // Column definitions per category
 const COLUMNS = {
   temperature: [
-    { key: 'temp_air_avg',    label: 'Avg (°C)',       dp: 2 },
-    { key: 'temp_air_min',    label: 'Min (°C)',       dp: 2 },
-    { key: 'temp_air_max',    label: 'Max (°C)',       dp: 2 },
-    { key: 'humid_rel_avg',   label: 'Humidity (%)',   dp: 1 },
-    { key: 'temp_dew_avg',    label: 'Dew point (°C)', dp: 2 },
-    { key: 'temp_ground_min', label: 'Ground min (°C)',dp: 2 },
+    { key: 'temp_air_avg',    label: 'temp_air_avg (°C)',    dp: 2 },
+    { key: 'temp_air_min',    label: 'temp_air_min (°C)',    dp: 2 },
+    { key: 'temp_air_max',    label: 'temp_air_max (°C)',    dp: 2 },
+    { key: 'humid_rel_avg',   label: 'humid_rel_avg (%)',    dp: 1 },
+    { key: 'temp_dew_avg',    label: 'temp_dew_avg (°C)',    dp: 2 },
+    { key: 'temp_ground_min', label: 'temp_ground_min (°C)', dp: 2 },
   ],
   wind: [
-    { key: 'wind_speed_avg', label: 'Speed (m/s)',   dp: 2 },
-    { key: 'wind_dir_avg',   label: 'Direction (°)', dp: 1 },
-    { key: 'wind_dir_sd',    label: 'Dir SD (°)',    dp: 1 },
+    { key: 'wind_speed_avg', label: 'wind_speed_avg (m/s)', dp: 2 },
+    { key: 'wind_dir_avg',   label: 'wind_dir_avg (°)',     dp: 1 },
+    { key: 'wind_dir_sd',    label: 'wind_dir_sd (°)',      dp: 1 },
   ],
   radiation: [
-    { key: 'rad_solar_avg', label: 'Solar Rad (W/m²)', dp: 1 },
+    { key: 'rad_solar_avg', label: 'rad_solar_avg (W/m²)', dp: 1 },
   ],
   uv: [
-    { key: 'rad_uv_avg', label: 'UV Rad (W/m²)', dp: 2 },
+    { key: 'rad_uv_avg', label: 'rad_uv_avg (W/m²)', dp: 2 },
   ],
   pressure: [
-    { key: 'pressure_atm_avg', label: 'Pressure (hPa)', dp: 2 },
-    { key: 'pressure_vpd_avg', label: 'VPD (kPa)',       dp: 3 },
+    { key: 'pressure_atm_avg', label: 'pressure_atm_avg (hPa)', dp: 2 },
+    { key: 'pressure_vpd_avg', label: 'pressure_vpd_avg (kPa)', dp: 3 },
   ],
   rainfall: [
-    { key: 'rain_tot', label: 'Rain (mm)', dp: 2 },
+    { key: 'rain_tot', label: 'rain_tot (mm)', dp: 2 },
   ],
   soil_temp: [
-    { key: 'temp_soil_avg', label: 'Soil Temp (°C)', dp: 2 },
+    { key: 'temp_soil_avg', label: 'temp_soil_avg (°C)', dp: 2 },
   ],
   leaf_wetness: [
-    { key: 'leaf_wet_avg', label: 'Leaf Wetness (mV)', dp: 1 },
+    { key: 'leaf_wet_avg', label: 'leaf_wet_avg (mV)', dp: 1 },
   ],
   soil_moisture: [
-    { key: 'moisture_soil_avg', label: 'VWC (%)', dp: 2 },
+    { key: 'moisture_soil_avg', label: 'moisture_soil_avg (%)', dp: 2 },
   ],
   evapo: [
-    { key: 'et_ref_tot', label: 'ET ref (mm)', dp: 3 },
+    { key: 'et_ref_tot', label: 'et_ref_tot (mm)', dp: 3 },
   ],
 };
 

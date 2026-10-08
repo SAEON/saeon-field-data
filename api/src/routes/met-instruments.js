@@ -1,7 +1,8 @@
 const express = require('express');
+const fs      = require('fs');
 const router  = express.Router();
 const db      = require('../db/queries');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireRole } = require('../middleware/auth');
 const { parseInBackground } = require('./files');
 
 const SOIL_CATEGORIES = new Set(['soil', 'leaf_wetness']);
@@ -286,6 +287,30 @@ router.post('/phenomena', async (req, res, next) => {
   }
 });
 
+router.patch('/phenomena/:id', requireRole('data_manager'), async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { display_name, phen_type, data_family, unit, measure, var_type } = req.body;
+    if (!display_name || !data_family || !unit || !measure || !var_type)
+      return res.status(400).json({ error: 'display_name, data_family, unit, measure, var_type are required' });
+    const VALID = {
+      data_family: ['met', 'groundwater', 'rainfall', 'all'],
+      measure:     ['avg', 'cumm', 'event', 'logi', 'max', 'min', 'mode', 'sd', 'smp', 'text', 'tot'],
+      var_type:    ['chr', 'difftime', 'fac', 'int', 'logi', 'num', 'posix', 'text'],
+    };
+    for (const [field, allowed] of Object.entries(VALID)) {
+      if (!allowed.includes(req.body[field]))
+        return res.status(400).json({ error: `Invalid ${field}` });
+    }
+    const row = await db.updatePhenomenon(id, {
+      displayName: display_name, phenType: phen_type ?? null,
+      dataFamily: data_family, unit, measure, varType: var_type,
+    });
+    if (!row) return res.status(404).json({ error: 'Phenomenon not found' });
+    res.json(row);
+  } catch (err) { next(err); }
+});
+
 router.get('/column-mappings/pending', async (req, res, next) => {
   try {
     const rows = await db.getPendingColumnMappings();
@@ -300,14 +325,26 @@ router.post('/column-mappings/:id/resolve', async (req, res, next) => {
     if (!phenomenon_id) return res.status(400).json({ error: 'phenomenon_id required' });
     const row = await db.resolveColumnMapping(id, { phenomenonId: phenomenon_id, resolvedBy: req.user?.id });
     if (!row) return res.status(404).json({ error: 'Mapping not found' });
-    if (row.source_file_id) {
+
+    // Reparse all files in the data_family that still have unmapped columns — not just source_file_id.
+    // This clears has_unmapped_columns on every file that benefits from the new mapping.
+    let filesQueued = 0;
+    if (row.data_family) {
+      const flagged  = await db.getFlaggedFilesForDataFamily(row.data_family);
+      const reachable = flagged.filter(f => f.storage_path && fs.existsSync(f.storage_path));
+      for (const f of reachable) await db.resetFileToPending(f.id);
+      filesQueued = reachable.length;
+      for (const f of reachable) setImmediate(() => parseInBackground(f, f.visit_id));
+    } else if (row.source_file_id) {
       const fileRecord = await db.getFileById(row.source_file_id);
-      if (fileRecord) {
+      if (fileRecord && fileRecord.storage_path && fs.existsSync(fileRecord.storage_path)) {
         await db.resetFileToPending(fileRecord.id);
+        filesQueued = 1;
         setImmediate(() => parseInBackground(fileRecord, fileRecord.visit_id));
       }
     }
-    res.json(row);
+
+    res.json({ ...row, files_queued: filesQueued });
   } catch (err) { next(err); }
 });
 
@@ -317,6 +354,40 @@ router.post('/column-mappings/:id/ignore', async (req, res, next) => {
     const row = await db.ignoreColumnMapping(id, req.user?.id);
     if (!row) return res.status(404).json({ error: 'Mapping not found' });
     res.json(row);
+  } catch (err) { next(err); }
+});
+
+router.patch('/column-mappings/:id/reassign', requireRole('data_manager'), async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { phenomenon_id } = req.body;
+    if (!phenomenon_id) return res.status(400).json({ error: 'phenomenon_id required' });
+
+    const row = await db.resolveColumnMapping(id, { phenomenonId: phenomenon_id, resolvedBy: req.user?.id });
+    if (!row) return res.status(404).json({ error: 'Mapping not found' });
+
+    let filesQueued = 0;
+
+    if (row.data_family) {
+      const files     = await db.getParsedFilesForDataFamily(row.data_family);
+      const reachable = files.filter(f => f.storage_path && fs.existsSync(f.storage_path));
+      for (const f of reachable) {
+        await db.resetFileToPending(f.id);
+      }
+      filesQueued = reachable.length;
+      for (const f of reachable) {
+        setImmediate(() => parseInBackground(f, f.visit_id));
+      }
+    } else if (row.source_file_id) {
+      const fileRecord = await db.getFileById(row.source_file_id);
+      if (fileRecord && fileRecord.storage_path && fs.existsSync(fileRecord.storage_path)) {
+        await db.resetFileToPending(fileRecord.id);
+        filesQueued = 1;
+        setImmediate(() => parseInBackground(fileRecord, fileRecord.visit_id));
+      }
+    }
+
+    res.json({ ...row, files_queued: filesQueued });
   } catch (err) { next(err); }
 });
 
