@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 
 
-export default function LoginPage() {
+export default function LoginPage({ sessionExpired = false }) {
   const { login, justSignedOut } = useAuth();
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
@@ -85,6 +85,13 @@ export default function LoginPage() {
             South African Environmental Observation Network
           </div>
         </div>
+
+        {/* Session expired notice */}
+        {sessionExpired && (
+          <div style={{ width: '100%', maxWidth: 400, marginBottom: 16, fontSize: 13, color: '#4A5568', textAlign: 'center' }}>
+            Session expired — please sign in again.
+          </div>
+        )}
 
         {/* Signed-out confirmation */}
         {justSignedOut && (

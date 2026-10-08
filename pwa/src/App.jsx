@@ -623,15 +623,19 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
               {/* Submit bar */}
               <div className="px-4 pb-3 pt-2 shrink-0 bg-surface border-t border-surface-dark">
                 <button
-                  onClick={() => setShowSubmit(true)}
-                  disabled={!canSubmit}
+                  onClick={() => {
+                    if (canSubmit) { setShowSubmit(true); return; }
+                    if (!detailsDone)  { setVisitSection('details');  return; }
+                    if (!readingsDone) { setVisitSection('readings'); return; }
+                    setVisitSection('files');
+                  }}
                   className="cta-btn"
                 >
-                  {canSubmit       ? 'Review & submit visit →'
-                    : !detailsDone  ? 'Complete site notes to continue'
-                    : !readingsDone ? 'Complete manual readings to continue'
+                  {canSubmit          ? 'Review & submit visit →'
+                    : !detailsDone    ? 'Complete site notes →'
+                    : !readingsDone   ? 'Complete manual readings →'
                     : hasUnmappedFiles ? 'Map unknown column names before submitting'
-                    : 'Upload a logger file to continue'}
+                    : 'Upload a logger file →'}
                 </button>
               </div>
             </>
@@ -736,7 +740,7 @@ export default function App() {
     );
   }
 
-  if (!auth?.id) return <LoginPage />;
+  if (!auth?.id) return <LoginPage sessionExpired={auth?.sessionExpired ?? false} />;
   if (auth?.password_change_required) return <ChangePasswordPage />;
 
   const roles = auth?.roles ?? [];

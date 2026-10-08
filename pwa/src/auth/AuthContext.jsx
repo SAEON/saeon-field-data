@@ -14,15 +14,18 @@ export function AuthProvider({ children }) {
   const [userFields,    setUserFields]    = useState(null);
   const [isReady,       setIsReady]       = useState(false);
   const [justSignedOut, setJustSignedOut] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
-  const applySession = useCallback(async () => {
+  const applySession = useCallback(async ({ fromExpiry = false } = {}) => {
     try {
       const session = await whoami();
       if (!session) {
+        if (fromExpiry) setSessionExpired(true);
         setUserFields(null);
         setIsReady(true);
         return;
       }
+      setSessionExpired(false);
       const traits = session.identity.traits;
       const me = await getMe().catch(() => null);
       setUserFields({
@@ -50,7 +53,7 @@ export function AuthProvider({ children }) {
 
   // Register 401 interceptor — any API call returning 401 triggers immediate session refresh
   useEffect(() => {
-    setUnauthorizedHandler(applySession);
+    setUnauthorizedHandler(() => applySession({ fromExpiry: true }));
     return () => setUnauthorizedHandler(null);
   }, [applySession]);
 
@@ -69,6 +72,7 @@ export function AuthProvider({ children }) {
     const csrfToken = flow.ui?.nodes?.find(n => n.attributes?.name === 'csrf_token')?.attributes?.value ?? '';
     await submitLogin(flow.id, csrfToken, email, password);
     setJustSignedOut(false);
+    setSessionExpired(false);
     await applySession();
   }, [applySession]);
 
@@ -84,7 +88,7 @@ export function AuthProvider({ children }) {
   }, [userFields]);
 
   return (
-    <AuthContext.Provider value={{ isReady, login, logout, hasRole, justSignedOut, applySession, ...(userFields ?? {}) }}>
+    <AuthContext.Provider value={{ isReady, login, logout, hasRole, justSignedOut, sessionExpired, applySession, ...(userFields ?? {}) }}>
       {children}
     </AuthContext.Provider>
   );
