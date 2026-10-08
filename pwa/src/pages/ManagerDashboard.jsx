@@ -121,11 +121,11 @@ function CalibrationHistoryPanel({ stationId }) {
 // ── Network tab ──────────────────────────────────────────────────────────────
 
 function stationHealth(daysSince, frequency) {
-  if (daysSince == null) return { color: '#E53935', label: 'Never visited' };
+  if (daysSince == null) return { label: 'Never visited', overdue: true };
   const ratio = daysSince / frequency;
-  if (ratio >= 1)    return { color: '#E53935', label: 'Overdue' };
-  if (ratio >= 0.75) return { color: '#FB8C00', label: 'Due soon' };
-  return { color: '#43A047', label: 'Current' };
+  if (ratio >= 1)    return { label: 'Overdue',   overdue: true };
+  if (ratio >= 0.75) return { label: 'Due soon',  overdue: false };
+  return { label: 'Current', overdue: false };
 }
 
 function NetworkTab() {
@@ -161,14 +161,17 @@ function NetworkTab() {
             {/* Summary pills */}
             <div className="flex gap-2 px-4 pt-4 pb-2">
               {[
-                { label: 'Overdue', count: overdue,  color: '#E53935' },
-                { label: 'Due soon', count: dueSoon, color: '#FB8C00' },
-                { label: 'Current', count: current,  color: '#43A047' },
+                { label: 'Overdue',  count: overdue,  red: true  },
+                { label: 'Due soon', count: dueSoon,  red: false },
+                { label: 'Current',  count: current,  red: false },
               ].map(p => (
                 <div key={p.label} className="flex-1 rounded-xl px-3 py-2 text-center"
-                  style={{ background: p.color + '18', border: `1px solid ${p.color}33` }}>
-                  <div className="text-[20px] font-black" style={{ color: p.color }}>{p.count}</div>
-                  <div className="text-[10px] font-semibold" style={{ color: p.color }}>{p.label}</div>
+                  style={{
+                    background: p.red && p.count > 0 ? '#FEF2F2' : 'var(--color-surface-dark)',
+                    border: `1px solid ${p.red && p.count > 0 ? '#FECACA' : 'var(--color-border)'}`,
+                  }}>
+                  <div className="text-[20px] font-black" style={{ color: p.red && p.count > 0 ? '#DC2626' : 'var(--color-text-dark)' }}>{p.count}</div>
+                  <div className="text-[10px] font-semibold" style={{ color: p.red && p.count > 0 ? '#DC2626' : 'var(--color-text-light)' }}>{p.label}</div>
                 </div>
               ))}
             </div>
@@ -177,10 +180,8 @@ function NetworkTab() {
               {stations.map(station => {
                 const h = stationHealth(station.days_since_visit, station.visit_frequency_days);
                 return (
-                  <div key={station.id} className="bg-white rounded-2xl overflow-hidden"
+                  <div key={station.id} className="bg-white rounded-2xl px-4 py-3"
                     style={{ border: '1px solid var(--color-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                    <div style={{ height: 3, background: h.color }} />
-                    <div className="px-4 py-3">
                       <div className="flex items-start justify-between gap-2 mb-1">
                         <div className="min-w-0">
                           <div className="text-[13px] font-bold text-text-dark truncate">{station.display_name}</div>
@@ -188,17 +189,15 @@ function NetworkTab() {
                         </div>
                         <FamilyBadge family={station.data_family} />
                       </div>
-                      <div className="flex items-center justify-between mt-1">
-                        <div className="text-[11px] text-text-light">
-                          Last visit: {formatDate(station.last_visited_at)}
-                          {station.days_since_visit != null && (
-                            <> · {station.days_since_visit}d ago</>
-                          )}
-                        </div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                          style={{ background: h.color + '18', color: h.color }}>
-                          {h.label}
-                        </span>
+                      <div className="text-[11px] text-text-light mt-1">
+                        {station.last_visited_at == null
+                          ? <span className="font-medium" style={{ color: '#DC2626' }}>{h.label}</span>
+                          : <>
+                              Last visit: {formatDate(station.last_visited_at)}
+                              {station.days_since_visit != null && <> · {station.days_since_visit}d ago</>}
+                              {' · '}<span className="font-medium" style={{ color: h.overdue ? '#DC2626' : 'var(--color-text-dark)' }}>{h.label}</span>
+                            </>
+                        }
                       </div>
                       {station.data_family === 'met' && (
                         <div className="mt-2 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
@@ -213,7 +212,6 @@ function NetworkTab() {
                           )}
                         </div>
                       )}
-                    </div>
                   </div>
                 );
               })}
@@ -319,7 +317,6 @@ export function ErrorsTab({ canDelete = true }) {
         )}
         {!loading && !error && files.length === 0 && (
           <div className="flex flex-col items-center justify-center h-60 gap-3 text-center px-8">
-            <div className="text-4xl">✓</div>
             <div className="text-[15px] font-semibold text-text-dark">No errors</div>
             <div className="text-[13px] text-text-light">All uploaded files have been parsed and processed successfully.</div>
           </div>
@@ -1513,10 +1510,10 @@ function PhenoStandardPanel({ onCountChange }) {
 const TABS = [
   { id: 'network',  label: 'Network',  icon: '◉' },
   { id: 'history',  label: 'History',  icon: '≡' },
-  { id: 'stations', label: 'Stations', icon: '⊞' },
   { id: 'errors',   label: 'Errors',   icon: '⚠' },
-  { id: 'columns',  label: 'Pheno',    icon: '⌗' },
+  { id: 'stations', label: 'Stations', icon: '⊞' },
   { id: 'data',     label: 'Data',     icon: '≀' },
+  { id: 'columns',  label: 'Pheno',    icon: '⌗' },
   { id: 'users',    label: 'Users',    icon: '◎' },
   { id: 'field',    label: 'Field',    icon: '⊕' },
 ];
@@ -1537,9 +1534,11 @@ export default function ManagerDashboard() {
       {activeTab === 'history'  && (
         <div className="flex flex-col flex-1 overflow-hidden">
           <header className="bg-navy h-14 flex items-center px-4 shrink-0">
+            <div className="w-10" />
             <div className="flex-1 text-center">
               <div className="text-white text-[17px] font-bold">History</div>
             </div>
+            <ProfileButton />
           </header>
           <div className="flex-1 flex flex-col overflow-hidden w-full max-w-[var(--max-width)] mx-auto">
             <HistoryTab defaultScope="all" onGoToColumns={() => setActiveTab('columns')} />

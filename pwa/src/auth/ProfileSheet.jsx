@@ -131,9 +131,6 @@ function ProfileDropdown({ onClose }) {
         <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
           {me?.role ? ROLE_LABELS[me.role] ?? me.role : '…'}
         </div>
-        <div style={{ fontSize: 11, color: '#aaa' }}>
-          ID #{me?.id ?? '…'}
-        </div>
       </div>
 
       {/* Change password */}
