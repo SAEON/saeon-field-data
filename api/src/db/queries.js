@@ -1354,6 +1354,26 @@ async function upsertGroundwaterLevels(rows) {
   );
 }
 
+async function getBarologgerSeries(stationId, from, to) {
+  const result = await pool.query(
+    `SELECT rm.measured_at,
+            MAX(rm.value_numeric) FILTER (WHERE p.name = 'baro_pressure_smp') AS pressure_kpa,
+            MAX(rm.value_numeric) FILTER (WHERE p.name = 'water_temp_smp')    AS temp_c
+     FROM   raw_measurements rm
+     JOIN   station_data_streams sds ON sds.id = rm.stream_id
+     JOIN   phenomena p ON p.id = rm.phenomenon_id
+     WHERE  sds.station_id = $1
+       AND  p.name IN ('baro_pressure_smp', 'water_temp_smp')
+       AND  rm.is_interference = false
+       AND  ($2::timestamptz IS NULL OR rm.measured_at >= $2)
+       AND  ($3::timestamptz IS NULL OR rm.measured_at <= $3)
+     GROUP  BY rm.measured_at
+     ORDER  BY rm.measured_at`,
+    [stationId, from || null, to || null]
+  );
+  return result.rows;
+}
+
 async function getGroundwaterLevels(stationId, from, to) {
   const result = await pool.query(
     `SELECT measured_at, level_m_raw, baro_kpa, level_m_comp,
@@ -1904,6 +1924,7 @@ module.exports = {
   getDataHandlesForStation,
   upsertGroundwaterLevels,
   getGroundwaterLevels,
+  getBarologgerSeries,
   // Instrument history
   getInstrumentHistory,
   getCalibrationPeriodsForStation,

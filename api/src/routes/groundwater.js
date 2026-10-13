@@ -15,8 +15,22 @@ router.get('/:id/groundwater', async (req, res, next) => {
     const from = req.query.from || null;
     const to   = req.query.to   || null;
 
-    const data = await db.getGroundwaterLevels(stationId, from, to);
-    res.json({ station_id: stationId, from, to, count: data.length, data });
+    const station = await db.getStationById(stationId);
+    if (station?.is_barologger) {
+      const data = await db.getBarologgerSeries(stationId, from, to);
+      return res.json({ station_id: stationId, from, to, mode: 'barologger', count: data.length, data });
+    }
+
+    const rows = await db.getGroundwaterLevels(stationId, from, to);
+    // Depth below ground surface = dipper − casing height = elevation_m − level_m_asl (gw_f2_driffter2.r)
+    const elev = station?.elevation_m != null ? parseFloat(station.elevation_m) : null;
+    const data = rows.map(r => ({
+      ...r,
+      depth_to_water_m: elev != null && r.level_m_asl != null
+        ? parseFloat((elev - parseFloat(r.level_m_asl)).toFixed(3))
+        : null,
+    }));
+    res.json({ station_id: stationId, from, to, mode: 'level', count: data.length, data });
   } catch (err) {
     next(err);
   }
