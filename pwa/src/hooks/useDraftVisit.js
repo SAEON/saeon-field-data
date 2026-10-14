@@ -8,13 +8,23 @@
 
 import { getDB } from './idb.js';
 
-const STORE = 'draft_visit';
-const KEY   = 'current';
+const STORE  = 'draft_visit';
+const LEGACY = 'current';                       // single shared slot used before drafts belonged to a user
+const keyFor = userId => `user:${userId}`;
 
-export async function loadDraft() {
+// The draft belonging to this user. A draft saved by an older version of the app has no owner:
+// it is returned flagged `unowned` so the caller can confirm it really is theirs before showing it.
+export async function loadDraft(userId) {
+  if (userId == null) return null;
   try {
     const db = await getDB();
-    return (await db.get(STORE, KEY)) || null;
+    const own = await db.get(STORE, keyFor(userId));
+    if (own) return own;
+    const legacy = await db.get(STORE, LEGACY);
+    if (!legacy) return null;
+    if (legacy.user_id === userId) return legacy;       // saved by this user under the old slot name
+    if (legacy.user_id == null)    return { ...legacy, unowned: true };
+    return null;                                        // someone else's
   } catch {
     return null;
   }
@@ -42,17 +52,27 @@ export async function saveDraft(draft) {
         // raw, abortController intentionally omitted
       })),
     };
-    await db.put(STORE, serialisable, KEY);
+    if (draft.user_id == null) return;          // never store a draft nobody owns
+    await db.put(STORE, serialisable, keyFor(draft.user_id));
   } catch {
     // IDB write failure is non-fatal — session still works via in-memory state
   }
 }
 
-export async function clearDraft() {
+export async function clearDraft(userId) {
+  if (userId == null) return;
   try {
     const db = await getDB();
-    await db.delete(STORE, KEY);
+    await db.delete(STORE, keyFor(userId));
+    // A shared-slot draft stamped with this user's id goes too (never one that is unowned or someone else's)
+    const legacy = await db.get(STORE, LEGACY);
+    if (legacy && legacy.user_id === userId) await db.delete(STORE, LEGACY);
   } catch {
     // non-fatal
   }
+}
+
+// Remove the old shared slot once its draft has been claimed by its real owner
+export async function removeLegacyDraft() {
+  try { await (await getDB()).delete(STORE, LEGACY); } catch { /* non-fatal */ }
 }

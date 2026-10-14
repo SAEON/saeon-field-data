@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { loadDraft, saveDraft, clearDraft } from './hooks/useDraftVisit.js';
+import { loadDraft, saveDraft, clearDraft, removeLegacyDraft } from './hooks/useDraftVisit.js';
 import { createVisit, submitVisit, abandonVisit, getVisit, isTransientError, prefetchVisitData } from './services/api.js';
 import { enqueueOp, getOps, onOpSynced, onOpEvent, flushOutbox, clearVisitOps } from './services/outbox.js';
 import { hasStoredFile } from './services/uploadQueue.js';  // also registers the upload handlers
@@ -373,9 +373,27 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
   const saveTimer = useRef(null);
 
   useEffect(() => {
-    loadDraft().then(async draft => {
-      // A draft left on a shared device by someone else is not shown to this user
-      if (draft && (draft.user_id == null || draft.user_id === auth?.id)) {
+    (async () => {
+      let draft = await loadDraft(auth?.id);
+
+      // A draft saved by an older version has no owner. Show it only if the server says the visit is
+      // this user's; otherwise it stays hidden (it may belong to someone who used this device).
+      if (draft?.unowned) {
+        try {
+          const v = await getVisit(draft.visitId);
+          if (v?.technician_id === auth?.id) {
+            draft = { ...draft, user_id: auth.id, unowned: undefined };
+            await saveDraft(draft);
+            await removeLegacyDraft();
+          } else {
+            draft = null;
+          }
+        } catch {
+          draft = null;
+        }
+      }
+
+      if (draft) {
         setDraftVisit({ visitId: draft.visitId, station: draft.station });
         setFormState(draft.formState || null);
         setReadingsDone(!!draft.progress?.readingsDone);
@@ -415,8 +433,8 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
         setActiveTab('visit');
       }
       setDraftLoading(false);
-    });
-  }, []);
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Debounced IDB save whenever draft state changes ────────────────────
   const persistDraft = useCallback((visitId, station, files, form, extra) => {
@@ -469,7 +487,7 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
 
   async function handleDiscardAndStart() {
     setShowDiscard(false);
-    await clearDraft();
+    await clearDraft(auth?.id);
     setDraftVisit(null);
     setVisitFiles([]);
     setFormState(null);
@@ -496,7 +514,7 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
     } finally {
       setAbandoning(false);
     }
-    await clearDraft();
+    await clearDraft(auth?.id);
     setDraftVisit(null);
     setVisitFiles([]);
     setFormState(null);
@@ -508,7 +526,7 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
   // ── Submit visit ───────────────────────────────────────────────────────
   async function finishSubmit(vid) {
     await clearVisitOps(vid);
-    await clearDraft();
+    await clearDraft(auth?.id);
     setDraftVisit(null);
     setVisitFiles([]);
     setFormState(null);
