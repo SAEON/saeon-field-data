@@ -3,8 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   getVisits, getVisit, uploadFile, getStationRainfall,
-  getUsers, getStations, getOverdueStations, assignVisit, updateVisit, reparseFile, updateStation,
+  getUsers, getStations, getOverdueStations, assignVisit, updateVisit, reparseFile, updateStation, getStationSensorHistory,
 } from '../services/api.js';
+import { parseMaintType, maintFieldLabel, maintValueLabel } from '../utils/sensorMaintenance.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 
 const ADD_FILE_WINDOW_DAYS = 7;
@@ -49,6 +50,16 @@ const READING_META = {
   gauge_condition:        { label: 'Raingauge condition',   unit: ''   },
   gauge_reading:          { label: 'Rainfall in gauge',     unit: 'mm' },
   last_emptied:           { label: 'Gauge last checked',    unit: ''   },
+  met_activities:         { label: 'Purpose of visit',      unit: ''   },
+  solar_panel_capacity_w:       { label: 'Solar panel capacity',                     unit: 'W'  },
+  solar_panel_voltage:          { label: 'Solar panel voltage (open circuit)',       unit: 'V'  },
+  charge_controller_model:      { label: 'Charge controller model',                  unit: ''   },
+  charge_controller_voltage:    { label: 'Charge controller output voltage',         unit: 'V'  },
+  charge_controller_condition:  { label: 'Charge controller condition',              unit: ''   },
+  battery_capacity_ah:          { label: 'Battery capacity',                         unit: 'Ah' },
+  battery_voltage_disconnected: { label: 'Battery voltage (controller disconnected)', unit: 'V' },
+  battery_voltage_connected:    { label: 'Battery voltage (controller connected)',    unit: 'V' },
+  cables_condition:             { label: 'Cables intact',                            unit: ''   },
   pyranometer_clean:      { label: 'Pyranometer clean',     unit: ''   },
   anemometer_spinning:    { label: 'Anemometer spinning',   unit: ''   },
   rain_gauge_clear:       { label: 'Rain gauge clear',      unit: ''   },
@@ -65,7 +76,7 @@ const READING_META = {
 const REQUIRED_PER_FAMILY = {
   rainfall:    ['event_type', 'gauge_condition'],
   groundwater: ['dipper_depth', 'dipper_time'],
-  met:         ['pyranometer_clean', 'anemometer_spinning', 'rain_gauge_clear'],
+  met:         ['met_activities'],
 };
 
 const EVENT_TYPE_LABELS = {
@@ -77,6 +88,8 @@ const EVENT_TYPE_LABELS = {
   raingauge_deploy: 'Raingauge deployed', raingauge_decommission: 'Raingauge decommissioned',
   raingauge_calibrate: 'Raingauge calibration', raingauge_calibration_check: 'Calibration check',
   pseudo_events: 'Non-rainfall water entry',
+  download: 'Download', maintenance: 'Maintenance',
+  calibration_check: 'Calibration check', instrument_change: 'Instrument change',
 };
 
 function readingValue(r) {
@@ -90,7 +103,7 @@ function readingValue(r) {
     try {
       const arr = JSON.parse(text);
       if (Array.isArray(arr)) {
-        const isActivity = r.reading_type === 'logger_activities' || r.reading_type === 'raingauge_activities';
+        const isActivity = r.reading_type === 'logger_activities' || r.reading_type === 'raingauge_activities' || r.reading_type === 'met_activities';
         return arr.map(v => isActivity ? (EVENT_TYPE_LABELS[v] || v) : v).join(', ') || '—';
       }
     } catch {}
@@ -367,6 +380,7 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
   const [notesValue,      setNotesValue]      = useState('');
   const [notesSaving,     setNotesSaving]     = useState(false);
   const [assignOpen,      setAssignOpen]      = useState(false);
+  const [sensorNames,     setSensorNames]     = useState({});
   const noteTimer = useRef(null);
 
   const isOversight = technicians.length > 0;
@@ -377,6 +391,15 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [visitId]);
+
+  useEffect(() => {
+    if (!visit || !(visit.readings || []).some(r => parseMaintType(r.reading_type))) return;
+    getStationSensorHistory(visit.station_id)
+      .then(list => setSensorNames(Object.fromEntries(
+        list.map(s => [String(s.id), s.serial_no ? `${s.label} (S/N ${s.serial_no})` : s.label])
+      )))
+      .catch(() => {});
+  }, [visit]);
 
   useEffect(() => {
     if (!visit || visit.data_family !== 'rainfall') return;
@@ -434,10 +457,16 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
   const siteReading    = (visit.readings || []).find(r => r.reading_type === 'overall_site_condition');
   const condStyle      = siteReading ? (CONDITION_STYLE[siteReading.value_text?.toLowerCase()] || {}) : {};
   const requiredTypes  = REQUIRED_PER_FAMILY[visit.data_family] || [];
-  const requiredReadings = (visit.readings || []).filter(r => requiredTypes.includes(r.reading_type));
-  const optionalReadings = (visit.readings || []).filter(r =>
+  const plainReadings  = (visit.readings || []).filter(r => !parseMaintType(r.reading_type));
+  const requiredReadings = plainReadings.filter(r => requiredTypes.includes(r.reading_type));
+  const optionalReadings = plainReadings.filter(r =>
     r.reading_type !== 'overall_site_condition' && !requiredTypes.includes(r.reading_type)
   );
+  const maintBySensor = {};
+  for (const r of (visit.readings || [])) {
+    const m = parseMaintType(r.reading_type);
+    if (m) (maintBySensor[m.sensorId] ??= []).push({ ...r, key: m.key });
+  }
   const hasUnmapped    = (visit.files || []).some(f => f.has_unmapped_columns);
   const canAssign      = isOversight && (visit.status === 'draft' || visit.status === 'submitted');
 
@@ -653,6 +682,31 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
                     {(visit.files || []).some(f => f.parse_status === 'parsed') ? 'Loading…' : 'Processing…'}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Sensor maintenance */}
+          {Object.keys(maintBySensor).length > 0 && (
+            <div>
+              <div className="text-[11px] font-bold text-text-light uppercase tracking-wide mb-2">
+                Sensor maintenance
+              </div>
+              <div className="flex flex-col gap-2">
+                {Object.entries(maintBySensor).map(([sensorId, rows]) => (
+                  <div key={sensorId} className="bg-white rounded-xl overflow-hidden" style={{ border: '1.5px solid var(--color-border)' }}>
+                    <div className="px-3.5 py-2 text-[12px] font-bold text-text-dark bg-surface" style={{ borderBottom: '1px solid var(--color-surface-dark)' }}>
+                      {sensorNames[sensorId] || `Sensor #${sensorId}`}
+                    </div>
+                    {rows.map((r, i) => (
+                      <div key={r.id} className="flex items-center justify-between gap-3 px-3.5 py-2"
+                        style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--color-surface-dark)' : 'none' }}>
+                        <span className="text-[12px] text-text-med">{maintFieldLabel(r.key)}</span>
+                        <span className="text-[13px] font-bold text-text-dark text-right">{maintValueLabel(r.key, r)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
               </div>
             </div>
           )}

@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { createReading, deleteReading, getVisit, createInstrumentRecord, getStationSensors, getTransferStandards, createCalibrationCheck, getCalibrationChecks, getMetInstrumentTypes, assignSensor, decommissionSensor, getStationById } from '../services/api.js';
+import { createReading, deleteReading, getVisit, createInstrumentRecord, getStationSensors, getTransferStandards, createCalibrationCheck, getCalibrationChecks, getMetInstrumentTypes, assignSensor, decommissionSensor, getStationById, getStationPowerSpecs } from '../services/api.js';
 import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
+import { MAINT_FIELDS, maintType, parseMaintType } from '../utils/sensorMaintenance.js';
 
 const REQUIRED_TYPES = {
   rainfall:           ['logger_activities', 'raingauge_activities', 'gauge_condition', 'overall_site_condition'],
   groundwater_level:  ['logger_activities', 'dipper_depth', 'dipper_time', 'overall_site_condition'],
   groundwater_baro:   ['logger_activities', 'overall_site_condition'],
-  met:                ['met_activities', 'temp_rh_condition', 'pyranometer_clean', 'uv_radiometer_condition', 'anemometer_spinning', 'wind_vane', 'rain_gauge_clear', 'charge_controller_condition', 'cables_condition', 'overall_site_condition'],
+  met:                ['met_activities', 'solar_panel_capacity_w', 'solar_panel_voltage', 'charge_controller_model', 'charge_controller_voltage', 'charge_controller_condition', 'battery_capacity_ah', 'battery_voltage_disconnected', 'battery_voltage_connected', 'cables_condition', 'overall_site_condition'],
 };
 
 const MET_ACTS = [
@@ -1234,8 +1235,33 @@ function GroundwaterForm({ saved, onSave, stationId }) {
   );
 }
 
-function MetForm({ saved, onSave, onCalibrationSelected }) {
-  function ex(type) { return saved.find(r => r.reading_type === type); }
+const POWER_COND = [['good', 'Good'], ['fair', 'Fair'], ['poor', 'Poor'], ['damaged', 'Damaged']];
+const LEGACY_COND = { yes: 'good', no: 'poor', true: 'good', false: 'poor' };
+const STATIC_POWER = ['solar_panel_capacity_w', 'charge_controller_model', 'battery_capacity_ah'];
+
+function PowerNumRow({ label, val, onChange, unit, ph, locked, fromLast }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-[12px] font-semibold text-text-dark" style={{ minWidth: 150 }}>
+        {label}<span className="text-warning text-[11px] ml-0.5">*</span>
+        {fromLast && <div className="text-[10px] font-normal text-text-light">from last visit</div>}
+      </div>
+      <div className="relative" style={{ width: 150, flexShrink: 0 }}>
+        <input type="number" step="0.01" min="0" inputMode="decimal" value={val}
+          onChange={e => onChange(e.target.value)}
+          disabled={locked} placeholder={ph}
+          className={`field-input w-full ${val ? 'field-input--active' : ''}`}
+          style={{ height: 34, fontSize: 12, paddingRight: 30 }}
+        />
+        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">{unit}</span>
+      </div>
+    </div>
+  );
+}
+
+function MetForm({ saved, onSave, onDelete, stationId, onActsChange, stagedConfirmed = [], extraReady = true, children }) {
+  const ex  = type => saved.find(r => r.reading_type === type);
+  const num = type => ex(type)?.value_numeric != null ? String(ex(type).value_numeric) : '';
 
   function normYesNo(v) {
     if (!v) return null;
@@ -1249,65 +1275,102 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
     if (!r?.value_text) return new Set();
     try { return new Set(JSON.parse(r.value_text)); } catch { return new Set(); }
   });
-  const [tempRhCond,  setTempRhCond]  = useState(() => normYesNo(ex('temp_rh_condition')?.value_text));
-  const [pyrano,      setPyrano]      = useState(() => normYesNo(ex('pyranometer_clean')?.value_text));
-  const [uvRadCond,   setUvRadCond]   = useState(() => normYesNo(ex('uv_radiometer_condition')?.value_text));
-  const [anemo,       setAnemo]       = useState(() => normYesNo(ex('anemometer_spinning')?.value_text));
-  const [rainGauge,   setRainGauge]   = useState(() => normYesNo(ex('rain_gauge_clear')?.value_text));
-  const [chgCtrlCond, setChgCtrlCond] = useState(() => normYesNo(ex('charge_controller_condition')?.value_text));
   const [cablesCond,  setCablesCond]  = useState(() => normYesNo(ex('cables_condition')?.value_text));
-  const [battery,    setBattery]    = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
-  const [solarPanel, setSolarPanel] = useState(ex('solar_panel_voltage')?.value_numeric != null ? String(ex('solar_panel_voltage').value_numeric) : '');
-  const [chargeCtrl, setChargeCtrl] = useState(ex('charge_controller_voltage')?.value_numeric != null ? String(ex('charge_controller_voltage').value_numeric) : '');
-  const [lithiumBatt,setLithiumBatt]= useState(ex('lithium_battery_voltage')?.value_numeric != null ? String(ex('lithium_battery_voltage').value_numeric) : '');
-  const [windVane,   setWindVane]   = useState(ex('wind_vane')?.value_text ?? null);
+  const [solarCap,    setSolarCap]    = useState(num('solar_panel_capacity_w'));
+  const [solarOcv,    setSolarOcv]    = useState(num('solar_panel_voltage'));
+  const [ctrlModel,   setCtrlModel]   = useState(ex('charge_controller_model')?.value_text ?? '');
+  const [ctrlOut,     setCtrlOut]     = useState(num('charge_controller_voltage'));
+  const [ctrlCond,    setCtrlCond]    = useState(() => {
+    const v = ex('charge_controller_condition')?.value_text;
+    return v ? (LEGACY_COND[v] ?? (POWER_COND.some(([k]) => k === v) ? v : null)) : null;
+  });
+  const [battAh,      setBattAh]      = useState(num('battery_capacity_ah'));
+  const [battDisc,    setBattDisc]    = useState(num('battery_voltage_disconnected'));
+  const [battConn,    setBattConn]    = useState(num('battery_voltage_connected'));
   const [siteCond,  setSiteCond]  = useState(ex('overall_site_condition')?.value_text ?? null);
+  const [prefilled, setPrefilled] = useState({});
 
-  const isAlreadySaved = !!(ex('met_activities') && ex('temp_rh_condition') && ex('pyranometer_clean') && ex('uv_radiometer_condition') && ex('anemometer_spinning') && ex('wind_vane') && ex('rain_gauge_clear') && ex('charge_controller_condition') && ex('cables_condition') && ex('overall_site_condition'));
+  const isAlreadySaved = REQUIRED_TYPES.met.every(t => !!ex(t));
   const [saveState, setSaveState] = useState(isAlreadySaved ? 'saved' : 'idle');
   const locked = saveState === 'saved';
 
+  useEffect(() => {
+    if (isAlreadySaved || !stationId) return;
+    if (STATIC_POWER.every(t => ex(t))) return;
+    getStationPowerSpecs(stationId)
+      .then(specs => {
+        const filled = {};
+        if (!ex('solar_panel_capacity_w') && specs.solar_panel_capacity_w != null) {
+          setSolarCap(v => v || String(specs.solar_panel_capacity_w)); filled.solar_panel_capacity_w = true;
+        }
+        if (!ex('charge_controller_model') && specs.charge_controller_model) {
+          setCtrlModel(v => v || String(specs.charge_controller_model)); filled.charge_controller_model = true;
+        }
+        if (!ex('battery_capacity_ah') && specs.battery_capacity_ah != null) {
+          setBattAh(v => v || String(specs.battery_capacity_ah)); filled.battery_capacity_ah = true;
+        }
+        setPrefilled(filled);
+      })
+      .catch(() => {});
+  }, [stationId]);
+
   function toggleAct(value) {
     if (locked) return;
-    setMetActs(prev => {
-      const next = new Set(prev);
-      next.has(value) ? next.delete(value) : next.add(value);
-      onCalibrationSelected(next.has('calibration_check'));
-      return next;
-    });
+    const next = new Set(metActs);
+    next.has(value) ? next.delete(value) : next.add(value);
+    setMetActs(next);
+    onActsChange(next);
     setSaveState('idle');
   }
+
+  const touch = setter => v => { setter(v); setSaveState('idle'); };
 
   async function handleSave() {
     setSaveState('saving');
     const now = new Date().toISOString();
-    const saves = [
-      () => onSave({ reading_type: 'met_activities',    value_text:    JSON.stringify([...metActs]),        recorded_at: now }),
-      ...(tempRhCond  ? [() => onSave({ reading_type: 'temp_rh_condition',          value_text: tempRhCond,  recorded_at: now })] : []),
-      ...(pyrano      ? [() => onSave({ reading_type: 'pyranometer_clean',           value_text: pyrano,      recorded_at: now })] : []),
-      ...(uvRadCond   ? [() => onSave({ reading_type: 'uv_radiometer_condition',     value_text: uvRadCond,   recorded_at: now })] : []),
-      ...(anemo       ? [() => onSave({ reading_type: 'anemometer_spinning',         value_text: anemo,       recorded_at: now })] : []),
-      ...(rainGauge   ? [() => onSave({ reading_type: 'rain_gauge_clear',            value_text: rainGauge,   recorded_at: now })] : []),
-      ...(chgCtrlCond ? [() => onSave({ reading_type: 'charge_controller_condition', value_text: chgCtrlCond, recorded_at: now })] : []),
-      ...(cablesCond  ? [() => onSave({ reading_type: 'cables_condition',            value_text: cablesCond,  recorded_at: now })] : []),
-      ...(battery    ? [() => onSave({ reading_type: 'battery_voltage',           value_numeric: parseFloat(battery),    unit: 'V', recorded_at: now })] : []),
-      ...(solarPanel ? [() => onSave({ reading_type: 'solar_panel_voltage',      value_numeric: parseFloat(solarPanel), unit: 'V', recorded_at: now })] : []),
-      ...(chargeCtrl ? [() => onSave({ reading_type: 'charge_controller_voltage',value_numeric: parseFloat(chargeCtrl), unit: 'V', recorded_at: now })] : []),
-      ...(lithiumBatt? [() => onSave({ reading_type: 'lithium_battery_voltage',  value_numeric: parseFloat(lithiumBatt),unit: 'V', recorded_at: now })] : []),
-      ...(windVane   ? [() => onSave({ reading_type: 'wind_vane',                value_text:    windVane,                          recorded_at: now })] : []),
-      ...(siteCond  ? [() => onSave({ reading_type: 'overall_site_condition', value_text: siteCond,                   recorded_at: now })] : []),
-    ];
+    let wentOffline = false;
+    async function put(reading) {
+      try { await onSave(reading); }
+      catch (err) { if (err?.offline) wentOffline = true; else throw err; }
+    }
+    const numeric = (reading_type, v, unit) => put({ reading_type, value_numeric: parseFloat(v), unit, recorded_at: now });
     try {
-      for (const fn of saves) await fn();
-      setSaveState('saved');
-    } catch (err) {
-      setSaveState(err?.offline ? 'queued' : 'error');
+      await put({ reading_type: 'met_activities', value_text: JSON.stringify([...metActs]), recorded_at: now });
+      await numeric('solar_panel_capacity_w', solarCap, 'W');
+      await numeric('solar_panel_voltage', solarOcv, 'V');
+      await put({ reading_type: 'charge_controller_model', value_text: ctrlModel.trim(), recorded_at: now });
+      await numeric('charge_controller_voltage', ctrlOut, 'V');
+      await put({ reading_type: 'charge_controller_condition', value_text: ctrlCond, recorded_at: now });
+      await numeric('battery_capacity_ah', battAh, 'Ah');
+      await numeric('battery_voltage_disconnected', battDisc, 'V');
+      await numeric('battery_voltage_connected', battConn, 'V');
+      await put({ reading_type: 'cables_condition', value_text: cablesCond, recorded_at: now });
+      await put({ reading_type: 'overall_site_condition', value_text: siteCond, recorded_at: now });
+
+      // Sensor "No change" confirmations are staged on the page and written here, with the rest of the form.
+      const staged = new Set(stagedConfirmed.map(String));
+      for (const id of staged) {
+        await put({ reading_type: maintType(id, 'confirmation'), value_text: 'no_change', recorded_at: now });
+      }
+      for (const r of saved) {
+        const m = parseMaintType(r.reading_type);
+        if (m?.key === 'confirmation' && r.value_text === 'no_change' && !staged.has(String(m.sensorId))) {
+          await onDelete(r.reading_type);
+        }
+      }
+      setSaveState(wentOffline ? 'queued' : 'saved');
+    } catch {
+      setSaveState('error');
     }
   }
 
-  const canSave = !locked && metActs.size > 0 && !!tempRhCond && !!pyrano && !!uvRadCond && !!anemo && !!windVane && !!rainGauge && !!chgCtrlCond && !!cablesCond && !!battery && !!solarPanel && !!chargeCtrl && !!lithiumBatt && !!siteCond;
+  const isNum = v => v !== '' && !isNaN(parseFloat(v));
+  const canSave = !locked && metActs.size > 0
+    && isNum(solarCap) && isNum(solarOcv) && ctrlModel.trim() !== '' && isNum(ctrlOut) && !!ctrlCond
+    && isNum(battAh) && isNum(battDisc) && isNum(battConn) && !!cablesCond && !!siteCond && extraReady;
 
   return (
+    <>
     <div className="form-card">
       <div className="text-[12px] font-semibold text-text-dark mb-2">
         Purpose of visit <span className="text-warning text-[11px]">*</span>
@@ -1326,56 +1389,55 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
 
       <div style={{ borderTop: '1px solid var(--color-border)', marginBottom: '0.75rem' }} />
 
-      {[
-        { key: 'trh', label: 'Temp & RH sensor clean?',      val: tempRhCond,  set: v => { setTempRhCond(v);  setSaveState('idle'); } },
-        { key: 'pyr', label: 'Pyranometer clean?',            val: pyrano,      set: v => { setPyrano(v);      setSaveState('idle'); } },
-        { key: 'uv',  label: 'UV radiometer clean?',          val: uvRadCond,   set: v => { setUvRadCond(v);   setSaveState('idle'); } },
-        { key: 'ane', label: 'Anemometer spinning?',          val: anemo,       set: v => { setAnemo(v);       setSaveState('idle'); } },
-        { key: 'wdv', label: 'Wind direction sensor ok?',     val: windVane,    set: v => { setWindVane(v);    setSaveState('idle'); } },
-        { key: 'rg',  label: 'Rain gauge clear?',             val: rainGauge,   set: v => { setRainGauge(v);   setSaveState('idle'); } },
-        { key: 'cc',  label: 'Charge controller ok?',         val: chgCtrlCond, set: v => { setChgCtrlCond(v); setSaveState('idle'); } },
-        { key: 'cab', label: 'Cables intact?',                val: cablesCond,  set: v => { setCablesCond(v);  setSaveState('idle'); } },
-      ].map(({ key, label, val, set }) => (
-        <div key={key} className="mb-3">
-          <div className="text-[12px] font-semibold text-text-dark mb-1.5">
-            {label} <span className="text-warning text-[11px]">*</span>
+      <div className="mb-3">
+        <div className="text-[11px] font-bold text-text-light uppercase tracking-wide mb-2" style={{ letterSpacing: '0.06em' }}>Power system</div>
+        <div className="flex flex-col gap-2.5">
+          <PowerNumRow label="Solar panel capacity" val={solarCap} onChange={touch(setSolarCap)} unit="W" ph="30" locked={locked} fromLast={prefilled.solar_panel_capacity_w} />
+          <PowerNumRow label="Solar panel voltage (open circuit)" val={solarOcv} onChange={touch(setSolarOcv)} unit="V" ph="21.8" locked={locked} />
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[12px] font-semibold text-text-dark" style={{ minWidth: 150 }}>
+              Charge controller model<span className="text-warning text-[11px] ml-0.5">*</span>
+              {prefilled.charge_controller_model && <div className="text-[10px] font-normal text-text-light">from last visit</div>}
+            </div>
+            <input type="text" value={ctrlModel} disabled={locked} placeholder="e.g. 4A MPPT"
+              onChange={e => touch(setCtrlModel)(e.target.value)}
+              className={`field-input ${ctrlModel ? 'field-input--active' : ''}`}
+              style={{ width: 150, height: 34, fontSize: 12, flexShrink: 0 }} />
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {[['Yes', 'yes'], ['No', 'no'], ['N/A', 'n/a']].map(([lbl, v]) => (
-              <button key={lbl} onClick={() => !locked && set(val === v ? null : v)} disabled={locked}
-                data-selected={val === v ? 'true' : undefined}
-                className="note-chip"
-              >{lbl}</button>
-            ))}
+
+          <PowerNumRow label="Charge controller output voltage" val={ctrlOut} onChange={touch(setCtrlOut)} unit="V" ph="13.2" locked={locked} />
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[12px] font-semibold text-text-dark" style={{ minWidth: 150 }}>
+              Charge controller condition<span className="text-warning text-[11px] ml-0.5">*</span>
+            </div>
+            <select value={ctrlCond ?? ''} disabled={locked}
+              onChange={e => touch(setCtrlCond)(e.target.value || null)}
+              className="rounded-lg px-2 bg-surface-dark text-text-dark border-none" style={{ width: 150, height: 34, fontSize: 12, flexShrink: 0 }}>
+              <option value="">Select…</option>
+              {POWER_COND.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
           </div>
+
+          <PowerNumRow label="Battery capacity" val={battAh} onChange={touch(setBattAh)} unit="Ah" ph="9" locked={locked} fromLast={prefilled.battery_capacity_ah} />
+          <PowerNumRow label="Battery voltage, charge controller disconnected" val={battDisc} onChange={touch(setBattDisc)} unit="V" ph="13.16" locked={locked} />
+          <PowerNumRow label="Battery voltage, charge controller connected" val={battConn} onChange={touch(setBattConn)} unit="V" ph="13.18" locked={locked} />
         </div>
-      ))}
+      </div>
 
       <div style={{ borderTop: '1px solid var(--color-border)', marginBottom: '0.75rem' }} />
 
       <div className="mb-3">
-        <div className="text-[11px] font-bold text-text-light uppercase tracking-wide mb-2" style={{ letterSpacing: '0.06em' }}>Power system</div>
-        <div className="flex flex-col gap-2">
-          {[
-            { label: 'Battery voltage',     req: true,  val: battery,    set: v => { setBattery(v);    setSaveState('idle'); }, ph: '12.6' },
-            { label: 'Solar panel (OCV)',    req: true,  val: solarPanel, set: v => { setSolarPanel(v); setSaveState('idle'); }, ph: '18.2' },
-            { label: 'Charge controller',   req: true,  val: chargeCtrl, set: v => { setChargeCtrl(v); setSaveState('idle'); }, ph: '13.8' },
-            { label: 'Internal lithium',    req: true,  val: lithiumBatt,set: v => { setLithiumBatt(v);setSaveState('idle'); }, ph: '3.6'  },
-          ].map(({ label, req, val, set, ph }) => (
-            <div key={label} className="flex items-center justify-between gap-3">
-              <div className="text-[12px] font-semibold text-text-dark" style={{ minWidth: 130 }}>
-                {label}{req && <span className="text-warning text-[11px] ml-0.5">*</span>}
-              </div>
-              <div className="relative flex-1" style={{ maxWidth: 120 }}>
-                <input type="number" step="0.01" min="0" value={val}
-                  onChange={e => set(e.target.value)}
-                  disabled={locked} placeholder={ph}
-                  className={`field-input w-full ${val ? 'field-input--active' : ''}`}
-                  style={{ height: '36px', paddingRight: '26px' }}
-                />
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-text-light pointer-events-none">V</span>
-              </div>
-            </div>
+        <div className="text-[12px] font-semibold text-text-dark mb-1.5">
+          Cables intact? <span className="text-warning text-[11px]">*</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {[['Yes', 'yes'], ['No', 'no'], ['N/A', 'n/a']].map(([lbl, v]) => (
+            <button key={lbl} onClick={() => !locked && touch(setCablesCond)(cablesCond === v ? null : v)} disabled={locked}
+              data-selected={cablesCond === v ? 'true' : undefined}
+              className="note-chip"
+            >{lbl}</button>
           ))}
         </div>
       </div>
@@ -1404,6 +1466,10 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
         </div>
       </div>
 
+    </div>
+
+      {typeof children === 'function' ? children({ locked }) : children}
+
       <button
         onClick={handleSave}
         disabled={!canSave || saveState === 'saving'}
@@ -1412,19 +1478,26 @@ function MetForm({ saved, onSave, onCalibrationSelected }) {
       >
         {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : saveState === 'queued' ? '≡ Queued' : saveState === 'error' ? 'Retry' : 'Save'}
       </button>
-    </div>
+    </>
   );
 }
 
 // ── Met sensor confirmation ───────────────────────────────────────────────────
 
 
-function MetSensorConfirmationSection({ stationId, visitId, onAllConfirmed, onSensorsChanged }) {
+function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSave, onAllConfirmed, onSensorsChanged, onStaged }) {
   const [sensors,    setSensors]    = useState(null);
   const [types,      setTypes]      = useState([]);
   const [cardState,  setCardState]  = useState({});
   const [changeData, setChangeData] = useState({});
+  const [rowErr,     setRowErr]     = useState({});
   const [error,      setError]      = useState(null);
+
+  const confKey = id => maintType(id, 'confirmation');
+  const initialState = id => {
+    const c = saved.find(r => r.reading_type === confKey(id))?.value_text;
+    return c === 'no_change' ? 'confirmed' : c === 'changed' ? 'saved' : 'idle';
+  };
 
   useEffect(() => {
     Promise.all([getStationSensors(stationId), getMetInstrumentTypes()])
@@ -1432,7 +1505,7 @@ function MetSensorConfirmationSection({ stationId, visitId, onAllConfirmed, onSe
         setSensors(s);
         setTypes(t);
         const init = {};
-        s.forEach(sensor => { init[sensor.id] = 'idle'; });
+        s.forEach(sensor => { init[sensor.id] = initialState(sensor.id); });
         setCardState(init);
       })
       .catch(() => setError('Could not load deployed sensors.'));
@@ -1442,42 +1515,72 @@ function MetSensorConfirmationSection({ stationId, visitId, onAllConfirmed, onSe
     if (!sensors) return;
     const allDone = sensors.every(s => ['confirmed', 'saved'].includes(cardState[s.id]));
     onAllConfirmed(sensors.length === 0 || allDone);
+    onStaged(sensors.filter(s => cardState[s.id] === 'confirmed').map(s => s.id));
   }, [cardState, sensors]);
 
   function setField(sensorId, field, value) {
     setChangeData(prev => ({ ...prev, [sensorId]: { ...prev[sensorId], [field]: value } }));
   }
 
-  function confirm(sensorId) {
-    setCardState(prev => ({ ...prev, [sensorId]: 'confirmed' }));
+  const setRowError = (id, msg) => setRowErr(prev => ({ ...prev, [id]: msg }));
+  const setState    = (id, st)  => setCardState(prev => ({ ...prev, [id]: st }));
+
+  async function persistConfirmation(id, value) {
+    try {
+      await onSave({ reading_type: confKey(id), value_text: value, recorded_at: new Date().toISOString() });
+      return true;
+    } catch (err) {
+      return !!err?.offline;
+    }
   }
 
-  function startChange(sensorId) {
-    setCardState(prev => ({ ...prev, [sensorId]: 'changing' }));
+  function chooseNoChange(sensorId) {
+    if (locked) return;
+    setRowError(sensorId, null);
+    if (cardState[sensorId] === 'confirmed') { setState(sensorId, 'idle'); return; }
+    setChangeData(prev => { const n = { ...prev }; delete n[sensorId]; return n; });
+    setState(sensorId, 'confirmed');
+  }
+
+  function chooseChanged(sensorId) {
+    if (locked) return;
+    setRowError(sensorId, null);
+    const state = cardState[sensorId];
+    if (state === 'changing' || state === 'error') { setState(sensorId, 'idle'); return; }
+    setState(sensorId, 'changing');
     setChangeData(prev => ({ ...prev, [sensorId]: { mode: 'swap', newTypeId: '', newSerial: '' } }));
   }
 
   async function saveChange(sensor) {
     const data = changeData[sensor.id] || {};
-    setCardState(prev => ({ ...prev, [sensor.id]: 'saving' }));
+    setState(sensor.id, 'saving');
     try {
+      let created = null;
       if (data.mode === 'decommission') {
         await decommissionSensor(stationId, sensor.id);
       } else {
         const typeId = data.mode === 'swap' ? sensor.instrument_type_id : parseInt(data.newTypeId, 10);
-        await assignSensor(stationId, {
+        created = await assignSensor(stationId, {
           instrument_type_id: typeId,
           serial_no:          data.newSerial || null,
           sensitivity_value:  data.newSensitivity ? parseFloat(data.newSensitivity) : null,
           effective_from:     new Date().toISOString(),
           visit_id:           visitId,
         });
+        if (created?.id) await persistConfirmation(created.id, 'changed');
       }
-      setCardState(prev => ({ ...prev, [sensor.id]: 'saved' }));
-      setSensors(prev => prev.filter(s => s.id !== sensor.id));
+      const fresh = await getStationSensors(stationId);
+      setSensors(fresh);
+      setCardState(prev => {
+        const next = {};
+        fresh.forEach(sn => {
+          next[sn.id] = created && sn.id === created.id ? 'saved' : (prev[sn.id] ?? initialState(sn.id));
+        });
+        return next;
+      });
       onSensorsChanged();
     } catch {
-      setCardState(prev => ({ ...prev, [sensor.id]: 'error' }));
+      setState(sensor.id, 'error');
     }
   }
 
@@ -1503,14 +1606,14 @@ function MetSensorConfirmationSection({ stationId, visitId, onAllConfirmed, onSe
         const state = cardState[sensor.id];
         const data  = changeData[sensor.id] || {};
 
-        if (state === 'confirmed' || state === 'saved') {
+        if (state === 'saved') {
           return (
             <div key={sensor.id} className="form-card flex items-center justify-between">
               <div>
-                <div className="text-[12px] font-semibold text-text-dark">{sensor.label}</div>
-                {sensor.serial_no && <div className="text-[11px] text-text-light">S/N: {sensor.serial_no}</div>}
+                <div className="font-bold text-text-dark" style={{ fontSize: 13 }}>{sensor.label}</div>
+                {sensor.serial_no && <div className="text-text-light" style={{ fontSize: 11 }}>S/N {sensor.serial_no}</div>}
               </div>
-              <span className="text-[11px] font-semibold text-success">✓ Confirmed</span>
+              <span className="font-semibold text-success" style={{ fontSize: 11 }}>✓ Changed</span>
             </div>
           );
         }
@@ -1531,26 +1634,31 @@ function MetSensorConfirmationSection({ stationId, visitId, onAllConfirmed, onSe
           <div key={sensor.id} className="form-card">
             <div className="flex items-center justify-between mb-2">
               <div>
-                <div className="text-[12px] font-semibold text-text-dark">{sensor.label}</div>
-                {sensor.serial_no && <div className="text-[11px] text-text-light">S/N: {sensor.serial_no}</div>}
+                <div className="font-bold text-text-dark" style={{ fontSize: 13 }}>{sensor.label}</div>
+                {sensor.serial_no && <div className="text-text-light" style={{ fontSize: 11 }}>S/N {sensor.serial_no}</div>}
               </div>
-              {state === 'idle' && (
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => confirm(sensor.id)}
-                    className="px-2.5 h-7 rounded-md text-[11px] font-semibold bg-success-light text-success border-none"
-                  >
-                    No change
-                  </button>
-                  <button
-                    onClick={() => startChange(sensor.id)}
-                    className="px-2.5 h-7 rounded-md text-[11px] font-semibold bg-surface-dark text-text-dark border-none"
-                  >
-                    Changed
-                  </button>
-                </div>
-              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => chooseNoChange(sensor.id)}
+                  disabled={state === 'saving' || locked}
+                  className={state === 'confirmed' ? 'bg-success-light text-success' : 'bg-white text-text-med'}
+                  style={{ fontSize: 12, height: 32, padding: '0 12px', lineHeight: 1, borderRadius: 8, fontWeight: 600,
+                           border: state === 'confirmed' ? '1.5px solid currentColor' : '1.5px solid #D7DCE3' }}
+                >
+                  {state === 'confirmed' ? '✓ No change' : 'No change'}
+                </button>
+                <button
+                  onClick={() => chooseChanged(sensor.id)}
+                  disabled={state === 'saving' || locked}
+                  className={state === 'changing' || state === 'error' || state === 'saving' ? 'bg-navy text-white' : 'bg-white text-text-med'}
+                  style={{ fontSize: 12, height: 32, padding: '0 12px', lineHeight: 1, borderRadius: 8, fontWeight: 600,
+                           border: state === 'changing' || state === 'error' || state === 'saving' ? '1.5px solid var(--color-navy)' : '1.5px solid #D7DCE3' }}
+                >
+                  Changed
+                </button>
+              </div>
             </div>
+            {rowErr[sensor.id] && <div className="text-[11px] text-error mb-2 text-right">{rowErr[sensor.id]}</div>}
 
             {state === 'changing' || state === 'saving' || state === 'error' ? (
               <div className="pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
@@ -2000,17 +2108,201 @@ function MetCalibrationSection({ visitId, stationId, onComplete }) {
   );
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
+// ── Met sensor maintenance (per sensor, per visit) ────────────────────────────
+// Fields shown per sensor come from met_instrument_types.maintenance_checks (QMS sensor lookup).
+// Each answer is stored as a manual reading: reading_type = smaint:<station_sensor_id>:<field key>.
 
-const FAMILY_LABEL = { rainfall: 'Rainfall', groundwater: 'Groundwater', met: 'Meteorological' };
+const maintSaved = (saved, sensorId, key) => saved.find(r => r.reading_type === maintType(sensorId, key));
+const sensorFields = sensor => MAINT_FIELDS.filter(f => sensor.maintenance_checks?.[f.key]);
+
+function sensorMaintComplete(sensor, saved) {
+  return sensorFields(sensor).every(f => {
+    if (f.onlyWhen && maintSaved(saved, sensor.id, f.onlyWhen.key)?.value_text !== f.onlyWhen.value) return true;
+    return !!maintSaved(saved, sensor.id, f.key);
+  });
+}
+
+function SensorMaintenanceCard({ sensor, saved, onSave, onDelete }) {
+  const fields = sensorFields(sensor);
+  const complete = sensorMaintComplete(sensor, saved);
+
+  const [open,   setOpen]   = useState(!complete);
+  const [status, setStatus] = useState('idle'); // idle | saving | queued | error
+  const [values, setValues] = useState(() => {
+    const v = {};
+    for (const f of fields) {
+      const r = maintSaved(saved, sensor.id, f.key);
+      if (!r) continue;
+      v[f.key] = f.type === 'orientation'
+        ? (r.value_text === 'n/a' ? 'n/a' : (r.value_numeric != null ? String(r.value_numeric) : ''))
+        : (r.value_text ?? '');
+    }
+    v.remarks = maintSaved(saved, sensor.id, 'remarks')?.value_text ?? '';
+    return v;
+  });
+
+  const visible = f => !f.onlyWhen || values[f.onlyWhen.key] === f.onlyWhen.value;
+
+  async function run(fn) {
+    setStatus('saving');
+    try { await fn(); setStatus('idle'); }
+    catch (err) { setStatus(err?.offline ? 'queued' : 'error'); }
+  }
+
+  const setVal = (key, v) => setValues(prev => ({ ...prev, [key]: v }));
+
+  function saveValue(key, reading) {
+    return run(() => onSave({ reading_type: maintType(sensor.id, key), recorded_at: new Date().toISOString(), ...reading }));
+  }
+  function clearValue(key) {
+    if (!maintSaved(saved, sensor.id, key)) return Promise.resolve();
+    return run(() => onDelete(maintType(sensor.id, key)));
+  }
+
+  function changeSelect(f, v) {
+    setVal(f.key, v);
+    if (f.key === 'level_as_found' && v !== 'not_level') {
+      setVal('level_if_adjusted', '');
+      clearValue('level_if_adjusted');
+    }
+    return v ? saveValue(f.key, { value_text: v }) : clearValue(f.key);
+  }
+
+  function commitText(f) {
+    const v = (values[f.key] ?? '').trim();
+    if (v === (maintSaved(saved, sensor.id, f.key)?.value_text ?? '')) return;
+    return v ? saveValue(f.key, { value_text: v }) : clearValue(f.key);
+  }
+
+  function commitOrientation(f, raw = values[f.key]) {
+    if (raw === 'n/a') return saveValue(f.key, { value_text: 'n/a' });
+    if (raw === '' || raw == null) return clearValue(f.key);
+    const n = parseFloat(raw);
+    if (isNaN(n) || n < 0 || n > 360) return;
+    if (maintSaved(saved, sensor.id, f.key)?.value_numeric === n) return;
+    return saveValue(f.key, { value_numeric: n, unit: '°' });
+  }
+
+  function commitRemarks() {
+    const v = (values.remarks ?? '').trim();
+    if (v === (maintSaved(saved, sensor.id, 'remarks')?.value_text ?? '')) return;
+    return v ? saveValue('remarks', { value_text: v }) : clearValue('remarks');
+  }
+
+  const ctlStyle = { width: 150, height: 34, fontSize: 12, flexShrink: 0 };
+  const selectCls = 'rounded-lg px-2 bg-surface-dark text-text-dark border-none';
+
+  return (
+    <div className="form-card">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between text-left bg-transparent border-none p-0"
+      >
+        <div>
+          <div className="text-[13px] font-bold text-text-dark">{sensor.label}</div>
+          {sensor.serial_no && <div className="text-[11px] text-text-light">S/N {sensor.serial_no}</div>}
+        </div>
+        <div className="text-[11px] font-semibold text-text-light">
+          {status === 'saving' ? 'Saving…' : status === 'queued' ? '≡ Queued' : status === 'error' ? 'Not saved'
+            : complete ? '✓ Saved' : ''} {open ? '▾' : '▸'}
+        </div>
+      </button>
+
+      {open && (
+        <div className="mt-3 flex flex-col gap-2.5">
+          {fields.filter(visible).map(f => (
+            <div key={f.key} className="flex items-center justify-between gap-3">
+              <label className="text-[12px] font-semibold text-text-dark">
+                {f.label} <span className="text-warning text-[11px]">*</span>
+              </label>
+              {f.options && (
+                <select value={values[f.key] ?? ''} onChange={e => changeSelect(f, e.target.value)}
+                  className={selectCls} style={ctlStyle}>
+                  <option value="">Select…</option>
+                  {f.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              )}
+              {f.type === 'text' && (
+                <input type="text" value={values[f.key] ?? ''} placeholder={f.placeholder}
+                  onChange={e => setVal(f.key, e.target.value)}
+                  onBlur={() => commitText(f)}
+                  className="field-input" style={ctlStyle} />
+              )}
+              {f.type === 'orientation' && (
+                <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
+                  <input type="number" step="1" min="0" max="360" inputMode="numeric"
+                    value={values[f.key] === 'n/a' ? '' : (values[f.key] ?? '')}
+                    disabled={values[f.key] === 'n/a'} placeholder="0–360"
+                    onChange={e => setVal(f.key, e.target.value)}
+                    onBlur={() => commitOrientation(f)}
+                    className="field-input" style={{ width: 80, height: 34, fontSize: 12 }} />
+                  <button
+                    data-selected={values[f.key] === 'n/a' ? 'true' : undefined}
+                    onClick={() => { const next = values[f.key] === 'n/a' ? '' : 'n/a'; setVal(f.key, next); commitOrientation(f, next); }}
+                    className="note-chip"
+                  >N/A</button>
+                </div>
+              )}
+            </div>
+          ))}
+
+          <div>
+            <label className="text-[12px] font-semibold text-text-dark block mb-1">Remarks <span className="text-text-light font-normal">(optional)</span></label>
+            <textarea value={values.remarks ?? ''} rows={2}
+              onChange={e => setVal('remarks', e.target.value)}
+              onBlur={commitRemarks}
+              className="field-input w-full" style={{ height: 'auto', padding: '8px' }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetSensorMaintenanceSection({ stationId, saved, onSave, onDelete, onComplete }) {
+  const [sensors, setSensors] = useState(null);
+  const [error,   setError]   = useState(null);
+
+  useEffect(() => {
+    getStationSensors(stationId)
+      .then(setSensors)
+      .catch(() => setError('Could not load sensors — check connection and reload.'));
+  }, [stationId]);
+
+  useEffect(() => {
+    if (!sensors) return;
+    onComplete(sensors.every(s => sensorMaintComplete(s, saved)));
+  }, [sensors, saved]);
+
+  if (error) return <div className="form-card text-[12px] text-error">{error}</div>;
+  if (!sensors) return <div className="form-card text-[12px] text-text-light">Loading sensors…</div>;
+  if (sensors.length === 0) return null;
+
+  const done = sensors.filter(s => sensorMaintComplete(s, saved)).length;
+
+  return (
+    <>
+      <div className="flex items-center gap-1.5 pb-2 pt-1 text-[12px] font-semibold text-text-dark">
+        Sensor maintenance ({done}/{sensors.length} complete)
+      </div>
+      {sensors.map(s => (
+        <SensorMaintenanceCard key={s.id} sensor={s} saved={saved} onSave={onSave} onDelete={onDelete} />
+      ))}
+    </>
+  );
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
 
 export default function ManualReadings({ visitId, stationId, dataFamily, isBarologger, onReadingsSaved, onLoggerUnavailable }) {
   const [saved,               setSaved]               = useState([]);
   const [loaded,              setLoaded]              = useState(false);
   const [formKey,             setFormKey]             = useState(0);   // increment to remount fields after queue flush
-  const [calibrationSelected,    setCalibrationSelected]    = useState(false);
+  const [metActs,                setMetActs]                = useState(() => new Set());
   const [sensorConfirmationDone, setSensorConfirmationDone] = useState(false);
   const [calibrationAllSaved,    setCalibrationAllSaved]    = useState(false);
+  const [sensorMaintDone,         setSensorMaintDone]        = useState(false);
+  const [stagedConfirmed,         setStagedConfirmed]        = useState([]);
   const [instrumentChangeKey,    setInstrumentChangeKey]    = useState(0);
   const calledDone  = useRef(false);
   const onlineTimer = useRef(null);
@@ -2027,7 +2319,7 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
           if (actR?.value_text) {
             try {
               const acts = JSON.parse(actR.value_text);
-              setCalibrationSelected(acts.includes('calibration_check'));
+              setMetActs(new Set(acts));
             } catch {}
           }
         }
@@ -2066,13 +2358,14 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
     if (required.length === 0) return;
     const savedTypes = new Set(saved.map(r => r.reading_type));
     const readingsDone = required.every(t => savedTypes.has(t));
-    const calibDone = dataFamily !== 'met' || (!calibrationSelected || calibrationAllSaved);
-    const confirmDone = dataFamily !== 'met' || sensorConfirmationDone;
-    if (readingsDone && confirmDone && calibDone) {
+    const calibDone   = dataFamily !== 'met' || !metActs.has('calibration_check') || calibrationAllSaved;
+    const confirmDone = dataFamily !== 'met' || !metActs.has('instrument_change') || sensorConfirmationDone;
+    const maintDone   = dataFamily !== 'met' || !metActs.has('maintenance')       || sensorMaintDone;
+    if (readingsDone && confirmDone && maintDone && calibDone) {
       calledDone.current = true;
       onReadingsSaved?.();
     }
-  }, [saved, dataFamily, sensorConfirmationDone, calibrationSelected, calibrationAllSaved, onReadingsSaved]);
+  }, [saved, dataFamily, sensorConfirmationDone, sensorMaintDone, metActs, calibrationAllSaved, onReadingsSaved]);
 
   // Flush queued readings when reconnected (2.5s debounce for network stabilisation)
   useEffect(() => {
@@ -2151,10 +2444,6 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
           </div>
         )}
 
-        <div className="flex items-center gap-1.5 pb-3 text-[12px] font-semibold" style={{ color: 'var(--fc-text)' }}>
-          {FAMILY_LABEL[dataFamily]} station — record all readings below
-        </div>
-
         <div key={formKey}>
           {dataFamily === 'rainfall'    && <RainfallForm    saved={saved} onSave={handleSave} visitId={visitId} stationId={stationId} />}
           {dataFamily === 'groundwater' && isBarologger  && <BarologgerForm  saved={saved} onSave={handleSave} />}
@@ -2163,24 +2452,45 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
             <MetForm
               saved={saved}
               onSave={handleSave}
-              onCalibrationSelected={setCalibrationSelected}
-            />
-          )}
-          {dataFamily === 'met' && (
+              onDelete={handleDelete}
+              stationId={stationId}
+              onActsChange={setMetActs}
+              stagedConfirmed={stagedConfirmed}
+              extraReady={!metActs.has('instrument_change') || sensorConfirmationDone}
+            >
+              {({ locked }) => (<>
+          {metActs.has('instrument_change') && (
             <MetSensorConfirmationSection
               stationId={stationId}
               visitId={visitId}
+              saved={saved}
+              locked={locked}
+              onSave={handleSave}
+              onStaged={setStagedConfirmed}
               onAllConfirmed={setSensorConfirmationDone}
               onSensorsChanged={() => setInstrumentChangeKey(k => k + 1)}
             />
           )}
-          {dataFamily === 'met' && sensorConfirmationDone && calibrationSelected && (
+          {metActs.has('maintenance') && (!metActs.has('instrument_change') || sensorConfirmationDone) && (
+            <MetSensorMaintenanceSection
+              key={instrumentChangeKey}
+              stationId={stationId}
+              saved={saved}
+              onSave={handleSave}
+              onDelete={handleDelete}
+              onComplete={setSensorMaintDone}
+            />
+          )}
+          {metActs.has('calibration_check') && (!metActs.has('instrument_change') || sensorConfirmationDone) && (
             <MetCalibrationSection
               key={instrumentChangeKey}
               visitId={visitId}
               stationId={stationId}
               onComplete={setCalibrationAllSaved}
             />
+          )}
+              </>)}
+            </MetForm>
           )}
 
         </div>

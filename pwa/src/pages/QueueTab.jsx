@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { getVisit, reparseFile } from '../services/api.js';
 import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { parseMaintType, maintFieldLabel } from '../utils/sensorMaintenance.js';
 
 // ── Lookup tables ─────────────────────────────────────────────────────────────
 
@@ -22,6 +23,15 @@ const READING_META = {
   gauge_condition:        { label: 'Gauge condition',       unit: ''   },
   gauge_reading:          { label: 'Gauge reading',         unit: 'mm' },
   last_emptied:           { label: 'Gauge last checked',    unit: ''   },
+  solar_panel_capacity_w:       { label: 'Solar panel capacity',                     unit: 'W'  },
+  solar_panel_voltage:          { label: 'Solar panel voltage (open circuit)',       unit: 'V'  },
+  charge_controller_model:      { label: 'Charge controller model',                  unit: ''   },
+  charge_controller_voltage:    { label: 'Charge controller output voltage',         unit: 'V'  },
+  charge_controller_condition:  { label: 'Charge controller condition',              unit: ''   },
+  battery_capacity_ah:          { label: 'Battery capacity',                         unit: 'Ah' },
+  battery_voltage_disconnected: { label: 'Battery voltage (controller disconnected)', unit: 'V' },
+  battery_voltage_connected:    { label: 'Battery voltage (controller connected)',    unit: 'V' },
+  cables_condition:             { label: 'Cables intact',                            unit: ''   },
   pyranometer_clean:      { label: 'Pyranometer clean',     unit: ''   },
   anemometer_spinning:    { label: 'Anemometer spinning',   unit: ''   },
   rain_gauge_clear:       { label: 'Rain gauge clear',      unit: ''   },
@@ -300,7 +310,8 @@ export default function QueueTab({ visitId, files, setFiles, onGoToFiles, statio
 
             <div className="bg-white rounded-xl overflow-hidden" style={{ border: '1.5px solid var(--color-border)' }}>
               {pendingReadings.map((r, i) => {
-                const meta     = READING_META[r.payload?.reading_type] || { label: r.payload?.reading_type?.replace(/_/g, ' ') || '—', unit: '' };
+                const maint    = parseMaintType(r.payload?.reading_type);
+                const meta     = READING_META[r.payload?.reading_type] || { label: maint ? `Sensor #${maint.sensorId} — ${maintFieldLabel(maint.key)}` : (r.payload?.reading_type?.replace(/_/g, ' ') || '—'), unit: '' };
                 const isFailed = r.status === 'failed';
                 return (
                   <div

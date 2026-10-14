@@ -278,7 +278,7 @@ export function createReading(visitId, { reading_type, value_numeric, value_text
 }
 
 export function deleteReading(visitId, readingType) {
-  return request(`/api/visits/${visitId}/readings/${readingType}/delete`, { method: 'POST' });
+  return request(`/api/visits/${visitId}/readings/${encodeURIComponent(readingType)}/delete`, { method: 'POST' });
 }
 
 // ── Instruments ────────────────────────────────────────────────────────────
@@ -315,6 +315,10 @@ export function getTransferStandards() {
 
 export function getStationSensors(stationId) {
   return request(`/api/stations/${stationId}/sensors`);
+}
+
+export function getStationPowerSpecs(stationId) {
+  return request(`/api/stations/${stationId}/power-specs`);
 }
 
 export function getStationSensorHistory(stationId) {

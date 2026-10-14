@@ -55,6 +55,18 @@ router.get('/:id/raw-tips', async (req, res, next) => {
   }
 });
 
+// GET /api/stations/:id/power-specs
+// Latest solar capacity / charge controller model / battery capacity recorded at this station
+// (any technician) — used to prefill the met visit form.
+router.get('/:id/power-specs', async (req, res, next) => {
+  try {
+    const rows = await db.getLatestPowerSpecs(parseInt(req.params.id, 10));
+    res.json(Object.fromEntries(rows.map(r => [r.reading_type, r.value_numeric ?? r.value_text])));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/stations/:id
 router.get('/:id', async (req, res, next) => {
   try {

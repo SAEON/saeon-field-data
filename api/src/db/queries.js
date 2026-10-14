@@ -50,6 +50,19 @@ async function getStationLastVisit(stationId) {
   return result.rows[0] || null;
 }
 
+async function getLatestPowerSpecs(stationId) {
+  const result = await pool.query(
+    `SELECT DISTINCT ON (mr.reading_type) mr.reading_type, mr.value_numeric, mr.value_text
+     FROM   manual_readings mr
+     JOIN   field_visits fv ON fv.id = mr.visit_id
+     WHERE  fv.station_id = $1
+       AND  mr.reading_type IN ('solar_panel_capacity_w', 'charge_controller_model', 'battery_capacity_ah')
+     ORDER  BY mr.reading_type, fv.visited_at DESC`,
+    [stationId]
+  );
+  return result.rows;
+}
+
 async function getAllStationsWithLastVisit(assignedToUserId = null) {
   const params = [];
   let assignmentClause = '';
@@ -644,7 +657,7 @@ async function createManualReading({ visitId, readingType, valueNumeric, valueTe
        recorded_at   = EXCLUDED.recorded_at,
        notes         = EXCLUDED.notes
      RETURNING *`,
-    [visitId, readingType, valueNumeric || null, valueText || null, unit || null, recordedAt, notes || null]
+    [visitId, readingType, valueNumeric ?? null, valueText || null, unit || null, recordedAt, notes || null]
   );
   return result.rows[0];
 }
@@ -1856,6 +1869,7 @@ module.exports = {
   getStationById,
   getStationStreams,
   getStationLastVisit,
+  getLatestPowerSpecs,
   createStation,
   updateStation,
   deactivateStation,
