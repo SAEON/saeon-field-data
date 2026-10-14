@@ -205,6 +205,10 @@ router.post('/visits/:id/calibration-checks', async (req, res, next) => {
       return res.status(400).json({ error: 'parameter must be temperature, humidity, or pressure' });
     }
 
+    // A queued request can arrive twice if the first reply was lost: keep one check per sensor × parameter per visit
+    const already = await db.findCalibrationCheck(visitId, parseInt(station_sensor_id, 10), parameter);
+    if (already) return res.status(200).json(already);
+
     const sensorParams = await db.getSensorParametersForCalibration(parseInt(station_sensor_id, 10));
     const tolerance    = sensorParams?.[parameter]?.tolerance ?? null;
 

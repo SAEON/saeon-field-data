@@ -5,6 +5,7 @@ import { getVisit, reparseFile } from '../services/api.js';
 import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { parseMaintType, maintFieldLabel } from '../utils/sensorMaintenance.js';
+import { discardOp } from '../services/outbox.js';
 
 // ── Lookup tables ─────────────────────────────────────────────────────────────
 
@@ -60,6 +61,37 @@ function formatBytes(bytes) {
 function fmtDate(iso) {
   if (!iso) return '';
   return new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+const OP_LABEL = {
+  visit_update:  'Visit details',
+  instrument:    'Instrument record',
+  calibration:   'Calibration check',
+  sensor_change: 'Sensor change',
+  upload:        'Logger file',
+  submit:        'Submit visit',
+  abandon:       'Abandon visit',
+};
+
+function readingLabel(type) {
+  const maint = parseMaintType(type);
+  return READING_META[type]?.label
+    || (maint ? `Sensor #${maint.sensorId} — ${maintFieldLabel(maint.key)}` : (type?.replace(/_/g, ' ') || '—'));
+}
+
+function opLabel(op) {
+  if (op.type === 'reading')        return readingLabel(op.payload?.reading_type);
+  if (op.type === 'reading_delete') return `Remove: ${readingLabel(op.payload?.reading_type)}`;
+  return OP_LABEL[op.type] || op.type;
+}
+
+function opDetail(op) {
+  if (op.type === 'reading')     return readingValue(op.payload || {});
+  if (op.type === 'upload')      return op.payload?.name || '';
+  if (op.type === 'calibration') return [op.payload?.parameter, op.payload?.calibration_date].filter(Boolean).join(' · ');
+  if (op.type === 'sensor_change') return op.payload?.mode === 'decommission' ? 'Decommission' : 'New sensor';
+  if (op.type === 'submit')      return 'Sends when every change above has synced';
+  return '';
 }
 
 function readingValue(payload) {
@@ -294,7 +326,7 @@ export default function QueueTab({ visitId, files, setFiles, onGoToFiles, statio
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-bold text-text-light uppercase tracking-wide">
-                  Manual readings
+                  Waiting to sync
                 </span>
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-warning-light text-warning">
                   {pendingReadings.length} pending
@@ -310,8 +342,6 @@ export default function QueueTab({ visitId, files, setFiles, onGoToFiles, statio
 
             <div className="bg-white rounded-xl overflow-hidden" style={{ border: '1.5px solid var(--color-border)' }}>
               {pendingReadings.map((r, i) => {
-                const maint    = parseMaintType(r.payload?.reading_type);
-                const meta     = READING_META[r.payload?.reading_type] || { label: maint ? `Sensor #${maint.sensorId} — ${maintFieldLabel(maint.key)}` : (r.payload?.reading_type?.replace(/_/g, ' ') || '—'), unit: '' };
                 const isFailed = r.status === 'failed';
                 return (
                   <div
@@ -320,11 +350,11 @@ export default function QueueTab({ visitId, files, setFiles, onGoToFiles, statio
                     style={{ borderBottom: i < pendingReadings.length - 1 ? '1px solid var(--color-surface-dark)' : 'none' }}
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="text-[12px] font-semibold text-text-dark">{meta.label}</div>
-                      <div className="text-[11px] text-text-light mt-0.5">{readingValue(r.payload || {})}</div>
+                      <div className="text-[12px] font-semibold text-text-dark">{opLabel(r)}</div>
+                      <div className="text-[11px] text-text-light mt-0.5">{opDetail(r)}</div>
                       {isFailed && (
                         <div className="text-[10px] text-error mt-0.5">
-                          Sync failed after {r.attempts} attempt{r.attempts !== 1 ? 's' : ''}
+                          {r.error || 'The server rejected this change'}
                         </div>
                       )}
                     </div>
@@ -333,11 +363,18 @@ export default function QueueTab({ visitId, files, setFiles, onGoToFiles, statio
                         {isFailed ? '⚠ Failed' : 'Queued'}
                       </span>
                       {isFailed && (
-                        <button
-                          onClick={() => retryItem(r.id)}
-                          className="w-7 h-7 rounded-lg flex items-center justify-center text-[13px] font-bold"
-                          style={{ background: '#EBF2FB', border: '1px solid #BFDBFE', color: '#1565C0' }}
-                        >↺</button>
+                        <>
+                          <button
+                            onClick={() => retryItem(r.id)}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-[13px] font-bold"
+                            style={{ background: '#EBF2FB', border: '1px solid #BFDBFE', color: '#1565C0' }}
+                          >↺</button>
+                          <button
+                            onClick={() => { if (window.confirm('Discard this change? It will not be saved.')) discardOp(r.id); }}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-[13px] font-bold"
+                            style={{ background: '#FFEBEE', border: '1px solid #FFCDD2', color: '#B71C1C' }}
+                          >✕</button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -345,7 +382,7 @@ export default function QueueTab({ visitId, files, setFiles, onGoToFiles, statio
               })}
             </div>
             <div className="text-[10px] text-text-light text-center mt-1.5">
-              Readings saved locally — will sync automatically on reconnect
+              Saved on this device — syncs automatically when you are connected
             </div>
           </div>
         )}

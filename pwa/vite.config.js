@@ -23,7 +23,8 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt': a new version waits until the technician taps Update, so the app is never swapped mid-visit
+      registerType: 'prompt',
       devOptions: { enabled: true },
       manifest: {
         id: '/fds/',
@@ -43,7 +44,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webmanifest}'],
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             urlPattern: /\/api\/stations$/,

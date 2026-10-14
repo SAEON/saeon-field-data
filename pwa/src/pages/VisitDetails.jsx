@@ -2,7 +2,8 @@
 // The visit record already exists on the server (created by App.jsx on "Start visit").
 // This component PATCHes /api/visits/:id whenever fields change (debounced 800ms).
 import { useState, useEffect, useRef } from 'react';
-import { updateVisit, getVisit, createReading } from '../services/api.js';
+import { updateVisit, getVisit, createReading, isTransientError } from '../services/api.js';
+import { enqueueOp, enqueueOpReplacing, getOps, overlayPending, onOpSynced } from '../services/outbox.js';
 
 const PROMPTS = [
   {
@@ -49,14 +50,20 @@ export default function VisitDetails({ visitId, station, formState, setFormState
   // Load existing raining readings on mount (draft resume)
   useEffect(() => {
     if (!station || station.data_family !== 'rainfall') return;
-    getVisit(visitId).then(v => {
-      const readings = v.readings || [];
+    (async () => {
+      let serverReadings = [];
+      try { serverReadings = (await getVisit(visitId)).readings || []; } catch { /* offline — use what is on this device */ }
+      const readings = overlayPending(serverReadings, await getOps(visitId));
       const r = readings.find(x => x.reading_type === 'raining');
       const c = readings.find(x => x.reading_type === 'no_rainfall_confirmed');
       if (r) setRaining(r.value_text);
       if (c) setRainConfirmed(true);
-    }).catch(() => {});
+    })();
   }, [visitId, station?.data_family]);
+
+  useEffect(() => onOpSynced(({ op }) => {
+    if (op.type === 'visit_update' && op.visit_id === visitId) setSaveState('saved');
+  }), [visitId]);
 
   const dateInputRef = useRef(null);
   const saveTimer    = useRef(null);
@@ -84,14 +91,20 @@ export default function VisitDetails({ visitId, station, formState, setFormState
     clearTimeout(saveTimer.current);
     setSaveState('saving');
     saveTimer.current = setTimeout(async () => {
+      // Always keep the draft on this device first — it must survive a dropped connection or a reload
+      setFormState({ visitDate, visitTime, selections, extraNotes, otherNotes });
+      const body = { visited_at: new Date(`${visitDate}T${visitTime}`).toISOString(), notes: buildNote() };
       try {
-        const visited_at = new Date(`${visitDate}T${visitTime}`).toISOString();
-        await updateVisit(visitId, { visited_at, notes: buildNote() });
+        if (!navigator.onLine) throw Object.assign(new Error('offline'), { network: true });
+        await updateVisit(visitId, body);
         setSaveState('saved');
-        // Bubble form state up to App.jsx so IDB draft stays in sync
-        setFormState({ visitDate, visitTime, selections, extraNotes, otherNotes });
-      } catch {
-        setSaveState('error');
+      } catch (err) {
+        if (isTransientError(err)) {
+          await enqueueOpReplacing('visit_update', visitId, body);
+          setSaveState('queued');
+        } else {
+          setSaveState('error');
+        }
       }
     }, 800);
     return () => clearTimeout(saveTimer.current);
@@ -115,19 +128,36 @@ export default function VisitDetails({ visitId, station, formState, setFormState
     return true;
   });
 
+  // Send a reading, or keep it on this device when there is no usable connection
+  async function sendReading(reading) {
+    try {
+      if (!navigator.onLine) throw Object.assign(new Error('offline'), { network: true });
+      await createReading(visitId, reading);
+    } catch (err) {
+      if (!isTransientError(err)) throw err;
+      await enqueueOp('reading', visitId, reading);
+    }
+  }
+
   async function saveRaining(val) {
     if (raining === val) return;
+    const previous = raining;
     setRaining(val);
     try {
-      await createReading(visitId, { reading_type: 'raining', value_text: val, recorded_at: new Date().toISOString() });
+      await sendReading({ reading_type: 'raining', value_text: val, recorded_at: new Date().toISOString() });
     } catch {
-      setRaining(raining); // revert on failure
+      setRaining(previous); // the server rejected it
     }
   }
 
   async function saveRainConfirmed(val) {
     setRainConfirmed(val);
-    if (val) await createReading(visitId, { reading_type: 'no_rainfall_confirmed', value_text: 'true', recorded_at: new Date().toISOString() });
+    if (!val) return;
+    try {
+      await sendReading({ reading_type: 'no_rainfall_confirmed', value_text: 'true', recorded_at: new Date().toISOString() });
+    } catch {
+      setRainConfirmed(false);
+    }
   }
 
   const isRainfallReady = station?.data_family !== 'rainfall' ||
@@ -160,10 +190,12 @@ export default function VisitDetails({ visitId, station, formState, setFormState
         </span>
         <span className={`text-[10px] font-semibold ${
           saveState === 'saved'  ? 'text-success' :
+          saveState === 'queued' ? 'text-warning' :
           saveState === 'error'  ? 'text-error'   :
           saveState === 'saving' ? 'text-text-light' : 'text-transparent'
         }`}>
           {saveState === 'saved'  ? '✓ Saved'    :
+           saveState === 'queued' ? 'Saved on this device' :
            saveState === 'error'  ? '⚠ Save failed' :
            saveState === 'saving' ? 'Saving…'    : '·'}
         </span>

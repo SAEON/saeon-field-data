@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { createReading, deleteReading, getVisit, createInstrumentRecord, getStationSensors, getTransferStandards, createCalibrationCheck, getCalibrationChecks, getMetInstrumentTypes, assignSensor, decommissionSensor, getStationById, getStationPowerSpecs } from '../services/api.js';
 import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
+import { enqueueOp, getOps, overlayPending, onOpSynced, retryAllFailed } from '../services/outbox.js';
+import { isTransientError } from '../services/api.js';
 import { MAINT_FIELDS, maintType, parseMaintType } from '../utils/sensorMaintenance.js';
 
 const REQUIRED_TYPES = {
@@ -9,6 +11,29 @@ const REQUIRED_TYPES = {
   groundwater_baro:   ['logger_activities', 'overall_site_condition'],
   met:                ['met_activities', 'solar_panel_capacity_w', 'solar_panel_voltage', 'charge_controller_model', 'charge_controller_voltage', 'charge_controller_condition', 'battery_capacity_ah', 'battery_voltage_disconnected', 'battery_voltage_connected', 'cables_condition', 'overall_site_condition'],
 };
+
+// Run a form's saves one by one. An offline/queued save does not stop the rest — every value
+// is either sent or queued, never dropped. Returns true if anything was queued.
+async function runSaves(saves) {
+  let queued = false;
+  for (const save of saves) {
+    try { await save(); }
+    catch (err) { if (err?.offline) queued = true; else throw err; }
+  }
+  return queued;
+}
+
+// Instrument records have no reading row, so queue them in the outbox when the server can't be reached.
+async function saveInstrument(visitId, stationId, data) {
+  try {
+    if (!navigator.onLine) throw Object.assign(new Error('offline'), { network: true });
+    return await createInstrumentRecord(stationId, data);
+  } catch (err) {
+    if (!isTransientError(err)) throw err;
+    await enqueueOp('instrument', visitId, { station_id: stationId, data });
+    throw Object.assign(new Error('offline'), { offline: true });
+  }
+}
 
 const MET_ACTS = [
   { value: 'download',          label: 'Download' },
@@ -488,7 +513,7 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
       saves.push(() => onSave({ reading_type: 'raingauge_activities', value_text: JSON.stringify([...rgActs]), recorded_at: now }));
 
     if (hasLoggerDeploy && loggerSerial.trim())
-      saves.push(() => createInstrumentRecord(stationId, {
+      saves.push(() => saveInstrument(visitId, stationId, {
         instrument_type: 'datalogger', serial_no: loggerSerial.trim(),
         mm_per_tip: null, visit_id: visitId,
         notes: 'Recorded on-site by technician during visit',
@@ -504,7 +529,7 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
       saves.push(() => onSave({ reading_type: 'memory_used_pct', value_numeric: parseFloat(memory), unit: '%', recorded_at: now }));
 
     if (hasRgDeploy && rgSerial.trim())
-      saves.push(() => createInstrumentRecord(stationId, {
+      saves.push(() => saveInstrument(visitId, stationId, {
         instrument_type: 'raingauge', serial_no: rgSerial.trim(),
         mm_per_tip: rgMmPerTip ? parseFloat(rgMmPerTip) : 0.254,
         visit_id: visitId,
@@ -512,7 +537,7 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
       }));
 
     if (hasRgCal && rgCalSerial.trim() && rgCalMm)
-      saves.push(() => createInstrumentRecord(stationId, {
+      saves.push(() => saveInstrument(visitId, stationId, {
         instrument_type: 'raingauge', serial_no: rgCalSerial.trim(),
         mm_per_tip: parseFloat(rgCalMm), visit_id: visitId,
         notes: rgActs.has('raingauge_calibrate') ? 'Calibration recorded on-site' : 'Calibration check — factor confirmed',
@@ -538,10 +563,10 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
       saves.push(() => onSave({ reading_type: 'overall_site_condition', value_text: siteCondition, recorded_at: now }));
 
     try {
-      for (const save of saves) await save();
-      setSaveState('idle');
-    } catch (err) {
-      setSaveState(err?.offline ? 'idle' : 'error');
+      const queued = await runSaves(saves);
+      setSaveState(queued ? 'queued' : 'idle');
+    } catch {
+      setSaveState('error');
     }
   }
 
@@ -866,7 +891,7 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
         className="w-full h-12 rounded-xl text-[15px] font-bold border-none transition-opacity mt-1 mb-2 bg-navy text-white"
         style={{ opacity: (!canSave || saveState === 'saving') ? 0.4 : 1 }}
       >
-        {saveState === 'saving' ? 'Saving…' : 'Save'}
+        {saveState === 'saving' ? 'Saving…' : saveState === 'queued' ? '≡ Queued' : saveState === 'error' ? 'Retry' : 'Save'}
       </button>
     </>
   );
@@ -906,10 +931,10 @@ function BarologgerForm({ saved, onSave }) {
     if (battery) saves.push(() => onSave({ reading_type: 'battery_voltage', value_numeric: parseFloat(battery), unit: 'V', recorded_at: now }));
     saves.push(() => onSave({ reading_type: 'overall_site_condition', value_text: loggerCond, recorded_at: now }));
     try {
-      for (const save of saves) await save();
-      setSaveState('saved');
-    } catch (err) {
-      setSaveState(err?.offline ? 'idle' : 'error');
+      const queued = await runSaves(saves);
+      setSaveState(queued ? 'queued' : 'saved');
+    } catch {
+      setSaveState('error');
     }
   }
 
@@ -981,7 +1006,7 @@ function BarologgerForm({ saved, onSave }) {
         disabled={!canSave || saveState === 'saving'}
         style={{ opacity: (!canSave || saveState === 'saving') ? 0.4 : 1, background: 'var(--color-navy)' }}
         className="w-full h-12 rounded-xl font-bold text-white transition-colors">
-        {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : 'Save'}
+        {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : saveState === 'queued' ? '≡ Queued' : saveState === 'error' ? 'Retry' : 'Save'}
       </button>
     </>
   );
@@ -1060,10 +1085,10 @@ function GroundwaterForm({ saved, onSave, stationId }) {
     saves.push(() => onSave({ reading_type: 'overall_site_condition', value_text: siteCond, recorded_at: now }));
 
     try {
-      for (const save of saves) await save();
-      setSaveState('saved');
-    } catch (err) {
-      setSaveState(err?.offline ? 'idle' : 'error');
+      const queued = await runSaves(saves);
+      setSaveState(queued ? 'queued' : 'saved');
+    } catch {
+      setSaveState('error');
     }
   }
 
@@ -1229,7 +1254,7 @@ function GroundwaterForm({ saved, onSave, stationId }) {
         disabled={!canSave || saveState === 'saving'}
         style={{ opacity: (!canSave || saveState === 'saving') ? 0.4 : 1, background: 'var(--color-navy)' }}
         className="w-full h-12 rounded-xl font-bold text-white transition-colors">
-        {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : 'Save'}
+        {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : saveState === 'queued' ? '≡ Queued' : saveState === 'error' ? 'Retry' : 'Save'}
       </button>
     </>
   );
@@ -1553,9 +1578,10 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
 
   async function saveChange(sensor) {
     const data = changeData[sensor.id] || {};
+    setRowError(sensor.id, null);
     setState(sensor.id, 'saving');
+    let created = null;
     try {
-      let created = null;
       if (data.mode === 'decommission') {
         await decommissionSensor(stationId, sensor.id);
       } else {
@@ -1567,8 +1593,22 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
           effective_from:     new Date().toISOString(),
           visit_id:           visitId,
         });
-        if (created?.id) await persistConfirmation(created.id, 'changed');
       }
+    } catch (err) {
+      // Nothing reached the server. A swap creates a new sensor id, so it cannot be queued:
+      // keep the form as typed and let the technician retry when there is coverage.
+      if (isTransientError(err) || !navigator.onLine) {
+        setState(sensor.id, 'changing');
+        setRowError(sensor.id, 'No signal — nothing was changed. Your entries are kept; tap Save change when you have coverage.');
+      } else {
+        setState(sensor.id, 'error');
+      }
+      return;
+    }
+
+    // The change is on the server from here on. The confirmation reading queues itself if needed.
+    if (created?.id) await persistConfirmation(created.id, 'changed');
+    try {
       const fresh = await getStationSensors(stationId);
       setSensors(fresh);
       setCardState(prev => {
@@ -1578,10 +1618,10 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
         });
         return next;
       });
-      onSensorsChanged();
     } catch {
-      setState(sensor.id, 'error');
+      setState(sensor.id, 'saved');
     }
+    onSensorsChanged();
   }
 
   if (error) return <div className="form-card text-[12px] text-error">{error}</div>;
@@ -1820,20 +1860,35 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
   async function handleSave() {
     if (!canSave) return;
     setSaveState('saving');
+    const body = {
+      station_sensor_id,
+      transfer_standard_id: parseInt(tsId, 10),
+      parameter,
+      calibration_date:  new Date().toISOString().slice(0, 10),
+      transfer_std_reading:               tsNum,
+      sensor_reading:                     snNum,
+      correction_applied:                 phase1Pass === false,
+      offset_applied:                     offsetApplied !== '' ? Number(offsetApplied) : null,
+      station_reading_post_cal:           postNum,
+      transfer_std_verification_reading:  verifyNum,
+      remarks: remarks.trim() || null,
+    };
     try {
-      const check = await createCalibrationCheck(visitId, {
-        station_sensor_id,
-        transfer_standard_id: parseInt(tsId, 10),
-        parameter,
-        calibration_date:  new Date().toISOString().slice(0, 10),
-        transfer_std_reading:               tsNum,
-        sensor_reading:                     snNum,
-        correction_applied:                 phase1Pass === false,
-        offset_applied:                     offsetApplied !== '' ? Number(offsetApplied) : null,
-        station_reading_post_cal:           postNum,
-        transfer_std_verification_reading:  verifyNum,
-        remarks: remarks.trim() || null,
-      });
+      let check;
+      try {
+        if (!navigator.onLine) throw Object.assign(new Error('offline'), { network: true });
+        check = await createCalibrationCheck(visitId, body);
+      } catch (err) {
+        if (!isTransientError(err)) throw err;
+        // No signal: keep the check on this device; the server works out tolerance when it syncs
+        await enqueueOp('calibration', visitId, body);
+        check = {
+          calibration_date: body.calibration_date,
+          within_tolerance: phase1Pass !== false,
+          post_cal_within_tolerance: phase2Pass !== false,
+          pending: true,
+        };
+      }
       setSavedCheck(check);
       setSaveState('saved');
       onSaved();
@@ -1869,7 +1924,9 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
           <span className="text-[12px] font-semibold text-text-dark">{label}</span>
           <span className="text-[11px] capitalize px-2 py-0.5 rounded-full bg-surface-dark text-text-light">{parameter}</span>
         </div>
-        <div className="text-[11px] text-success font-medium mt-1">✓ Calibration check saved</div>
+        <div className="text-[11px] text-success font-medium mt-1">
+          {savedCheck.pending ? '✓ Saved on this device — will sync when connected' : '✓ Calibration check saved'}
+        </div>
         <div className="text-[11px] text-text-light mt-0.5">{outcome}</div>
         {(savedCheck.technician_name || calDate) && (
           <div className="text-[10px] text-text-light mt-1">
@@ -2297,7 +2354,6 @@ function MetSensorMaintenanceSection({ stationId, saved, onSave, onDelete, onCom
 export default function ManualReadings({ visitId, stationId, dataFamily, isBarologger, onReadingsSaved, onLoggerUnavailable }) {
   const [saved,               setSaved]               = useState([]);
   const [loaded,              setLoaded]              = useState(false);
-  const [formKey,             setFormKey]             = useState(0);   // increment to remount fields after queue flush
   const [metActs,                setMetActs]                = useState(() => new Set());
   const [sensorConfirmationDone, setSensorConfirmationDone] = useState(false);
   const [calibrationAllSaved,    setCalibrationAllSaved]    = useState(false);
@@ -2305,17 +2361,17 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
   const [stagedConfirmed,         setStagedConfirmed]        = useState([]);
   const [instrumentChangeKey,    setInstrumentChangeKey]    = useState(0);
   const calledDone  = useRef(false);
-  const onlineTimer = useRef(null);
 
-  const { enqueue, flushQueue, failedCount } = useOfflineQueue(visitId);
+  const { enqueue, failedCount } = useOfflineQueue(visitId);
 
   useEffect(() => {
     if (!visitId) { setLoaded(true); return; }
     getVisit(visitId)
-      .then(v => {
-        setSaved(v.readings || []);
+      .then(async v => {
+        const merged = overlayPending(v.readings || [], await getOps(visitId));
+        setSaved(merged);
         if (dataFamily === 'met') {
-          const actR = v.readings?.find(r => r.reading_type === 'met_activities');
+          const actR = merged.find(r => r.reading_type === 'met_activities');
           if (actR?.value_text) {
             try {
               const acts = JSON.parse(actR.value_text);
@@ -2325,7 +2381,11 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
         }
         setLoaded(true);
       })
-      .catch(() => setLoaded(true));
+      .catch(async () => {
+        // Server unreachable: show whatever is waiting on this device so nothing looks lost
+        setSaved(overlayPending([], await getOps(visitId)));
+        setLoaded(true);
+      });
   }, [visitId, dataFamily]);
 
   useEffect(() => {
@@ -2367,52 +2427,46 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
     }
   }, [saved, dataFamily, sensorConfirmationDone, sensorMaintDone, metActs, calibrationAllSaved, onReadingsSaved]);
 
-  // Flush queued readings when reconnected (2.5s debounce for network stabilisation)
-  useEffect(() => {
-    if (!visitId) return;
-    function handleOnline() {
-      clearTimeout(onlineTimer.current);
-      onlineTimer.current = setTimeout(async () => {
-        const flushed = await flushQueue();
-        if (flushed.length > 0) {
-          setSaved(prev => [...prev, ...flushed]);
-          setFormKey(k => k + 1); // remount fields — they re-read existingReading as saved
-        }
-      }, 2500);
-    }
-    window.addEventListener('online', handleOnline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      clearTimeout(onlineTimer.current);
-    };
-  }, [visitId, flushQueue]);
+  // The sync engine (app-wide) delivers queued readings; fold each confirmed one back into state
+  useEffect(() => onOpSynced(({ op, result }) => {
+    if (op.visit_id !== visitId || op.type !== 'reading' || !result?.reading_type) return;
+    setSaved(prev => [...prev.filter(r => r.reading_type !== result.reading_type), result]);
+  }), [visitId]);
+
+  async function queueReading(reading) {
+    await enqueue(reading);
+    setSaved(prev => [...prev.filter(r => r.reading_type !== reading.reading_type), { ...reading, id: null, pending: true }]);
+    const err = new Error('offline');
+    err.offline = true;
+    throw err;
+  }
 
   async function handleSave(reading) {
-    if (!navigator.onLine) {
-      await enqueue(reading);
-      const err = new Error('offline');
-      err.offline = true;
+    if (!navigator.onLine) return queueReading(reading);
+    let result;
+    try {
+      result = await createReading(visitId, reading);
+    } catch (err) {
+      if (isTransientError(err)) return queueReading(reading);
       throw err;
     }
-    const result = await createReading(visitId, reading);
-    setSaved(prev => {
-      const without = prev.filter(r => r.reading_type !== result.reading_type);
-      return [...without, result];
-    });
+    setSaved(prev => [...prev.filter(r => r.reading_type !== result.reading_type), result]);
     return result;
   }
 
   async function handleDelete(readingType) {
-    await deleteReading(visitId, readingType);
+    try {
+      if (!navigator.onLine) throw Object.assign(new Error('offline'), { network: true });
+      await deleteReading(visitId, readingType);
+    } catch (err) {
+      if (!isTransientError(err)) throw err;
+      await enqueueOp('reading_delete', visitId, { reading_type: readingType });
+    }
     setSaved(prev => prev.filter(r => r.reading_type !== readingType));
   }
 
   async function handleRetryFailed() {
-    const flushed = await flushQueue();
-    if (flushed.length > 0) {
-      setSaved(prev => [...prev, ...flushed]);
-      setFormKey(k => k + 1);
-    }
+    await retryAllFailed();
   }
 
   if (!loaded) {
@@ -2433,7 +2487,7 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
             style={{ border: '1px solid rgba(183,28,28,0.2)' }}
           >
             <span className="text-[12px] text-error font-medium">
-              ⚠ {failedCount} reading{failedCount !== 1 ? 's' : ''} failed to sync after 3 attempts.
+              ⚠ {failedCount} change{failedCount !== 1 ? 's' : ''} could not be saved — the server rejected them.
             </span>
             <button
               onClick={handleRetryFailed}
@@ -2444,7 +2498,7 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
           </div>
         )}
 
-        <div key={formKey}>
+        <div>
           {dataFamily === 'rainfall'    && <RainfallForm    saved={saved} onSave={handleSave} visitId={visitId} stationId={stationId} />}
           {dataFamily === 'groundwater' && isBarologger  && <BarologgerForm  saved={saved} onSave={handleSave} />}
           {dataFamily === 'groundwater' && !isBarologger && <GroundwaterForm saved={saved} onSave={handleSave} stationId={stationId} />}

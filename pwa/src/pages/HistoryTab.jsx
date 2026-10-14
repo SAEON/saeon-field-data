@@ -177,23 +177,23 @@ function AssignVisitSheet({ visit, technicians, onClose, onAssigned }) {
   return (
     <div className="back-sheet-overlay">
       <div className="back-sheet">
-        <div className="text-[15px] font-bold text-text-dark mb-1">Assign visit</div>
+        <div className="text-[14px] font-bold text-text-dark mb-1">Assign visit</div>
         <div className="text-[12px] text-text-light mb-3">
           {visit.station_display_name} · {fmtDate(visit.visited_at)}
         </div>
         <input
           type="text" placeholder="Search by name or email…" value={search}
           onChange={e => setSearch(e.target.value)} autoFocus
-          className="w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark mb-2"
+          className="w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark mb-2" style={{ fontSize: 13 }}
         />
         <div className="flex flex-col gap-2 mb-4 max-h-52 overflow-y-auto">
           <button onClick={() => setSelected('')} className="text-left px-3 py-2.5 rounded-xl border text-[13px]"
-            style={{ borderColor: !selected ? 'var(--color-navy)' : 'var(--color-border)', background: !selected ? '#EAF0FB' : 'white', fontWeight: !selected ? 600 : 400 }}>
+            style={{ fontSize: 13, borderColor: !selected ? 'var(--color-navy)' : 'var(--color-border)', background: !selected ? '#EAF0FB' : 'white', fontWeight: !selected ? 600 : 400 }}>
             Unassigned
           </button>
           {filtered.map(t => (
             <button key={t.id} onClick={() => setSelected(t.id)} className="text-left px-3 py-2.5 rounded-xl border text-[13px]"
-              style={{ borderColor: selected === t.id ? 'var(--color-navy)' : 'var(--color-border)', background: selected === t.id ? '#EAF0FB' : 'white', fontWeight: selected === t.id ? 600 : 400 }}>
+              style={{ fontSize: 13, borderColor: selected === t.id ? 'var(--color-navy)' : 'var(--color-border)', background: selected === t.id ? '#EAF0FB' : 'white', fontWeight: selected === t.id ? 600 : 400 }}>
               <div>{t.full_name}</div>
               <div style={{ fontSize: 11, color: 'var(--color-text-light)' }}>{t.email}</div>
             </button>
@@ -208,11 +208,11 @@ function AssignVisitSheet({ visit, technicians, onClose, onAssigned }) {
         {error && <div className="text-[12px] text-error mb-3">{error}</div>}
         <div className="flex gap-2.5">
           <button onClick={onClose} disabled={saving}
-            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
+            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold" style={{ fontSize: 13 }}>
             Cancel
           </button>
           <button onClick={handleSave} disabled={saving}
-            className="flex-1 h-12 rounded-xl bg-navy text-white text-sm font-semibold border-none">
+            className="flex-1 h-12 rounded-xl bg-navy text-white text-sm font-semibold border-none" style={{ fontSize: 13 }}>
             {saving ? 'Saving…' : 'Assign'}
           </button>
         </div>
@@ -252,21 +252,21 @@ function AssignStationSheet({ station, technicians, onClose, onAssigned }) {
   return (
     <div className="back-sheet-overlay">
       <div className="back-sheet">
-        <div className="text-[15px] font-bold text-text-dark mb-1">Assign technician</div>
+        <div className="text-[14px] font-bold text-text-dark mb-1">Assign technician</div>
         <div className="text-[12px] text-text-light mb-3">{station.display_name}</div>
         <input
           type="text" placeholder="Search by name or email…" value={search}
           onChange={e => setSearch(e.target.value)} autoFocus
-          className="w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark mb-2"
+          className="w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark mb-2" style={{ fontSize: 13 }}
         />
         <div className="flex flex-col gap-2 mb-4 max-h-52 overflow-y-auto">
           <button onClick={() => setSelected('')} className="text-left px-3 py-2.5 rounded-xl border text-[13px]"
-            style={{ borderColor: selected === '' ? 'var(--color-navy)' : 'var(--color-border)', background: selected === '' ? '#EAF0FB' : 'white', fontWeight: selected === '' ? 600 : 400 }}>
+            style={{ fontSize: 13, borderColor: selected === '' ? 'var(--color-navy)' : 'var(--color-border)', background: selected === '' ? '#EAF0FB' : 'white', fontWeight: selected === '' ? 600 : 400 }}>
             Unassigned
           </button>
           {filtered.map(t => (
             <button key={t.id} onClick={() => setSelected(t.id)} className="text-left px-3 py-2.5 rounded-xl border text-[13px]"
-              style={{ borderColor: selected === t.id ? 'var(--color-navy)' : 'var(--color-border)', background: selected === t.id ? '#EAF0FB' : 'white', fontWeight: selected === t.id ? 600 : 400 }}>
+              style={{ fontSize: 13, borderColor: selected === t.id ? 'var(--color-navy)' : 'var(--color-border)', background: selected === t.id ? '#EAF0FB' : 'white', fontWeight: selected === t.id ? 600 : 400 }}>
               <div>{t.full_name}</div>
               <div style={{ fontSize: 11, color: 'var(--color-text-light)' }}>{t.email}</div>
             </button>
@@ -281,11 +281,11 @@ function AssignStationSheet({ station, technicians, onClose, onAssigned }) {
         {error && <div className="text-[12px] text-error mb-3">{error}</div>}
         <div className="flex gap-2.5">
           <button onClick={onClose} disabled={saving}
-            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
+            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold" style={{ fontSize: 13 }}>
             Cancel
           </button>
           <button onClick={handleSave} disabled={saving}
-            className="flex-1 h-12 rounded-xl bg-navy text-white text-sm font-semibold border-none">
+            className="flex-1 h-12 rounded-xl bg-navy text-white text-sm font-semibold border-none" style={{ fontSize: 13 }}>
             {saving ? 'Saving…' : 'Assign'}
           </button>
         </div>
@@ -324,8 +324,8 @@ function AddFileSheet({ visit, onClose }) {
     <div className="back-sheet-overlay">
       <div className="back-sheet" style={{ maxHeight: '80vh', overflowY: 'auto' }}>
         <div className="flex items-center justify-between mb-3">
-          <div className="text-[15px] font-bold text-text-dark">Add file to visit</div>
-          <button onClick={onClose} className="text-text-light text-[20px] leading-none bg-transparent border-none">×</button>
+          <div className="text-[14px] font-bold text-text-dark">Add file to visit</div>
+          <button onClick={onClose} className="text-text-light text-[20px] leading-none bg-transparent border-none" style={{ fontSize: 20 }}>×</button>
         </div>
         <div className="text-[12px] text-text-light mb-4">
           {visit.station_display_name} · {fmtDate(visit.visited_at)}
@@ -483,12 +483,12 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
         <div className="flex items-start justify-between px-5 py-3 shrink-0">
           <div>
             <div className="flex items-center gap-2">
-              <div className="text-[16px] font-bold text-text-dark">
+              <div className="text-[14px] font-bold text-text-dark">
                 {cfg.icon} {visit.station_display_name}
               </div>
               <StatusBadge status={visit.status} />
             </div>
-            <div className="text-[12px] text-text-light mt-0.5">
+            <div className="text-[11px] text-text-light mt-0.5">
               {fmtDateTime(visit.visited_at)} · {visit.technician_name}
             </div>
           </div>
@@ -497,7 +497,7 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
               <button
                 onClick={() => setAssignOpen(true)}
                 className="h-7 px-2.5 rounded-lg text-[11px] font-semibold border-none"
-                style={{ background: '#EAF0FB', color: 'var(--color-navy)' }}
+                style={{ fontSize: 11, background: '#EAF0FB', color: 'var(--color-navy)' }}
               >
                 {visit.assigned_technician_id ? 'Reassign' : 'Assign'}
               </button>
@@ -505,7 +505,7 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
             <button
               onClick={onClose}
               className="w-8 h-8 rounded-lg flex items-center justify-center text-text-light text-[16px] bg-transparent border-none"
-              style={{ border: '1px solid var(--color-border)' }}
+              style={{ fontSize: 16, border: '1px solid var(--color-border)' }}
             >✕</button>
           </div>
         </div>
@@ -574,7 +574,7 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
                 <button
                   onClick={() => setShowAdd(true)}
                   className="text-[11px] font-semibold text-white px-2.5 py-1 rounded-md border-none"
-                  style={{ background: '#3B7DD8' }}
+                  style={{ fontSize: 11, background: '#3B7DD8' }}
                 >
                   + Add file
                 </button>
@@ -618,7 +618,7 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
                             <button
                               onClick={() => { onGoToColumns(); onClose(); }}
                               className="text-[10px] font-semibold mt-0.5 text-left bg-transparent border-none p-0 cursor-pointer"
-                              style={{ color: '#F57F17', textDecoration: 'underline dotted' }}
+                              style={{ fontSize: 10, color: '#F57F17', textDecoration: 'underline dotted' }}
                             >
                               Unknown column names — tap to map
                             </button>
@@ -860,8 +860,9 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
             <button
               key={s}
               onClick={() => { setScope(s); setStatusFilter('all'); setFamilyFilter('all'); setTechFilter(''); setStationFilter(''); }}
-              className="flex-1 py-2.5 text-[13px] font-semibold border-none bg-transparent"
+              className="flex-1 py-2 text-[12px] font-semibold border-none bg-transparent"
               style={{
+                fontSize: 12,
                 color: scope === s ? 'var(--color-navy)' : 'var(--color-text-light)',
                 borderBottom: scope === s ? '2px solid var(--color-navy)' : '2px solid transparent',
               }}
@@ -882,6 +883,7 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
                 key={s}
                 onClick={() => setStatusFilter(s)}
                 className="filter-chip shrink-0"
+                style={{ height: 26, fontSize: 10, padding: '0 10px' }}
                 data-active={statusFilter === s ? 'true' : undefined}
               >
                 {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
@@ -895,6 +897,7 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
                 value={techFilter}
                 onChange={e => setTechFilter(e.target.value)}
                 className="text-[12px] h-8 px-2 rounded-lg border border-border bg-white text-text-med shrink-0"
+                style={{ fontSize: 12 }}
               >
                 <option value="">All technicians</option>
                 {technicians.map(t => (
@@ -905,6 +908,7 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
                 value={stationFilter}
                 onChange={e => setStationFilter(e.target.value)}
                 className="text-[12px] h-8 px-2 rounded-lg border border-border bg-white text-text-med shrink-0"
+                style={{ fontSize: 12 }}
               >
                 <option value="">All stations</option>
                 {stations.map(s => (
@@ -926,6 +930,7 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
                 data-active={familyFilter === f ? 'true' : undefined}
                 onClick={() => setFamilyFilter(f)}
                 className="filter-chip"
+                style={{ height: 26, fontSize: 10, padding: '0 10px' }}
               >
                 {cfg && <span>{cfg.icon}</span>}
                 {f === 'all' ? 'All' : cfg.label}
@@ -942,7 +947,7 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
         {isOverdueMode && (
           filteredOverdue.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 pt-16 text-center">
-              <div className="text-[15px] font-semibold text-text-dark">All stations are current</div>
+              <div className="text-[13px] font-semibold text-text-dark">All stations are current</div>
               <div className="text-[13px] text-text-light leading-relaxed">
                 No stations are overdue based on their configured visit frequency.
               </div>
@@ -959,33 +964,37 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
                     <div className="px-4 py-3">
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <div className="min-w-0">
-                          <div className="text-[14px] font-bold text-text-dark truncate">{station.display_name}</div>
-                          <div className="text-[11px] text-text-light mt-0.5">{station.region ?? 'No region'}</div>
+                          <div className="text-[12px] font-bold text-text-dark truncate">{station.display_name}</div>
+                          <div className="text-[10px] text-text-light mt-0.5">{station.region ?? 'No region'}</div>
                         </div>
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{
-                          background: FAMILY_CONFIG[station.data_family]?.bg || '#F5F5F5',
-                          color: FAMILY_CONFIG[station.data_family]?.color || '#616161',
+                          fontSize: 10,
+                          background: 'var(--color-surface-dark)',
+                          color: 'var(--color-text-med)',
                         }}>
                           {FAMILY_CONFIG[station.data_family]?.label || station.data_family}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
                         <div>
-                          <div className="text-[22px] font-black leading-none text-text-dark">
+                          <div className="text-[14px] font-bold leading-none text-text-dark">
                             {station.days_since_visit ?? '∞'}
                           </div>
-                          <div className="text-[11px] text-text-light mt-0.5">
+                          <div className="text-[10px] text-text-light mt-0.5">
                             {daysSinceLabel(station.days_since_visit)}{' · '}threshold {station.visit_frequency_days}d
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-[11px] text-text-light mb-1">
-                            {station.assigned_technician_name ?? 'Unassigned'}
-                          </div>
+                          {station.assigned_technician_name && (
+                            <div className="text-[10px] text-text-light mb-1">
+                              {station.assigned_technician_name}
+                            </div>
+                          )}
                           <button
                             onClick={() => setAssignTarget(station)}
-                            className="h-8 px-3 rounded-lg text-[12px] font-semibold border-none"
-                            style={{ background: 'var(--color-navy)', color: 'white' }}
+                            className="font-semibold"
+                            style={{ fontSize: 12, height: 32, padding: '0 12px', borderRadius: 8, lineHeight: 1,
+                                     background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}
                           >
                             {station.assigned_technician_id ? 'Reassign' : 'Assign'}
                           </button>
@@ -1003,7 +1012,7 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
         {!isOverdueMode && (
           displayedVisits.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 pt-16 text-center">
-              <div className="text-[15px] font-semibold text-text-dark">
+              <div className="text-[13px] font-semibold text-text-dark">
                 {scope === 'mine' && familyFilter === 'all' ? 'No submitted visits yet'
                   : scope === 'mine' ? `No ${FAMILY_CONFIG[familyFilter]?.label} visits`
                   : 'No visits found'}
@@ -1040,7 +1049,7 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
                         style={{ background: cfg.bg, border: `1px solid ${cfg.border}22` }}
                       >{cfg.icon}</div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-[14px] font-semibold text-text-dark truncate">{v.station_display_name}</div>
+                        <div className="text-[13px] font-semibold text-text-dark truncate">{v.station_display_name}</div>
                         <div className="text-[11px] text-text-light mt-0.5">
                           {fmtDate(v.visited_at)}
                           {scope === 'all'

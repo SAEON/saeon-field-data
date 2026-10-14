@@ -150,6 +150,7 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
           <span className="absolute left-3.5 text-text-light pointer-events-none">⌕</span>
           <input
             className="search-input"
+            style={{ height: 38, fontSize: 13, borderRadius: 10 }}
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Search by station or region…"
@@ -158,6 +159,7 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
             <button
               onClick={() => setQuery('')}
               className="absolute right-3 w-[22px] h-[22px] rounded-full bg-surface-dark text-text-med text-[11px] border-none flex items-center justify-center"
+              style={{ fontSize: 11 }}
             >
               ✕
             </button>
@@ -174,6 +176,7 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
             data-active={filter === f ? 'true' : undefined}
             onClick={() => setFilter(f)}
             className="filter-chip"
+            style={{ height: 26, fontSize: 10, padding: '0 10px' }}
           >
             {f === 'overdue' && <span>⚠</span>}
             {f !== 'all' && f !== 'overdue' && <span>{FAMILY_ICONS[f]}</span>}
@@ -202,7 +205,7 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
       )}
 
       {/* ── Station list ──────────────────────────────────────────── */}
-      <div className="station-list flex-1 px-4 flex flex-col gap-2">
+      <div className="station-list flex-1 px-4 flex flex-col gap-1.5">
         {filtered.map(s => (
           <div
             key={s.id}
@@ -210,9 +213,10 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
             data-selected={selectedId === s.id ? 'true' : undefined}
             onClick={() => setSelectedId(prev => prev === s.id ? null : s.id)}
             className="station-card"
+            style={{ padding: '8px 12px', gap: 10, borderRadius: 12 }}
           >
             <div className="flex-1 min-w-0">
-              <div className="font-semibold text-sm text-text-dark truncate flex items-center gap-1.5">
+              <div className="font-semibold text-text-dark truncate flex items-center gap-1.5" style={{ fontSize: 12 }}>
                 {s.display_name}
                 {s.data_family === 'groundwater' && (
                   <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
@@ -221,34 +225,27 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
                   </span>
                 )}
               </div>
-              <div className={`text-[11px] mt-0.5 flex items-center gap-1 ${daysSince(s.last_visited_at) >= OVERDUE_DAYS ? 'text-warning' : 'text-text-light'}`}>
+              <div className={`text-[10px] mt-0.5 flex items-center gap-1 ${daysSince(s.last_visited_at) >= OVERDUE_DAYS ? 'text-warning' : 'text-text-light'}`}>
                 {daysSince(s.last_visited_at) >= OVERDUE_DAYS && <span>⚠</span>}
                 {s.region && <span>{s.region}</span>}
                 {s.region && <span>·</span>}
                 <span>Last: {lastVisitLabel(s.last_visited_at)}</span>
               </div>
               {loggerSnapshots[s.id] && (
-                <div className="mt-1">
-                  <div className="text-[10px] text-text-light mb-0.5">Last logger reading</div>
-                  <div className="flex items-center gap-2.5">
-                    {loggerSnapshots[s.id].last_temp_c != null && (
-                      <span className="text-[11px] text-text-light">
-                        🌡 <span className="font-medium text-text-dark">{loggerSnapshots[s.id].last_temp_c}°C</span>
-                      </span>
-                    )}
-                    {loggerSnapshots[s.id].last_batt_v != null && (
-                      <span className="text-[11px] text-text-light">
-                        🔋 <span className="font-medium text-text-dark">{loggerSnapshots[s.id].last_batt_v} V</span>
-                      </span>
-                    )}
-                  </div>
+                <div className="flex items-center gap-2 mt-0.5 text-[10px] text-text-light" title="Last logger reading">
+                  {loggerSnapshots[s.id].last_temp_c != null && (
+                    <span>🌡 <span className="font-medium text-text-dark">{loggerSnapshots[s.id].last_temp_c}°C</span></span>
+                  )}
+                  {loggerSnapshots[s.id].last_batt_v != null && (
+                    <span>🔋 <span className="font-medium text-text-dark">{loggerSnapshots[s.id].last_batt_v} V</span></span>
+                  )}
                 </div>
               )}
             </div>
 
             <div className="flex flex-col items-center gap-1 shrink-0">
               <div className={`status-dot ${statusDotClass(s.last_visited_at)}`} />
-              <span className={`text-lg ${selectedId === s.id ? 'text-blue' : 'text-border'}`}>›</span>
+              <span className={`${selectedId === s.id ? 'text-blue' : 'text-border'}`} style={{ fontSize: 14, lineHeight: 1 }}>›</span>
             </div>
           </div>
         ))}

@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { uploadFile, reparseFile, deleteFile, getVisit, getStationCoverage } from '../services/api.js';
+import { reparseFile, deleteFile, getVisit, getStationCoverage, isTransientError } from '../services/api.js';
+import { queueUpload, cancelUpload, retryUpload } from '../services/uploadQueue.js';
+import { enqueueOp, flushOutbox } from '../services/outbox.js';
 
 const FORMAT_MAP = {
   xle: { label: 'Solonist XLE',  icon: '⊥', families: ['groundwater'] },
@@ -284,13 +286,11 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
   const [rejectedFiles,   setRejectedFiles]   = useState([]);   // file names blocked upfront
   const fileInputRef   = useRef(null);
   const pollTimers     = useRef({});   // localId → timeout handle
-  const onlineTimer    = useRef(null);
 
   // Clear all poll timers on unmount
   useEffect(() => {
     return () => {
       Object.values(pollTimers.current).forEach(clearTimeout);
-      clearTimeout(onlineTimer.current);
     };
   }, []);
 
@@ -308,25 +308,6 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
       })
       .catch(() => {}); // non-critical — silently ignore
   }, [stationId]);
-
-  // Auto-retry queued files (current session only — need raw file) on reconnect
-  useEffect(() => {
-    function handleOnline() {
-      clearTimeout(onlineTimer.current);
-      onlineTimer.current = setTimeout(() => {
-        setFiles(prev => {
-          prev.filter(f => f.parseState === 'queued' && f.raw).forEach(f => {
-            const ac = new AbortController();
-            patchFile(f.localId, { parseState: 'uploading', abortController: ac });
-            doUpload(f.localId, f.raw, ac);
-          });
-          return prev;
-        });
-      }, 2500);
-    }
-    window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Start polling for any files already in 'pending' state (handles page-refresh resume)
   useEffect(() => {
@@ -372,21 +353,6 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
     }
   }
 
-  async function doUpload(localId, rawFile, abortController) {
-    if (!navigator.onLine) {
-      patchFile(localId, { parseState: 'queued', abortController: null });
-      return;
-    }
-    try {
-      const result = await uploadFile(visitId, rawFile, abortController.signal);
-      patchFile(localId, { parseState: 'pending', dbId: result.id, abortController: null });
-      pollTimers.current[localId] = setTimeout(() => pollStatus(localId, result.id), 1500);
-    } catch (err) {
-      if (err.name === 'AbortError') return; // user cancelled — file already removed from list
-      patchFile(localId, { parseState: navigator.onLine ? 'error' : 'queued', abortController: null });
-    }
-  }
-
   async function addFiles(fileList) {
     const allowedExts = new Set(
       acceptAttr.split(',').map(s => s.trim().replace(/^\./, '').toLowerCase())
@@ -407,31 +373,38 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
     setPendingPreviews(previews);
   }
 
+  // The file is stored on the device first; the sync engine uploads it (and keeps retrying on a weak link).
   function confirmPreviews() {
     if (!pendingPreviews) return;
-    const added = pendingPreviews.map(({ raw }, i) => {
-      const abortController = new AbortController();
-      return {
-        localId:         `${Date.now()}-${i}`,
-        name:            raw.name,
-        size:            raw.size,
-        raw,
-        parseState:      'uploading',
-        dbId:            null,
-        abortController,
-        dateRange:       null,
-        records:         null,
-      };
-    });
+    const stamp = Date.now();
+    const added = pendingPreviews.map(({ raw }, i) => ({
+      localId:    `${stamp}-${i}`,
+      name:       raw.name,
+      size:       raw.size,
+      parseState: 'queued',
+      dbId:       null,
+      dateRange:  null,
+      records:    null,
+    }));
+    const toStore = pendingPreviews.map(({ raw }, i) => queueUpload(visitId, raw, added[i].localId));
     setPendingPreviews(null);
     setFiles(prev => [...prev, ...added]);
-    added.forEach(f => doUpload(f.localId, f.raw, f.abortController));
+    Promise.all(toStore).then(() => flushOutbox({ force: true }));
   }
 
   // ↺ Retry — file is on server in error state. Calls reparse, no re-upload.
   async function retryFile(localId) {
     const f = files.find(f => f.localId === localId);
-    if (!f?.dbId) return;
+    if (!f) return;
+    if (!f.dbId) {
+      // Never reached the server: send the stored copy again
+      const ok = await retryUpload(visitId, localId);
+      patchFile(localId, ok
+        ? { parseState: 'queued', parseError: null }
+        : { parseState: 'error', parseError: 'This file is no longer stored on the device — please add it again.' });
+      if (ok) flushOutbox({ force: true });
+      return;
+    }
     patchFile(localId, { parseState: 'retrying', parseError: null });
     try {
       await reparseFile(f.dbId);
@@ -448,9 +421,9 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
     const f = files.find(f => f.localId === localId);
     if (!f) return;
 
-    if (f.parseState === 'uploading') {
-      // Cancel in-flight upload — no API call, nothing written to DB yet
-      f.abortController?.abort();
+    if (!f.dbId && ['uploading', 'queued', 'error'].includes(f.parseState)) {
+      // Not on the server yet — stop the upload and forget the stored copy
+      cancelUpload(localId);
       clearTimeout(pollTimers.current[localId]);
       delete pollTimers.current[localId];
       setFiles(prev => prev.filter(f => f.localId !== localId));
@@ -474,8 +447,9 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
     setDeleting(true);
     try {
       await deleteFile(f.dbId);
-    } catch {
-      // Server delete failed — still remove from UI (user made the decision)
+    } catch (err) {
+      // No signal: remember to delete it on the server later. Otherwise the user's decision stands.
+      if (isTransientError(err) || !navigator.onLine) await enqueueOp('file_delete', visitId, { dbId: f.dbId });
     } finally {
       setDeleting(false);
     }
@@ -717,7 +691,7 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
                           : isErr      ? 'Parse failed'
                           : isRetrying ? 'Retrying…'
                           : isPending  ? 'Processing…'
-                          : isQueued   ? 'Queued — offline'
+                          : isQueued   ? 'Waiting to upload — sends automatically'
                           :              'Uploading…'}
                         </span>
                       </div>

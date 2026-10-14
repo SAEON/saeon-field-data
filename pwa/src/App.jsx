@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { loadDraft, saveDraft, clearDraft } from './hooks/useDraftVisit.js';
-import { createVisit, submitVisit, abandonVisit, getVisit } from './services/api.js';
+import { createVisit, submitVisit, abandonVisit, getVisit, isTransientError, prefetchVisitData } from './services/api.js';
+import { enqueueOp, getOps, onOpSynced, onOpEvent, flushOutbox, clearVisitOps } from './services/outbox.js';
+import { hasStoredFile } from './services/uploadQueue.js';  // also registers the upload handlers
+import { useSyncEngine, useOutboxStatus } from './hooks/useSyncEngine.js';
 import { useAuth } from './auth/AuthContext.jsx';
 import ProfileButton from './auth/ProfileSheet.jsx';
 import LoginPage from './pages/LoginPage.jsx';
@@ -29,9 +32,9 @@ const TABS = [
   { id: 'errors',   icon: '⚠', label: 'Errors'   },
 ];
 
-function BottomNav({ activeTab, setActiveTab, visitBadge, queueBadge, queueErrors, tabs = TABS }) {
+function BottomNav({ activeTab, setActiveTab, visitBadge, queueBadge, queueErrors, tabs = TABS, embedded = false }) {
   return (
-    <nav className="bottom-tab-bar shrink-0">
+    <nav className={`bottom-tab-bar shrink-0${embedded ? ' bottom-tab-bar--embedded' : ''}`}>
       {/* Visible only on desktop — hidden via CSS on mobile */}
       <div className="sidebar-brand">
         <span style={{ fontSize: '22px' }}>🛰</span>
@@ -261,8 +264,32 @@ function SubmitSheet({ draftVisit, visitFiles, hasReadings, onKeep, onConfirm, s
   );
 }
 
+// After a reload, decide what really happened to files that had not reached the server:
+// still stored on the device (the sync engine will send them), already uploaded while the app was
+// closed (match by name), or lost (ask the technician to add them again).
+async function reconcileFiles(visitId, list) {
+  const unsent = f => !f.dbId && ['queued', 'uploading', 'error'].includes(f.parseState);
+  if (!list.some(unsent)) return list;
+
+  let serverFiles = null;
+  const out = [];
+  for (const f of list) {
+    if (!unsent(f)) { out.push(f); continue; }
+    if (await hasStoredFile(f.localId)) { out.push({ ...f, parseState: 'queued', parseError: null }); continue; }
+    if (serverFiles === null) {
+      try { serverFiles = (await getVisit(visitId)).files || []; } catch { serverFiles = []; }
+    }
+    const match = serverFiles.find(d => d.original_name === f.name && !list.some(x => x.dbId === d.id));
+    out.push(match
+      ? { ...f, dbId: match.id, parseState: 'pending', parseError: null }
+      : { ...f, parseState: 'error', parseError: 'This file is no longer stored on the device — please add it again.' });
+  }
+  return out;
+}
+
 // ── Field PWA (shared by technicians, leads, and managers) ────────────────
 export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDetected }) {
+  const auth = useAuth();
   const [activeTab,    setActiveTab]    = useState('stations');
   const [visitSection, setVisitSection] = useState('details');
   const [draftVisit,   setDraftVisit]   = useState(null);   // { visitId, station }
@@ -282,6 +309,8 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
   const [readingsDone,      setReadingsDone]      = useState(false);
   const [loggerUnavailable, setLoggerUnavailable] = useState(false);
   const [detailsAllDone, setDetailsAllDone] = useState(false);
+  const [pendingSubmit,   setPendingSubmit]   = useState(false);   // submit queued, waiting for connectivity
+  const outbox = useOutboxStatus();
   const [installPrompt, setInstallPrompt] = useState(null);
   const [installDismissed, setInstallDismissed] = useState(false);
   const [isInstalled, setIsInstalled] = useState(isStandaloneDisplayMode());
@@ -345,9 +374,16 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
 
   useEffect(() => {
     loadDraft().then(async draft => {
-      if (draft) {
+      // A draft left on a shared device by someone else is not shown to this user
+      if (draft && (draft.user_id == null || draft.user_id === auth?.id)) {
         setDraftVisit({ visitId: draft.visitId, station: draft.station });
         setFormState(draft.formState || null);
+        setReadingsDone(!!draft.progress?.readingsDone);
+        setDetailsAllDone(!!draft.progress?.detailsAllDone);
+        setLoggerUnavailable(!!draft.progress?.loggerUnavailable);
+        if (draft.progress?.visitSection) setVisitSection(draft.progress.visitSection);
+        setPendingSubmit(!!draft.pendingSubmit);
+        if (navigator.onLine) prefetchVisitData(draft.station);
         const restoredFiles = draft.files || [];
         // Re-sync any already-uploaded files so hasUnmappedColumns + parseState are current
         if (restoredFiles.some(f => f.dbId)) {
@@ -369,12 +405,12 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
                 gapDays:            db.gap_days      ?? null,
               };
             });
-            setVisitFiles(synced);
+            setVisitFiles(await reconcileFiles(draft.visitId, synced));
           } catch {
-            setVisitFiles(restoredFiles);
+            setVisitFiles(await reconcileFiles(draft.visitId, restoredFiles));
           }
         } else {
-          setVisitFiles(restoredFiles);
+          setVisitFiles(await reconcileFiles(draft.visitId, restoredFiles));
         }
         setActiveTab('visit');
       }
@@ -383,17 +419,20 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
   }, []);
 
   // ── Debounced IDB save whenever draft state changes ────────────────────
-  const persistDraft = useCallback((visitId, station, files, form) => {
+  const persistDraft = useCallback((visitId, station, files, form, extra) => {
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      saveDraft({ visitId, station, formState: form, files });
+      saveDraft({ visitId, station, formState: form, files, user_id: auth?.id ?? null, ...extra });
     }, 500);
-  }, []);
+  }, [auth?.id]);
 
   useEffect(() => {
     if (!draftVisit) return;
-    persistDraft(draftVisit.visitId, draftVisit.station, visitFiles, formState);
-  }, [draftVisit, visitFiles, formState, persistDraft]);
+    persistDraft(draftVisit.visitId, draftVisit.station, visitFiles, formState, {
+      progress: { readingsDone, detailsAllDone, loggerUnavailable, visitSection },
+      pendingSubmit,
+    });
+  }, [draftVisit, visitFiles, formState, readingsDone, detailsAllDone, loggerUnavailable, visitSection, pendingSubmit, persistDraft]);
 
   // ── Start visit: create draft on server, save to IDB ──────────────────
   async function handleStartVisit(station) {
@@ -418,7 +457,9 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
       setVisitFiles([]);
       setReadingsDone(false);
       setDetailsAllDone(false);
-      await saveDraft({ visitId: visit.id, station, formState: null, files: [] });
+      setPendingSubmit(false);
+      await saveDraft({ visitId: visit.id, station, formState: null, files: [], user_id: auth?.id ?? null });
+      prefetchVisitData(station);   // keep what this visit needs on the device in case signal drops
       setActiveTab('visit');
       setVisitSection('details');
     } catch (err) {
@@ -442,9 +483,16 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
   async function handleAbandon() {
     if (!draftVisit) return;
     setAbandoning(true);
+    const vid = draftVisit.visitId;
     try {
-      await abandonVisit(draftVisit.visitId);
-    } catch {
+      await abandonVisit(vid);
+      await clearVisitOps(vid);
+    } catch (err) {
+      // No signal: remember to abandon the server draft later instead of leaving it orphaned
+      if (isTransientError(err) || !navigator.onLine) {
+        await clearVisitOps(vid);
+        await enqueueOp('abandon', vid, {});
+      }
     } finally {
       setAbandoning(false);
     }
@@ -452,39 +500,95 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
     setDraftVisit(null);
     setVisitFiles([]);
     setFormState(null);
+    setPendingSubmit(false);
     setShowAbandon(false);
     setActiveTab('stations');
   }
 
   // ── Submit visit ───────────────────────────────────────────────────────
+  async function finishSubmit(vid) {
+    await clearVisitOps(vid);
+    await clearDraft();
+    setDraftVisit(null);
+    setVisitFiles([]);
+    setFormState(null);
+    setPendingSubmit(false);
+    setShowSubmit(false);
+    setActiveTab('history');
+  }
+
+  // Submit goes straight to the server when everything is already synced; otherwise (or with no
+  // signal) it is queued behind the visit's other changes and sent automatically when connected.
   async function handleSubmit() {
     if (!draftVisit) return;
     setSubmitting(true);
+    const vid = draftVisit.visitId;
     try {
-      await submitVisit(draftVisit.visitId);
-      await clearDraft();
-      setDraftVisit(null);
-      setVisitFiles([]);
-      setFormState(null);
+      const waiting = (await getOps(vid)).filter(o => o.type !== 'submit');
+      if (waiting.length === 0 && navigator.onLine) {
+        try {
+          await submitVisit(vid);
+          await finishSubmit(vid);
+          return;
+        } catch (err) {
+          if (!isTransientError(err)) { console.error('Submit failed:', err.message); return; }
+        }
+      }
+      const queuedAlready = (await getOps(vid)).some(o => o.type === 'submit');
+      if (!queuedAlready) await enqueueOp('submit', vid, {});
+      setPendingSubmit(true);
       setShowSubmit(false);
-      setActiveTab('history');
-    } catch (err) {
-      console.error('Submit failed:', err.message);
+      flushOutbox({ force: true });
     } finally {
       setSubmitting(false);
     }
   }
 
+  // Uploads are done by the sync engine; reflect each step on the file cards
+  useEffect(() => onOpEvent(({ phase, op, result, error }) => {
+    if (op.type !== 'upload' || !draftVisit || op.visit_id !== draftVisit.visitId) return;
+    const { localId } = op.payload;
+    const patch =
+      phase === 'start'     ? { parseState: 'uploading' }
+      : phase === 'synced'  ? { parseState: 'pending', dbId: result?.id ?? null, parseError: null }
+      : phase === 'transient' ? { parseState: 'queued' }
+      : phase === 'failed'  ? { parseState: 'error', parseError: error }
+      : null;
+    if (patch) setVisitFiles(prev => prev.map(f => f.localId === localId ? { ...f, ...patch } : f));
+  }), [draftVisit]);
+
+  // The queued submit was accepted by the server → close the visit out
+  useEffect(() => onOpSynced(({ op }) => {
+    if (op.type === 'submit' && draftVisit && op.visit_id === draftVisit.visitId) finishSubmit(op.visit_id);
+  }), [draftVisit]);
+
+  // If the app was closed while a submit was waiting, check whether it actually went through
+  useEffect(() => {
+    if (!pendingSubmit || !draftVisit || isOffline) return;
+    let cancelled = false;
+    (async () => {
+      const stillQueued = (await getOps(draftVisit.visitId)).some(o => o.type === 'submit');
+      if (stillQueued) return;
+      try {
+        const v = await getVisit(draftVisit.visitId);
+        if (!cancelled && v?.status === 'submitted') finishSubmit(draftVisit.visitId);
+      } catch { /* try again on the next reconnect */ }
+    })();
+    return () => { cancelled = true; };
+  }, [pendingSubmit, draftVisit, isOffline]);
+
   // ── Derived ────────────────────────────────────────────────────────────
   const hasFiles      = visitFiles.some(f => f.dbId);
   const queueActive   = visitFiles.filter(f => ['uploading', 'pending', 'queued'].includes(f.parseState)).length;
-  const queueErrors   = visitFiles.filter(f => f.parseState === 'error').length;
-  const queueBadge    = queueActive + queueErrors;  // drives nav badge count
+  const queueErrors   = visitFiles.filter(f => f.parseState === 'error').length + outbox.failed;
+  // Nav badge: files in flight or failed, plus every other change still waiting to sync
+  const queueBadge    = queueActive + visitFiles.filter(f => f.parseState === 'error').length + outbox.queued + outbox.failed;
   const visitBadge    = draftVisit ? 1 : 0;  // dot indicator when draft exists
 
   // Section completion
   const detailsDone      = detailsAllDone;
-  const filesDone        = hasFiles || loggerUnavailable;
+  // A file stored on the device and waiting to upload counts: the queued submit goes out after it
+  const filesDone        = hasFiles || loggerUnavailable || visitFiles.some(f => ['queued', 'uploading'].includes(f.parseState));
   const hasUnmappedFiles = visitFiles.some(f => f.hasUnmappedColumns);
   const completionMap    = { details: detailsDone, files: filesDone, readings: readingsDone };
 
@@ -519,13 +623,25 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
         </div>
       )}
 
-      {/* ── Global offline banner ────────────────────────────────────── */}
-      {isOffline && (
+      {/* ── Sync status ─────────────────────────────────────────────── */}
+      {(isOffline || outbox.queued > 0 || outbox.failed > 0 || pendingSubmit) && (
         <div
           className="bg-warning-light text-warning text-[12px] font-medium px-5 py-2 flex items-center gap-2 shrink-0 z-50"
           style={{ borderBottom: '1px solid rgba(230,81,0,0.2)' }}
         >
-          Offline — changes will sync when you reconnect
+          {outbox.failed > 0
+            ? `${outbox.failed} item${outbox.failed !== 1 ? 's' : ''} could not be saved — open the Queue tab`
+            : pendingSubmit
+              ? (isOffline
+                  ? 'Visit ready — it will be submitted automatically when you are back online'
+                  : 'Submitting visit…')
+              : isOffline
+                ? (outbox.queued > 0
+                    ? `Offline — ${outbox.queued} item${outbox.queued !== 1 ? 's' : ''} saved on this device, will sync when you reconnect`
+                    : 'Offline — your entries are saved on this device and will sync when you reconnect')
+                : outbox.syncing
+                  ? `Syncing ${outbox.queued} item${outbox.queued !== 1 ? 's' : ''}…`
+                  : `${outbox.queued} item${outbox.queued !== 1 ? 's' : ''} waiting to sync`}
         </div>
       )}
 
@@ -623,6 +739,8 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
               {/* Submit bar */}
               <div className="px-4 pb-3 pt-2 shrink-0 bg-surface border-t border-surface-dark">
                 <button
+                  disabled={pendingSubmit}
+                  style={pendingSubmit ? { opacity: 0.6 } : undefined}
                   onClick={() => {
                     if (canSubmit) { setShowSubmit(true); return; }
                     if (!detailsDone)  { setVisitSection('details');  return; }
@@ -631,7 +749,8 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
                   }}
                   className="cta-btn"
                 >
-                  {canSubmit          ? 'Review & submit visit →'
+                  {pendingSubmit      ? 'Submit queued — sends when connected'
+                    : canSubmit       ? 'Review & submit visit →'
                     : !detailsDone    ? 'Complete site notes →'
                     : !readingsDone   ? 'Complete manual readings →'
                     : hasUnmappedFiles ? 'Map unknown column names before submitting'
@@ -694,6 +813,7 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
         queueBadge={queueBadge}
         queueErrors={queueErrors}
         tabs={visibleTabs}
+        embedded={embedded}
       />
 
       {/* ── Sheets ──────────────────────────────────────────────────── */}
@@ -731,6 +851,7 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
 // ── App — role router ──────────────────────────────────────────────────────
 export default function App() {
   const auth  = useAuth();
+  useSyncEngine(auth?.id);
 
   if (!auth?.isReady) {
     return (

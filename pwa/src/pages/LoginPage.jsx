@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 
 
@@ -8,18 +8,38 @@ export default function LoginPage({ sessionExpired = false }) {
   const [password, setPassword] = useState('');
   const [error,    setError]    = useState('');
   const [loading,  setLoading]  = useState(false);
+  const [noSignal, setNoSignal] = useState(!navigator.onLine);
+
+  // Track coverage: clear the "no signal" notice as soon as the device is back online
+  useEffect(() => {
+    const goOnline  = () => setNoSignal(false);
+    const goOffline = () => setNoSignal(true);
+    window.addEventListener('online',  goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online',  goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
+    if (!navigator.onLine) { setNoSignal(true); return; }
+    setNoSignal(false);
     setLoading(true);
     try {
       await login(email.trim(), password);
     } catch (err) {
       const kratosCode = err?.ui?.messages?.[0]?.id;
-      setError(kratosCode === 4000006
-        ? 'Invalid email or password.'
-        : 'Sign in failed. Please try again.');
+      if (kratosCode === 4000006) {
+        setError('Invalid email or password.');
+      } else if (err instanceof TypeError || err?.message === 'Could not initiate login flow') {
+        // The server could not be reached (weak or no signal) — not a problem with the credentials
+        setNoSignal(true);
+      } else {
+        setError('Sign in failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -90,6 +110,14 @@ export default function LoginPage({ sessionExpired = false }) {
         {sessionExpired && (
           <div style={{ width: '100%', maxWidth: 400, marginBottom: 16, fontSize: 13, color: '#4A5568', textAlign: 'center' }}>
             Session expired — please sign in again.
+          </div>
+        )}
+
+        {/* No signal */}
+        {noSignal && (
+          <div style={{ width: '100%', maxWidth: 400, marginBottom: 16, fontSize: 13, color: '#4A5568', textAlign: 'center', lineHeight: 1.5 }}>
+            No signal — sign in when you have coverage.<br />
+            Anything already saved on this device stays safe and will sync after you sign in.
           </div>
         )}
 
@@ -187,7 +215,7 @@ export default function LoginPage({ sessionExpired = false }) {
                 transition: 'background 0.15s',
               }}
             >
-              {loading ? 'Signing in…' : 'Sign in'}
+              {loading ? 'Signing in…' : noSignal ? 'Try again' : 'Sign in'}
             </button>
           </form>
         </div>

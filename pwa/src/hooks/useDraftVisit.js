@@ -30,7 +30,8 @@ export async function saveDraft(draft) {
         localId:   f.localId,
         name:      f.name,
         size:      f.size,
-        parseState:  f.parseState === 'uploading' || f.parseState === 'retrying' ? 'error' : f.parseState,
+        // An upload in flight is resumed by the sync engine from the stored file; a reparse is re-polled
+        parseState:  f.parseState === 'uploading' ? (f.dbId ? 'pending' : 'queued') : f.parseState === 'retrying' ? 'pending' : f.parseState,
         dbId:        f.dbId,
         dateRange:   f.dateRange,
         records:     f.records,

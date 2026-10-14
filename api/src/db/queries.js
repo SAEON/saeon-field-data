@@ -1449,6 +1449,18 @@ async function setRainfallStatusForStation(stationId, status, error = null) {
 }
 
 async function createInstrumentRecord({ stationId, instrumentType, serialNo, mmPerTip, visitId, effectiveFrom, recordedBy, notes }) {
+  // An identical record for the same visit is a repeated request (queued retry), not a new instrument
+  const same = await pool.query(
+    `SELECT * FROM instrument_history
+     WHERE station_id = $1 AND instrument_type = $2 AND serial_no = $3
+       AND visit_id    IS NOT DISTINCT FROM $4::integer
+       AND mm_per_tip  IS NOT DISTINCT FROM $5::numeric
+       AND notes       IS NOT DISTINCT FROM $6::text
+     ORDER BY id LIMIT 1`,
+    [stationId, instrumentType, serialNo, visitId ?? null, mmPerTip ?? null, notes ?? null]
+  );
+  if (same.rows[0]) return same.rows[0];
+
   const result = await pool.query(
     `INSERT INTO instrument_history
        (station_id, instrument_type, serial_no, mm_per_tip, visit_id, effective_from, recorded_by, notes)
@@ -1578,6 +1590,20 @@ async function getActiveTransferStandards() {
     ORDER  BY kit_label, model
   `);
   return result.rows;
+}
+
+// One check per sensor × parameter per visit. Lets the API answer a repeated request (a queued retry
+// whose first reply was lost) with the stored check instead of inserting a second one.
+async function findCalibrationCheck(visitId, stationSensorId, parameter) {
+  const result = await pool.query(`
+    SELECT cc.*, u.full_name AS technician_name
+    FROM   calibration_checks cc
+    LEFT   JOIN users u ON u.id = cc.technician_id
+    WHERE  cc.visit_id = $1 AND cc.station_sensor_id = $2 AND cc.parameter = $3
+    ORDER  BY cc.id
+    LIMIT  1
+  `, [visitId, stationSensorId, parameter]);
+  return result.rows[0] || null;
 }
 
 async function createCalibrationCheck({
@@ -1970,6 +1996,7 @@ module.exports = {
   decommissionSensor,
   getActiveTransferStandards,
   createCalibrationCheck,
+  findCalibrationCheck,
   getCalibrationChecksForVisit,
   getCalibrationHistoryForStation,
   // Met data

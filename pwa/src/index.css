@@ -750,3 +750,27 @@ button {
     align-content: start;
   }
 }
+
+/* =============================================================================
+   FIELD APP EMBEDDED IN A DASHBOARD (lead / manager "Field" tab)
+   On desktop the field app's tab bar is normally a fixed left sidebar, which would sit
+   underneath the dashboard's own sidebar. Embedded, it stays a normal bar inside its area.
+============================================================================= */
+@media (min-width: 1024px) {
+  .bottom-tab-bar--embedded {
+    position: static;
+    width: auto;
+    flex-direction: row;
+    border-right: none;
+    border-top: 1.5px solid var(--color-surface-dark);
+    box-shadow: none;
+    overflow: visible;
+    z-index: auto;
+  }
+  .bottom-tab-bar--embedded .sidebar-brand { display: none; }
+  .bottom-tab-bar--embedded .tab-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 12px 8px;
+  }
+}

@@ -23,19 +23,18 @@ function AppBar({ title, subtitle }) {
 }
 
 function FamilyBadge({ family }) {
-  const MAP = {
-    groundwater: { label: 'Groundwater',    bg: '#E3F2FD', color: '#1565C0' },
-    rainfall:    { label: 'Rainfall',       bg: '#E8F5E9', color: '#2E7D32' },
-    met:         { label: 'Meteorological', bg: '#FFF3E0', color: '#E65100' },
-    other:       { label: 'Other',          bg: '#F5F5F5', color: '#616161' },
+  const LABELS = {
+    groundwater: 'Groundwater',
+    rainfall:    'Rainfall',
+    met:         'Meteorological',
+    other:       'Other',
   };
-  const s = MAP[family] || MAP.other;
   return (
     <span style={{
       fontSize: 10, fontWeight: 700, padding: '2px 6px',
-      borderRadius: 4, background: s.bg, color: s.color,
+      borderRadius: 4, background: 'var(--color-surface-dark)', color: 'var(--color-text-med)',
     }}>
-      {s.label}
+      {LABELS[family] || LABELS.other}
     </span>
   );
 }
@@ -203,7 +202,9 @@ function NetworkTab() {
                         <div className="mt-2 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
                           <button
                             onClick={() => setCalOpenId(id => id === station.id ? null : station.id)}
-                            className="text-[11px] font-semibold text-navy bg-transparent border-none p-0"
+                            className="font-semibold"
+                            style={{ fontSize: 12, height: 32, padding: '0 12px', borderRadius: 8, lineHeight: 1,
+                                     background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}
                           >
                             {calOpenId === station.id ? '▾ Hide calibration history' : '▸ Calibration history'}
                           </button>
@@ -246,11 +247,11 @@ function ConfirmDeleteSheet({ file, onClose, onDeleted }) {
   return (
     <div className="back-sheet-overlay">
       <div className="back-sheet">
-        <div className="text-[15px] font-bold text-text-dark mb-1">Delete file?</div>
-        <div className="text-[13px] text-text-light mb-1 leading-relaxed">
+        <div className="text-[14px] font-bold text-text-dark mb-1">Delete file?</div>
+        <div className="text-[12px] text-text-light mb-1 leading-relaxed">
           <strong>{file.original_name}</strong>
         </div>
-        <div className="text-[12px] text-text-light mb-4">
+        <div className="text-[11px] text-text-light mb-4">
           Station: {file.station_name} · Uploaded by {file.technician_name}
         </div>
         <div className="px-3 py-2 rounded-xl mb-4"
@@ -263,12 +264,13 @@ function ConfirmDeleteSheet({ file, onClose, onDeleted }) {
         {error && <div className="text-[12px] text-error mb-3">{error}</div>}
         <div className="flex gap-2.5">
           <button onClick={onClose} disabled={deleting}
-            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
+            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold"
+            style={{ fontSize: 13 }}>
             Cancel
           </button>
           <button onClick={handleDelete} disabled={deleting}
             className="flex-1 h-12 rounded-xl text-white text-sm font-semibold border-none"
-            style={{ background: 'var(--color-error)' }}>
+            style={{ fontSize: 13, background: 'var(--color-error)' }}>
             {deleting ? 'Deleting…' : 'Delete file'}
           </button>
         </div>
@@ -317,8 +319,8 @@ export function ErrorsTab({ canDelete = true }) {
         )}
         {!loading && !error && files.length === 0 && (
           <div className="flex flex-col items-center justify-center h-60 gap-3 text-center px-8">
-            <div className="text-[15px] font-semibold text-text-dark">No errors</div>
-            <div className="text-[13px] text-text-light">All uploaded files have been parsed and processed successfully.</div>
+            <div className="text-[13px] font-semibold text-text-dark">No errors</div>
+            <div className="text-[12px] text-text-light">All uploaded files have been parsed and processed successfully.</div>
           </div>
         )}
         {!loading && !error && files.length > 0 && (
@@ -346,8 +348,9 @@ export function ErrorsTab({ canDelete = true }) {
                   {canDelete && (
                   <button
                     onClick={() => setDeleteTarget(file)}
-                    className="h-7 px-2.5 rounded-lg text-[11px] font-semibold border-none shrink-0"
-                    style={{ background: '#FFEBEE', color: '#C62828' }}
+                    className="font-semibold shrink-0"
+                    style={{ fontSize: 12, height: 32, padding: '0 12px', borderRadius: 8, lineHeight: 1,
+                             background: '#FFEBEE', color: '#C62828', border: 'none' }}
                   >
                     Delete
                   </button>

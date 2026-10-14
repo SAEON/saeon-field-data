@@ -33,7 +33,7 @@ function Fab({ label, onPress }) {
     <button
       onClick={onPress}
       className="fixed flex items-center gap-1.5 rounded-full bg-navy text-white text-[12px] font-semibold shadow-lg border-none z-40"
-      style={{ bottom: 72, right: 16, height: 36, paddingLeft: 14, paddingRight: 14 }}
+      style={{ fontSize: 12, bottom: 72, right: 16, height: 36, paddingLeft: 14, paddingRight: 14 }}
     >
       <span style={{ fontSize: 16, lineHeight: 1, marginTop: -1 }}>+</span>
       {label}
@@ -42,17 +42,17 @@ function Fab({ label, onPress }) {
 }
 
 function FamilyBadge({ family }) {
-  const MAP = {
-    groundwater: { label: 'Groundwater',    bg: '#E3F2FD', color: '#1565C0' },
-    rainfall:    { label: 'Rainfall',       bg: '#E8F5E9', color: '#2E7D32' },
-    met:         { label: 'Meteorological', bg: '#FFF3E0', color: '#E65100' },
-    other:       { label: 'Other',          bg: '#F5F5F5', color: '#616161' },
+  const LABELS = {
+    groundwater: 'Groundwater',
+    rainfall:    'Rainfall',
+    met:         'Meteorological',
+    other:       'Other',
   };
-  const s = MAP[family] || MAP.other;
+  const s = { label: LABELS[family] || LABELS.other };
   return (
     <span style={{
       fontSize: 10, fontWeight: 700, padding: '2px 6px',
-      borderRadius: 4, background: s.bg, color: s.color,
+      borderRadius: 4, background: 'var(--color-surface-dark)', color: 'var(--color-text-med)',
     }}>
       {s.label}
     </span>
@@ -198,7 +198,7 @@ function StationSheet({ station, onClose, onSaved }) {
           <div className="text-[12px] text-text-light mb-4">{createdStation.display_name}</div>
           <MetSensorsSection station={createdStation} />
           <button onClick={onClose}
-            className="w-full h-10 rounded-xl bg-navy text-white text-[12px] font-semibold border-none mt-4">
+            className="w-full h-10 rounded-xl bg-navy text-white text-[12px] font-semibold border-none mt-4" style={{ fontSize: 12 }}>
             Done
           </button>
         </div>
@@ -219,13 +219,13 @@ function StationSheet({ station, onClose, onSaved }) {
             <div className={labelCls}>Name</div>
             <input className={inputCls} value={form.display_name}
               onChange={e => set('display_name', e.target.value)}
-              placeholder="e.g. Klein Nuwejaar Groundwater 01" />
+              placeholder="e.g. Klein Nuwejaar Groundwater 01" style={{ fontSize: 12 }}/>
           </div>
 
           <div className="flex gap-2">
             <div className="flex-1">
               <div className={labelCls}>Data family</div>
-              <select className={inputCls} value={form.data_family} onChange={e => set('data_family', e.target.value)}>
+              <select className={inputCls} value={form.data_family} onChange={e => set('data_family', e.target.value)} style={{ fontSize: 12 }}>
                 {DATA_FAMILY_OPTIONS.map(o => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
@@ -233,7 +233,7 @@ function StationSheet({ station, onClose, onSaved }) {
             </div>
             <div className="flex-1">
               <div className={labelCls}>Node</div>
-              <select className={inputCls} value={form.node} onChange={e => set('node', e.target.value)}>
+              <select className={inputCls} value={form.node} onChange={e => set('node', e.target.value)} style={{ fontSize: 12 }}>
                 <option value="">Select node</option>
                 {nodes.map(n => <option key={n} value={n}>{n}</option>)}
               </select>
@@ -244,7 +244,7 @@ function StationSheet({ station, onClose, onSaved }) {
             <div className="flex-1">
               <div className={labelCls}>Region</div>
               <input className={inputCls} value={form.region} onChange={e => set('region', e.target.value)}
-                placeholder="e.g. Western Cape" />
+                placeholder="e.g. Western Cape" style={{ fontSize: 12 }}/>
             </div>
           </div>
 
@@ -252,12 +252,12 @@ function StationSheet({ station, onClose, onSaved }) {
             <div className="flex-1">
               <div className={labelCls}>Latitude</div>
               <input className={inputCls} type="number" step="any" value={form.latitude}
-                onChange={e => set('latitude', e.target.value)} placeholder="-34.123" />
+                onChange={e => set('latitude', e.target.value)} placeholder="-34.123" style={{ fontSize: 12 }}/>
             </div>
             <div className="flex-1">
               <div className={labelCls}>Longitude</div>
               <input className={inputCls} type="number" step="any" value={form.longitude}
-                onChange={e => set('longitude', e.target.value)} placeholder="18.456" />
+                onChange={e => set('longitude', e.target.value)} placeholder="18.456" style={{ fontSize: 12 }}/>
             </div>
           </div>
 
@@ -269,13 +269,13 @@ function StationSheet({ station, onClose, onSaved }) {
                 </div>
                 <input className={inputCls} type="number" step="0.001" value={form.elevation_m}
                   onChange={e => set('elevation_m', e.target.value)}
-                  placeholder="e.g. 62.0" />
+                  placeholder="e.g. 62.0" style={{ fontSize: 12 }}/>
               </div>
             )}
             <div className={form.data_family === 'groundwater' && form.is_barologger ? 'w-1/2' : 'flex-1'}>
               <div className={labelCls}>Visit frequency (days)</div>
               <input className={inputCls} type="number" min="1" value={form.visit_frequency_days}
-                onChange={e => set('visit_frequency_days', e.target.value)} />
+                onChange={e => set('visit_frequency_days', e.target.value)} style={{ fontSize: 12 }}/>
             </div>
           </div>
 
@@ -307,14 +307,14 @@ function StationSheet({ station, onClose, onSaved }) {
                       <input className={inputCls} type="number" step="0.001" min="0"
                         value={form.casing_ht_m}
                         onChange={e => set('casing_ht_m', e.target.value)}
-                        placeholder="e.g. 0.17" />
+                        placeholder="e.g. 0.17" style={{ fontSize: 12 }}/>
                     </div>
                     <div className="flex-1">
                       <div className={labelCls}>Well depth (m)</div>
                       <input className={inputCls} type="number" step="0.01" min="0"
                         value={form.well_depth_m}
                         onChange={e => set('well_depth_m', e.target.value)}
-                        placeholder="e.g. 12.5" />
+                        placeholder="e.g. 12.5" style={{ fontSize: 12 }}/>
                     </div>
                   </div>
 
@@ -326,14 +326,14 @@ function StationSheet({ station, onClose, onSaved }) {
                         <button
                           type="button"
                           onClick={() => setNestedBarologger(true)}
-                          className="text-[11px] font-semibold text-navy border-none bg-transparent px-0">
+                          className="text-[11px] font-semibold text-navy border-none bg-transparent px-0" style={{ fontSize: 11 }}>
                           + New barologger
                         </button>
                       </div>
                     ) : (
                       <div className="flex items-center gap-2">
                         <select className={`${inputCls} flex-1`} value={form.baro_station_id}
-                          onChange={e => set('baro_station_id', e.target.value)}>
+                          onChange={e => set('baro_station_id', e.target.value)} style={{ fontSize: 12 }}>
                           <option value="">Select barologger…</option>
                           {barologgerStations.map(s => (
                             <option key={s.id} value={s.id}>{s.display_name}</option>
@@ -342,7 +342,7 @@ function StationSheet({ station, onClose, onSaved }) {
                         <button
                           type="button"
                           onClick={() => setNestedBarologger(true)}
-                          className="shrink-0 text-[11px] font-semibold text-navy border-none bg-transparent px-0 whitespace-nowrap">
+                          className="shrink-0 text-[11px] font-semibold text-navy border-none bg-transparent px-0 whitespace-nowrap" style={{ fontSize: 11 }}>
                           + New
                         </button>
                       </div>
@@ -357,12 +357,12 @@ function StationSheet({ station, onClose, onSaved }) {
                       <div className={labelCls}>Survey method <span className="normal-case font-normal text-text-light">(optional)</span></div>
                       <input className={inputCls} value={form.survey_method}
                         onChange={e => set('survey_method', e.target.value)}
-                        placeholder="e.g. GPS-SRTM" />
+                        placeholder="e.g. GPS-SRTM" style={{ fontSize: 12 }}/>
                     </div>
                     <div className="flex-1">
                       <div className={labelCls}>Survey date <span className="normal-case font-normal text-text-light">(optional)</span></div>
                       <input className={inputCls} type="date" value={form.surveyed_at}
-                        onChange={e => set('surveyed_at', e.target.value)} />
+                        onChange={e => set('surveyed_at', e.target.value)} style={{ fontSize: 12 }}/>
                     </div>
                   </div>
                 </>
@@ -373,7 +373,7 @@ function StationSheet({ station, onClose, onSaved }) {
           <div>
             <div className={labelCls}>Assigned technician</div>
             <select className={inputCls} value={form.assigned_technician_id}
-              onChange={e => set('assigned_technician_id', e.target.value)}>
+              onChange={e => set('assigned_technician_id', e.target.value)} style={{ fontSize: 12 }}>
               <option value="">Unassigned</option>
               {technicians.map(u => (
                 <option key={u.id} value={u.id}>{u.full_name}</option>
@@ -388,8 +388,7 @@ function StationSheet({ station, onClose, onSaved }) {
               rows={2}
               value={form.notes}
               onChange={e => set('notes', e.target.value)}
-              placeholder="Access instructions, special conditions, etc."
-            />
+              placeholder="Access instructions, special conditions, etc." style={{ fontSize: 12 }}/>
           </div>
 
           {isNew && form.data_family !== 'met' && (
@@ -399,7 +398,7 @@ function StationSheet({ station, onClose, onSaved }) {
               </div>
               <input className={inputCls} value={form.serial_no}
                 onChange={e => set('serial_no', e.target.value)}
-                placeholder="e.g. 20102577  (optional)" />
+                placeholder="e.g. 20102577  (optional)" style={{ fontSize: 12 }}/>
               {form.data_family === 'rainfall' && form.serial_no.trim() && (
                 <div className="text-[10px] text-text-light mt-1">Calibration defaults to 0.254 mm/tip — update via instrument history after first visit.</div>
               )}
@@ -439,11 +438,11 @@ function StationSheet({ station, onClose, onSaved }) {
 
         <div className="flex gap-2 mt-4">
           <button onClick={onClose} disabled={saving}
-            className="flex-1 h-10 border-[1.5px] border-border rounded-xl bg-white text-text-med text-[12px] font-semibold">
+            className="flex-1 h-10 border-[1.5px] border-border rounded-xl bg-white text-text-med text-[12px] font-semibold" style={{ fontSize: 12 }}>
             Cancel
           </button>
           <button onClick={handleSave} disabled={saving}
-            className="flex-1 h-10 rounded-xl bg-navy text-white text-[12px] font-semibold border-none">
+            className="flex-1 h-10 rounded-xl bg-navy text-white text-[12px] font-semibold border-none" style={{ fontSize: 12 }}>
             {saving ? 'Saving…' : isNew ? 'Add station' : 'Save changes'}
           </button>
         </div>
@@ -515,7 +514,7 @@ function InstrumentsSection({ station }) {
       <div className="flex items-center justify-between mb-2">
         <div className="text-[12px] font-semibold text-text-dark">Instrument history</div>
         <button onClick={() => setShowForm(v => !v)}
-          className="text-[11px] font-semibold text-navy border-none bg-transparent p-0">
+          className="text-[11px] font-semibold text-navy border-none bg-transparent p-0" style={{ fontSize: 11 }}>
           {showForm ? 'Cancel' : '+ Record change'}
         </button>
       </div>
@@ -679,7 +678,7 @@ function MetSensorsSection({ station }) {
       <div className="flex items-center justify-between mb-2">
         <div className="text-[12px] font-semibold text-text-dark">Station sensors</div>
         <button onClick={() => { setShowForm(v => !v); setError(null); setSaveState('idle'); }}
-          className="text-[11px] font-semibold text-navy border-none bg-transparent p-0">
+          className="text-[11px] font-semibold text-navy border-none bg-transparent p-0" style={{ fontSize: 11 }}>
           {showForm ? 'Cancel' : '+ Add sensor'}
         </button>
       </div>
@@ -730,7 +729,7 @@ function MetSensorsSection({ station }) {
 
             <button onClick={handleSave} disabled={!canSave || saveState === 'saving'}
               className="w-full h-10 rounded-xl text-white text-[12px] font-semibold border-none transition-colors"
-              style={{ background: canSave ? 'var(--color-navy)' : '#BDBDBD' }}>
+              style={{ fontSize: 12, background: canSave ? 'var(--color-navy)' : '#BDBDBD' }}>
               {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Error — retry' : 'Add to station'}
             </button>
           </div>
@@ -773,8 +772,7 @@ function MetSensorsSection({ station }) {
         <div className="mt-2">
           <button
             onClick={toggleHistory}
-            className="text-[11px] font-semibold text-navy bg-transparent border-none p-0"
-          >
+            className="text-[11px] font-semibold text-navy bg-transparent border-none p-0" style={{ fontSize: 11 }}>
             {historyOpen ? '▾ Hide deployment history' : '▸ Show deployment history'}
           </button>
           {historyOpen && (
@@ -846,7 +844,7 @@ function LinkBarologgerSheet({ barologger, stations, onClose, onLinked }) {
                   selected?.id === s.id
                     ? 'border-navy bg-navy/5 font-semibold text-text-dark'
                     : 'border-border text-text-med'
-                }`}>
+                }`} style={{ fontSize: 12 }}>
                 {s.display_name}
                 {s.region && <span className="ml-2 text-[10px] text-text-light">{s.region}</span>}
               </button>
@@ -856,12 +854,12 @@ function LinkBarologgerSheet({ barologger, stations, onClose, onLinked }) {
         {error && <div className="text-[11px] text-error mb-2">{error}</div>}
         <div className="flex gap-2">
           <button onClick={onClose} disabled={saving}
-            className="flex-1 h-10 border-[1.5px] border-border rounded-xl bg-white text-text-med text-[12px] font-semibold">
+            className="flex-1 h-10 border-[1.5px] border-border rounded-xl bg-white text-text-med text-[12px] font-semibold" style={{ fontSize: 12 }}>
             Skip
           </button>
           {unlinked.length > 0 && (
             <button onClick={handleLink} disabled={!selected || saving}
-              style={{ opacity: (!selected || saving) ? 0.4 : 1 }}
+              style={{ fontSize: 12, opacity: (!selected || saving) ? 0.4 : 1 }}
               className="flex-1 h-10 rounded-xl bg-navy text-white text-[12px] font-semibold border-none">
               {saving ? 'Linking…' : 'Link'}
             </button>
@@ -902,12 +900,12 @@ function DeactivateSheet({ station, onClose, onDeactivated }) {
         {error && <div className="text-[12px] text-error mb-3">{error}</div>}
         <div className="flex gap-2.5">
           <button onClick={onClose} disabled={saving}
-            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
+            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold" style={{ fontSize: 13 }}>
             Cancel
           </button>
           <button onClick={handleConfirm} disabled={saving}
             className="flex-1 h-12 rounded-xl text-white text-sm font-semibold border-none"
-            style={{ background: 'var(--color-error)' }}>
+            style={{ fontSize: 13, background: 'var(--color-error)' }}>
             {saving ? 'Deactivating…' : 'Deactivate'}
           </button>
         </div>
@@ -980,8 +978,7 @@ function AssignTechnicianSheet({ station, onClose, onAssigned }) {
           value={search}
           onChange={e => setSearch(e.target.value)}
           autoFocus
-          className="w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark mb-2"
-        />
+          className="w-full h-10 px-3 rounded-xl border border-border bg-white text-[13px] text-text-dark mb-2" style={{ fontSize: 13 }}/>
 
         {/* User list */}
         <div className="flex flex-col gap-1.5 mb-3 overflow-y-auto" style={{ maxHeight: 220 }}>
@@ -992,7 +989,7 @@ function AssignTechnicianSheet({ station, onClose, onAssigned }) {
             <button
               onClick={() => setSelected('')}
               className="text-left px-3 py-2.5 rounded-xl border text-[13px]"
-              style={{
+              style={{ fontSize: 13,
                 borderColor: selected === '' ? 'var(--color-navy)' : 'var(--color-border)',
                 background:  selected === '' ? '#EAF0FB' : 'white',
                 fontWeight:  selected === '' ? 600 : 400,
@@ -1006,7 +1003,7 @@ function AssignTechnicianSheet({ station, onClose, onAssigned }) {
               key={u.id}
               onClick={() => setSelected(u.id)}
               className="text-left px-3 py-2.5 rounded-xl border text-[13px]"
-              style={{
+              style={{ fontSize: 13,
                 borderColor: String(selected) === String(u.id) ? 'var(--color-navy)' : 'var(--color-border)',
                 background:  String(selected) === String(u.id) ? '#EAF0FB' : 'white',
                 fontWeight:  String(selected) === String(u.id) ? 600 : 400,
@@ -1036,11 +1033,11 @@ function AssignTechnicianSheet({ station, onClose, onAssigned }) {
 
         <div className="flex gap-2.5">
           <button onClick={onClose} disabled={saving}
-            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
+            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold" style={{ fontSize: 13 }}>
             Cancel
           </button>
           <button onClick={handleSave} disabled={saving}
-            className="flex-1 h-12 rounded-xl bg-navy text-white text-sm font-semibold border-none">
+            className="flex-1 h-12 rounded-xl bg-navy text-white text-sm font-semibold border-none" style={{ fontSize: 13 }}>
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
@@ -1081,7 +1078,7 @@ function CoverageSheet({ station, onClose }) {
           <button
             onClick={onClose}
             className="w-8 h-8 rounded-lg flex items-center justify-center text-text-light text-[16px] shrink-0 bg-transparent border-none"
-            style={{ border: '1px solid var(--color-border)' }}
+            style={{ fontSize: 16, border: '1px solid var(--color-border)' }}
           >✕</button>
         </div>
 
@@ -1237,7 +1234,6 @@ export default function StationRegistry() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-[10px] text-text-light min-w-0">
                     <FamilyBadge family={station.data_family} />
-                    {station.node && <span className="font-semibold">{station.node}</span>}
                     {station.region ?? 'No region'}
                     {' · '}every {station.visit_frequency_days}d
                     {station.last_visited_at && (
@@ -1256,8 +1252,9 @@ export default function StationRegistry() {
                       ...(station.active ? [{ label: 'Deactivate', onClick: () => setDeactivateTarget(station) }] : []),
                     ].map(btn => (
                       <button key={btn.label} onClick={btn.onClick}
-                        className="h-6 px-1.5 rounded text-[9px] font-semibold"
-                        style={{ background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}>
+                        className="font-semibold"
+                        style={{ fontSize: 12, height: 32, padding: '0 12px', borderRadius: 8, lineHeight: 1,
+                                 background: 'white', color: '#374151', border: '1px solid var(--color-border)' }}>
                         {btn.label}
                       </button>
                     ))}
@@ -1265,8 +1262,8 @@ export default function StationRegistry() {
                 </div>
 
               {station.data_family === 'groundwater' && !station.is_barologger && !station.baro_station_id && (
-                <div className="text-[10px] text-warning font-medium mt-1.5">
-                  ⚠ No baro station — processing skipped until one is linked
+                <div className="text-[10px] text-text-light font-medium mt-1.5">
+                  No baro station — processing skipped until one is linked
                 </div>
               )}
               </div>

@@ -19,6 +19,11 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Same check under /api so the PWA (which only reaches /api/*) can probe real connectivity
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
 // Health — database reachable
 app.get('/health/db', async (req, res, next) => {
   try {

@@ -3,6 +3,9 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getUsers, createUser, updateUser, getDepartments } from '../services/api.js';
 
+// Inputs and selects ignore Tailwind text-size classes (index.css resets them), so set it directly
+const inputStyle = { fontSize: 13 };
+
 function AppBar({ title }) {
   return (
     <header className="bg-navy h-14 flex items-center px-4 sticky top-0 z-50 shrink-0">
@@ -20,7 +23,7 @@ function Fab({ label, onPress }) {
     <button
       onClick={onPress}
       className="fixed flex items-center gap-2 rounded-full bg-navy text-white text-[14px] font-semibold shadow-lg border-none z-40"
-      style={{ bottom: 72, right: 16, height: 48, paddingLeft: 20, paddingRight: 20 }}
+      style={{ bottom: 72, right: 16, height: 48, paddingLeft: 20, paddingRight: 20, fontSize: 13 }}
     >
       <span style={{ fontSize: 22, lineHeight: 1, marginTop: -1 }}>+</span>
       {label}
@@ -132,18 +135,18 @@ function AddUserSheet({ isLead, departments, onClose, onCreated }) {
   return (
     <div className="back-sheet-overlay">
       <div className="back-sheet" style={{ maxHeight: '90dvh', overflowY: 'auto' }}>
-        <div className="text-[15px] font-bold text-text-dark mb-4">Add user</div>
+        <div className="text-[14px] font-bold text-text-dark mb-4">Add user</div>
 
         <form onSubmit={handleAdd}>
           <div className="mb-3">
             <div className={labelCls}>Full name</div>
-            <input type="text" required className={inputCls} placeholder="Jane Smith"
+            <input type="text" required className={inputCls} style={inputStyle} placeholder="Jane Smith"
               value={fullName} onChange={e => setFullName(e.target.value)} autoFocus />
           </div>
 
           <div className="mb-3">
             <div className={labelCls}>Email</div>
-            <input type="email" required className={inputCls} placeholder="jane@saeon.ac.za"
+            <input type="email" required className={inputCls} style={inputStyle} placeholder="jane@saeon.ac.za"
               value={email} onChange={e => setEmail(e.target.value)} />
           </div>
 
@@ -154,7 +157,7 @@ function AddUserSheet({ isLead, departments, onClose, onCreated }) {
                 Role will be set to <strong>Technician</strong>. Only a Data Manager can assign elevated roles.
               </div>
             ) : (
-              <select className={inputCls} value={role} onChange={e => setRole(e.target.value)}>
+              <select className={inputCls} style={inputStyle} value={role} onChange={e => setRole(e.target.value)}>
                 <option value="technician">Technician</option>
                 <option value="technician_lead">Technician Lead</option>
                 <option value="data_manager">Data Manager</option>
@@ -164,7 +167,7 @@ function AddUserSheet({ isLead, departments, onClose, onCreated }) {
 
           <div className="mb-3">
             <div className={labelCls}>Department</div>
-            <select required className={inputCls} value={department} onChange={e => setDepartment(e.target.value)}>
+            <select required className={inputCls} style={inputStyle} value={department} onChange={e => setDepartment(e.target.value)}>
               <option value="">Select department…</option>
               {departments.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
@@ -178,11 +181,12 @@ function AddUserSheet({ isLead, departments, onClose, onCreated }) {
               </div>
               <button type="button" onClick={handleCopy}
                 className="h-10 px-3 rounded-xl border border-border bg-white text-[12px] font-semibold text-text-med shrink-0"
-                style={{ minWidth: 60 }}>
+                style={{ minWidth: 60, fontSize: 12 }}>
                 {copied ? '✓ Copied' : 'Copy'}
               </button>
               <button type="button" onClick={handleRegenerate}
                 className="h-10 px-3 rounded-xl border border-border bg-white text-[12px] font-semibold text-text-med shrink-0"
+                style={{ fontSize: 12 }}
                 title="Generate a new password">
                 ↻
               </button>
@@ -193,12 +197,12 @@ function AddUserSheet({ isLead, departments, onClose, onCreated }) {
 
           <div className="flex gap-2.5">
             <button type="button" onClick={onClose} disabled={saving}
-              className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
+              className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold" style={{ fontSize: 13 }}>
               Cancel
             </button>
             <button type="submit" disabled={!canSubmit}
               className="flex-1 h-12 rounded-xl text-white text-sm font-semibold border-none"
-              style={{ background: canSubmit ? 'var(--color-navy)' : '#BDBDBD' }}>
+              style={{ fontSize: 13, background: canSubmit ? 'var(--color-navy)' : '#BDBDBD' }}>
               {saving ? 'Creating…' : 'Create user'}
             </button>
           </div>
@@ -240,18 +244,18 @@ function EditRoleSheet({ user, departments, onClose, onUpdated }) {
   return (
     <div className="back-sheet-overlay">
       <div className="back-sheet">
-        <div className="text-[15px] font-bold text-text-dark mb-1">Edit user</div>
+        <div className="text-[14px] font-bold text-text-dark mb-1">Edit user</div>
         <div className="text-[12px] text-text-light mb-4">{user.full_name ?? user.email}</div>
 
         <div className={labelCls}>Role</div>
-        <select className={inputCls + ' mb-3'} value={role} onChange={e => setRole(e.target.value)}>
+        <select className={inputCls + ' mb-3'} style={inputStyle} value={role} onChange={e => setRole(e.target.value)}>
           <option value="technician">Technician</option>
           <option value="technician_lead">Technician Lead</option>
           <option value="data_manager">Data Manager</option>
         </select>
 
         <div className={labelCls}>Department</div>
-        <select className={inputCls} value={department} onChange={e => setDepartment(e.target.value)}>
+        <select className={inputCls} style={inputStyle} value={department} onChange={e => setDepartment(e.target.value)}>
           <option value="">None</option>
           {departments.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
@@ -260,11 +264,11 @@ function EditRoleSheet({ user, departments, onClose, onUpdated }) {
 
         <div className="flex gap-2.5 mt-5">
           <button onClick={onClose} disabled={saving}
-            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold">
+            className="flex-1 h-12 border-[1.5px] border-border rounded-xl bg-white text-text-med text-sm font-semibold" style={{ fontSize: 13 }}>
             Cancel
           </button>
           <button onClick={handleSave} disabled={saving}
-            className="flex-1 h-12 rounded-xl bg-navy text-white text-sm font-semibold border-none">
+            className="flex-1 h-12 rounded-xl bg-navy text-white text-sm font-semibold border-none" style={{ fontSize: 13 }}>
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
@@ -440,7 +444,7 @@ function UserRow({ user, isManager, isLead, isSelf, toggling, onToggle, onEditRo
           <button
             onClick={onEditRole}
             className="h-7 px-2 rounded-lg text-[11px] font-semibold border-none"
-            style={{ background: '#EAF0FB', color: 'var(--color-navy)' }}
+            style={{ fontSize: 11, background: '#EAF0FB', color: 'var(--color-navy)' }}
           >
             Edit
           </button>
