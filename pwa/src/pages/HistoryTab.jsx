@@ -1,6 +1,7 @@
 // HistoryTab — visit history with scope toggle (all/mine), status filters, overdue view,
 // and oversight actions (notes edit, reparse, assign) for lead/manager roles.
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useOnReconnect } from '../hooks/useOnReconnect.js';
 import {
   getVisits, getVisit, uploadFile, getStationRainfall,
   getUsers, getStations, getOverdueStations, assignVisit, updateVisit, reparseFile, updateStation, getStationSensorHistory,
@@ -820,6 +821,7 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
   }, [user?.id, scope, statusFilter, techFilter, stationFilter, isOverdueMode]);
 
   useEffect(() => { load(); }, [load]);
+  useOnReconnect(load);
 
   // Client-side family filter (mine scope only)
   const displayedVisits = (scope === 'mine' && familyFilter !== 'all')

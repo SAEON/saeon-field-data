@@ -17,9 +17,9 @@ function fmtDateTime(iso) {
   });
 }
 
-function pillBtn(active, onClick, label) {
+function pillBtn(active, onClick, label, key) {
   return (
-    <button onClick={onClick} style={{
+    <button key={key} onClick={onClick} style={{
       fontSize: 11, fontWeight: active ? 700 : 500,
       padding: '3px 10px', borderRadius: 20,
       border: `1.5px solid ${active ? 'var(--color-navy)' : 'var(--color-border)'}`,
@@ -255,7 +255,7 @@ export default function GroundwaterDataTable({ stationId }) {
               {page < pageCount && pillBtn(false, () => setPage(p => p + 1), 'Next ›')}
             </div>
             <div style={{ display: 'flex', gap: 4 }}>
-              {PAGE_SIZES.map(s => pillBtn(pageSize === s, () => { setPageSize(s); setPage(1); }, String(s)))}
+              {PAGE_SIZES.map(s => pillBtn(pageSize === s, () => { setPageSize(s); setPage(1); }, String(s), s))}
             </div>
           </div>
         </>

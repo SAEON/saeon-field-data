@@ -284,8 +284,21 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
   const [coverageEnd,     setCoverageEnd]     = useState(null);
   const [pendingPreviews, setPendingPreviews] = useState(null); // [{ raw, preview }] awaiting confirm
   const [rejectedFiles,   setRejectedFiles]   = useState([]);   // file names blocked upfront
+  const [offline,         setOffline]         = useState(!navigator.onLine);
   const fileInputRef   = useRef(null);
   const pollTimers     = useRef({});   // localId → timeout handle
+
+  // Track connectivity so a queued file explains why it is waiting
+  useEffect(() => {
+    const goOffline = () => setOffline(true);
+    const goOnline  = () => setOffline(false);
+    window.addEventListener('offline', goOffline);
+    window.addEventListener('online',  goOnline);
+    return () => {
+      window.removeEventListener('offline', goOffline);
+      window.removeEventListener('online',  goOnline);
+    };
+  }, []);
 
   // Clear all poll timers on unmount
   useEffect(() => {
@@ -691,7 +704,7 @@ export default function UploadFiles({ visitId, stationId, files, setFiles, dataF
                           : isErr      ? 'Parse failed'
                           : isRetrying ? 'Retrying…'
                           : isPending  ? 'Processing…'
-                          : isQueued   ? 'Waiting to upload — sends automatically'
+                          : isQueued   ? (offline ? 'Offline — file queued, uploads automatically when back online' : 'Queued — uploads automatically')
                           :              'Uploading…'}
                         </span>
                       </div>

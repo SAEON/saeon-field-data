@@ -25,7 +25,16 @@ let failures = 0;
 let backoffUntil = 0;
 let flushPromise = null;
 
+const syncedKey = () => `fds_last_synced_${currentUser}`;
+function readLastSynced() {
+  try {
+    const v = localStorage.getItem(syncedKey());
+    return v ? new Date(v) : null;
+  } catch { return null; }
+}
+
 export function setOutboxUser(userId) {
+  if ((userId ?? null) !== currentUser) lastSyncedAt = null;
   currentUser = userId ?? null;
   emit();
 }
@@ -62,7 +71,7 @@ export async function getOutboxState() {
     queued:  ops.filter(o => o.status === 'queued').length,
     failed:  ops.filter(o => o.status === 'failed').length,
     syncing,
-    lastSyncedAt,
+    lastSyncedAt: lastSyncedAt ?? (currentUser ? readLastSynced() : null),
   };
 }
 
@@ -244,6 +253,7 @@ async function doFlush(force) {
       synced += 1;
       failures = 0;
       lastSyncedAt = new Date();
+      try { localStorage.setItem(syncedKey(), lastSyncedAt.toISOString()); } catch { /* storage unavailable */ }
       syncedListeners.forEach(fn => fn({ op, result }));
       fire({ phase: 'synced', op, result });
     } catch (err) {

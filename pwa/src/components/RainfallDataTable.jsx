@@ -43,9 +43,9 @@ function FlagCell({ value }) {
   return <span style={{ color: '#E65100', fontWeight: 700 }}>{value}</span>;
 }
 
-function pillBtn(active, onClick, label) {
+function pillBtn(active, onClick, label, key) {
   return (
-    <button onClick={onClick} style={{
+    <button key={key} onClick={onClick} style={{
       fontSize: 11, fontWeight: active ? 700 : 500,
       padding: '3px 10px', borderRadius: 20,
       border: `1.5px solid ${active ? 'var(--color-navy)' : 'var(--color-border)'}`,
@@ -169,7 +169,7 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
       {/* Resolution pills — processed view only */}
       {view === 'processed' && (
         <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', gap: 6, overflowX: 'auto' }}>
-          {RESOLUTIONS.map(r => pillBtn(resolution === r.value, () => setResolution(r.value), r.label))}
+          {RESOLUTIONS.map(r => pillBtn(resolution === r.value, () => setResolution(r.value), r.label, r.value))}
         </div>
       )}
 
@@ -179,7 +179,7 @@ export default function RainfallDataTable({ stationId, canReprocess = false }) {
       {/* Flag filter pills — processed view only */}
       {view === 'processed' && (
         <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)', display: 'flex', gap: 6, overflowX: 'auto' }}>
-          {FLAG_FILTERS.map(f => pillBtn(flagFilter === f.value, () => setFlagFilter(f.value), f.label))}
+          {FLAG_FILTERS.map(f => pillBtn(flagFilter === f.value, () => setFlagFilter(f.value), f.label, f.value))}
         </div>
       )}
 

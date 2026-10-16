@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useOnReconnect } from '../hooks/useOnReconnect.js';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers, getInstrumentHistory, createInstrumentRecord, getVisits, getMetInstrumentTypes, getStationSensors, getStationSensorHistory, assignSensor, getBarologgerStations, getDepartments } from '../services/api.js';
 
@@ -1155,6 +1156,7 @@ export default function StationRegistry() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useOnReconnect(load);
 
   function handleSaved(saved, isNew) {
     setStations(prev => {

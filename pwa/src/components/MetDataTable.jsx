@@ -12,9 +12,9 @@ function fmtDateTime(iso) {
   });
 }
 
-function pillBtn(active, onClick, label) {
+function pillBtn(active, onClick, label, key) {
   return (
-    <button onClick={onClick} style={{
+    <button key={key} onClick={onClick} style={{
       fontSize: 11, fontWeight: active ? 700 : 500,
       padding: '3px 10px', borderRadius: 20,
       border: `1.5px solid ${active ? 'var(--color-navy)' : 'var(--color-border)'}`,
@@ -179,7 +179,7 @@ export default function MetDataTable({ stationId }) {
         <span style={{ fontSize: 11, color: 'var(--color-text-light)', fontWeight: 600 }}>To</span>
         <input type="date" value={to}   onChange={e => setTo(e.target.value)}   style={inputStyle} />
         <div style={{ display: 'flex', gap: 4, marginLeft: 4 }}>
-          {RESOLUTIONS.map(r => pillBtn(resolution === r.id, () => { setResolution(r.id); setPage(1); }, r.label))}
+          {RESOLUTIONS.map(r => pillBtn(resolution === r.id, () => { setResolution(r.id); setPage(1); }, r.label, r.id))}
         </div>
         {fetching && <span style={{ fontSize: 11, color: 'var(--color-text-light)' }}>Loading…</span>}
       </div>
@@ -267,7 +267,7 @@ export default function MetDataTable({ stationId }) {
               {page < pageCount && pillBtn(false, () => setPage(p => p + 1), 'Next ›')}
             </div>
             <div style={{ display: 'flex', gap: 4 }}>
-              {PAGE_SIZES.map(s => pillBtn(pageSize === s, () => { setPageSize(s); setPage(1); }, String(s)))}
+              {PAGE_SIZES.map(s => pillBtn(pageSize === s, () => { setPageSize(s); setPage(1); }, String(s), s))}
             </div>
           </div>
         </>

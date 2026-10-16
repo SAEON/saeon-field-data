@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useOnReconnect } from '../hooks/useOnReconnect.js';
+import { useOutboxStatus } from '../hooks/useSyncEngine.js';
+import SyncQueue from './SyncQueue.jsx';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getDashboardStations, getFilesWithErrors, deleteFile, getStationCalibrationHistory, getPendingColumnMappings, resolveColumnMapping, ignoreColumnMapping, getAllPhenomena, getActiveMappings, updateColumnMappingNodes, createPhenomenon, updatePhenomenon, reassignColumnMapping } from '../services/api.js';
 import UserManagement    from './UserManagement.jsx';
@@ -133,12 +136,15 @@ function NetworkTab() {
   const [error,          setError]          = useState(null);
   const [calOpenId,      setCalOpenId]      = useState(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     getDashboardStations()
-      .then(setStations)
+      .then(d => { setStations(d); setError(null); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useOnReconnect(load);
 
   const overdue  = stations.filter(s => { const l = stationHealth(s.days_since_visit, s.visit_frequency_days).label; return l === 'Overdue' || l === 'Never visited'; }).length;
   const dueSoon  = stations.filter(s => stationHealth(s.days_since_visit, s.visit_frequency_days).label === 'Due soon').length;
@@ -298,6 +304,7 @@ export function ErrorsTab({ canDelete = true }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useOnReconnect(load);
 
   function handleDeleted(fileId) {
     setFiles(prev => prev.filter(f => f.id !== fileId));
@@ -1513,6 +1520,7 @@ function PhenoStandardPanel({ onCountChange }) {
 const TABS = [
   { id: 'network',  label: 'Network',  icon: '◉' },
   { id: 'history',  label: 'History',  icon: '≡' },
+  { id: 'queue',    label: 'Queue',    icon: '▤' },
   { id: 'errors',   label: 'Errors',   icon: '⚠' },
   { id: 'stations', label: 'Stations', icon: '⊞' },
   { id: 'data',     label: 'Data',     icon: '≀' },
@@ -1523,6 +1531,7 @@ const TABS = [
 
 export default function ManagerDashboard() {
   const [activeTab,        setActiveTab]        = useState('network');
+  const outbox = useOutboxStatus();
   const [pendingColCount,  setPendingColCount]  = useState(null);
 
   useEffect(() => {
@@ -1549,11 +1558,12 @@ export default function ManagerDashboard() {
         </div>
       )}
       {activeTab === 'stations' && <StationRegistry />}
+      {activeTab === 'queue'    && <SyncQueue />}
       {activeTab === 'errors'   && <ErrorsTab />}
       {activeTab === 'columns'  && <PhenoStandardPanel onCountChange={setPendingColCount} />}
       {activeTab === 'data'     && <DataTab />}
       {activeTab === 'users'    && <UserManagement />}
-      {activeTab === 'field'    && <FieldApp embedded={true} onGoToColumns={() => setActiveTab('columns')} onUnmappedDetected={() => getPendingColumnMappings().then(r => setPendingColCount(r.length)).catch(() => {})} />}
+      {activeTab === 'field'    && <FieldApp embedded={true} onLanding={() => setActiveTab('network')} onGoToColumns={() => setActiveTab('columns')} onUnmappedDetected={() => getPendingColumnMappings().then(r => setPendingColCount(r.length)).catch(() => {})} />}
 
       <nav className="bottom-tab-bar shrink-0">
         <div className="sidebar-brand">
@@ -1573,6 +1583,17 @@ export default function ManagerDashboard() {
           >
             <span className="tab-icon">{tab.icon}</span>
             <span>{tab.label}</span>
+            {tab.id === 'queue' && outbox.queued + outbox.failed > 0 && (
+              <span style={{
+                position: 'absolute', top: 4, right: 4,
+                background: outbox.failed > 0 ? '#C62828' : '#E65100', color: 'white',
+                fontSize: 9, fontWeight: 700, lineHeight: 1,
+                padding: '2px 4px', borderRadius: 8,
+                minWidth: 14, textAlign: 'center',
+              }}>
+                {outbox.queued + outbox.failed}
+              </span>
+            )}
             {tab.id === 'columns' && pendingColCount > 0 && (
               <span style={{
                 position: 'absolute', top: 4, right: 4,

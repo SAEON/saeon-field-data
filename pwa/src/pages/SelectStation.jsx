@@ -198,7 +198,7 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
       {selectedId && (
         <div className="px-4 pb-3 shrink-0">
           <button onClick={handleStart} className="cta-btn">
-            Start visit — {selectedStation?.display_name.split(' ').slice(0, 3).join(' ')}
+            Start Visit
             <span className="text-lg">→</span>
           </button>
         </div>

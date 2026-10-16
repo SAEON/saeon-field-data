@@ -171,7 +171,7 @@ export default function LeadDashboard() {
       {activeTab === 'rainfall' && <RainfallOverview />}
       {activeTab === 'errors'   && <ErrorsTab />}
       {activeTab === 'users'    && <UserManagement />}
-      {activeTab === 'field'    && <FieldApp embedded={true} />}
+      {activeTab === 'field'    && <FieldApp embedded={true} onLanding={() => setActiveTab('history')} />}
       <LeadNav activeTab={activeTab} setActiveTab={setActiveTab} />
     </div>
   );

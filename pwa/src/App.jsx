@@ -3,6 +3,7 @@ import { loadDraft, saveDraft, clearDraft, removeLegacyDraft } from './hooks/use
 import { createVisit, submitVisit, abandonVisit, getVisit, isTransientError, prefetchVisitData } from './services/api.js';
 import { enqueueOp, getOps, onOpSynced, onOpEvent, flushOutbox, clearVisitOps } from './services/outbox.js';
 import { hasStoredFile } from './services/uploadQueue.js';  // also registers the upload handlers
+import { showNotice } from './services/notice.js';
 import { useSyncEngine, useOutboxStatus } from './hooks/useSyncEngine.js';
 import { useAuth } from './auth/AuthContext.jsx';
 import ProfileButton from './auth/ProfileSheet.jsx';
@@ -196,8 +197,10 @@ function AbandonSheet({ stationName, onKeep, onConfirm, abandoning }) {
 // ── Submit confirmation sheet ──────────────────────────────────────────────
 function SubmitSheet({ draftVisit, visitFiles, hasReadings, onKeep, onConfirm, submitting }) {
   const fileCount   = visitFiles.filter(f => f.dbId).length;
+  // Files picked while offline are stored on the device and upload by themselves; they are not "missing"
+  const waitingCount = visitFiles.filter(f => !f.dbId && ['queued', 'uploading'].includes(f.parseState)).length;
   const parsedCount = visitFiles.filter(f => f.parseState === 'parsed').length;
-  const missingFiles    = fileCount === 0;
+  const missingFiles    = fileCount === 0 && waitingCount === 0;
   const missingReadings = !hasReadings;
   return (
     <div className="back-sheet-overlay">
@@ -237,7 +240,13 @@ function SubmitSheet({ draftVisit, visitFiles, hasReadings, onKeep, onConfirm, s
             Once submitted this visit moves to History.
           </div>
         )}
-        {fileCount === 0 && !missingReadings && (
+        {waitingCount > 0 && (
+          <div className="text-[12px] text-text-med mb-4 leading-relaxed">
+            {waitingCount} file{waitingCount !== 1 ? 's' : ''}{' '}
+            {navigator.onLine ? 'uploading.' : 'queued — uploads when back online.'}
+          </div>
+        )}
+        {fileCount === 0 && waitingCount === 0 && !missingReadings && (
           <div className="text-[12px] text-text-med mb-4 leading-relaxed">
             Once submitted this visit moves to History.
           </div>
@@ -288,7 +297,7 @@ async function reconcileFiles(visitId, list) {
 }
 
 // ── Field PWA (shared by technicians, leads, and managers) ────────────────
-export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDetected }) {
+export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDetected, onLanding }) {
   const auth = useAuth();
   const [activeTab,    setActiveTab]    = useState('stations');
   const [visitSection, setVisitSection] = useState('details');
@@ -554,9 +563,20 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
       }
       const queuedAlready = (await getOps(vid)).some(o => o.type === 'submit');
       if (!queuedAlready) await enqueueOp('submit', vid, {});
-      setPendingSubmit(true);
-      setShowSubmit(false);
       flushOutbox({ force: true });
+
+      // The technician is done: close the form and send them to their landing page. The queued files and
+      // the submit stay in the outbox and go through, in order, on their own (so the queue is NOT cleared).
+      await clearDraft(auth?.id);
+      setDraftVisit(null);
+      setVisitFiles([]);
+      setFormState(null);
+      setPendingSubmit(false);
+      setShowSubmit(false);
+      showNotice(navigator.onLine
+        ? 'Visit saved — it will submit as soon as its files finish uploading.'
+        : 'Visit saved on this device — it will submit automatically when you are back online.');
+      if (onLanding) onLanding(); else setActiveTab('stations');
     } finally {
       setSubmitting(false);
     }

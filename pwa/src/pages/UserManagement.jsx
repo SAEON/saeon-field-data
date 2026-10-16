@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useOnReconnect } from '../hooks/useOnReconnect.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getUsers, createUser, updateUser, getDepartments } from '../services/api.js';
@@ -305,6 +306,7 @@ export default function UserManagement() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useOnReconnect(load);
 
   async function handleToggleActive(user) {
     if (isLead && user.role !== 'technician') return;
