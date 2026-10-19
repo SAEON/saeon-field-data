@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { useHasDraft } from '../hooks/useDraftVisit.js';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getStations, getStationRainfallSummary } from '../services/api.js';
 import RainfallDataTable from '../components/RainfallDataTable.jsx';
@@ -109,7 +110,8 @@ function RainfallOverview() {
 // ── Nav ───────────────────────────────────────────────────────────────────────
 
 function LeadNav({ activeTab, setActiveTab }) {
-  const { initials } = useAuth();
+  const { initials, id } = useAuth();
+  const hasDraft = useHasDraft(id);
   return (
     <nav className="bottom-tab-bar shrink-0">
       <div className="sidebar-brand">
@@ -125,9 +127,19 @@ function LeadNav({ activeTab, setActiveTab }) {
           onClick={() => setActiveTab(tab.id)}
           data-active={activeTab === tab.id ? 'true' : undefined}
           className="tab-btn"
+          style={{ position: 'relative' }}
         >
           <span className="tab-icon">{tab.icon}</span>
           <span>{tab.label}</span>
+          {tab.id === 'field' && hasDraft && (
+            <span title="Visit in progress" style={{
+              position: 'absolute', top: 4, right: 4,
+              background: '#C62828', color: 'white',
+              fontSize: 9, fontWeight: 700, lineHeight: 1,
+              padding: '2px 4px', borderRadius: 8,
+              minWidth: 14, textAlign: 'center',
+            }}>1</span>
+          )}
         </button>
       ))}
       <div

@@ -6,12 +6,14 @@
 //
 // Flush rules:
 //   - network failure, timeout or 5xx  → stop, back off, nothing is lost, no attempt is burned
-//   - 401                              → stop (the auth layer prompts a sign-in), nothing is lost
+//   - 401                              → stop and pause until the user signs in again, nothing is lost
 //   - other 4xx                        → that op is marked 'failed' with the server message
 //   - 'submit' / 'abandon' for a visit are held while any op of that visit is 'failed'
+//   - ops of a visit that has no server id yet wait for its 'visit_create' (see remapVisit)
 
 import { getDB } from '../hooks/idb.js';
 import * as api from './api.js';
+import { isLocalVisit } from '../utils/visitId.js';
 
 const STORE = 'outbox';
 
@@ -24,6 +26,39 @@ let syncing = false;
 let failures = 0;
 let backoffUntil = 0;
 let flushPromise = null;
+let authPaused = false;
+
+// local visit id → real id, remembered after the server creates the visit. A screen that still holds the
+// old id (a save timer that started before the switch) is then re-pointed instead of being left stranded.
+const MAP_KEY = 'fds_visit_map';
+function readVisitMap() {
+  try { return JSON.parse(localStorage.getItem(MAP_KEY) || '{}'); } catch { return {}; }
+}
+function rememberVisitMapping(localId, realId) {
+  try {
+    const entries = Object.entries({ ...readVisitMap(), [localId]: realId }).slice(-50);
+    localStorage.setItem(MAP_KEY, JSON.stringify(Object.fromEntries(entries)));
+  } catch { /* storage unavailable */ }
+}
+export function resolveVisitId(id) {
+  return isLocalVisit(id) ? (readVisitMap()[id] ?? id) : id;
+}
+
+// An op with every occurrence of the visit id switched (the id also lives inside some payloads)
+function withVisitId(op, localId, realId) {
+  const next = { ...op, visit_id: realId };
+  if (op.payload?.data?.visit_id === localId)   next.payload = { ...next.payload, data:   { ...op.payload.data,   visit_id: realId } };
+  if (op.payload?.assign?.visit_id === localId) next.payload = { ...next.payload, assign: { ...op.payload.assign, visit_id: realId } };
+  return next;
+}
+
+// A 401 pauses the queue so it does not keep hitting the server; signing in again resumes it.
+export function resumeAfterAuth() {
+  if (!authPaused) return;
+  authPaused = false;
+  backoffUntil = 0;
+  flushOutbox({ force: true });
+}
 
 const syncedKey = () => `fds_last_synced_${currentUser}`;
 function readLastSynced() {
@@ -84,7 +119,8 @@ async function emit() {
 export async function getOps(visitId) {
   try {
     const ops = await mine();
-    return visitId == null ? ops : ops.filter(o => o.visit_id === visitId);
+    const id  = resolveVisitId(visitId);
+    return visitId == null ? ops : ops.filter(o => o.visit_id === id);
   } catch {
     return [];
   }
@@ -94,7 +130,7 @@ export async function enqueueOp(type, visitId, payload) {
   const db = await getDB();
   const id = await db.add(STORE, {
     user_id: currentUser,
-    visit_id: visitId,
+    visit_id: resolveVisitId(visitId),
     type,
     payload,
     attempts: 0,
@@ -109,6 +145,7 @@ export async function enqueueOp(type, visitId, payload) {
 // For "last write wins" ops (e.g. the visit's date/notes): drop earlier queued copies, keep the newest.
 export async function enqueueOpReplacing(type, visitId, payload) {
   const db = await getDB();
+  visitId = resolveVisitId(visitId);
   for (const op of (await mine()).filter(o => o.visit_id === visitId && o.type === type && o.status === 'queued')) {
     await db.delete(STORE, op.id);
   }
@@ -158,8 +195,37 @@ export async function discardOp(id) {
   emit();
 }
 
+// Everything stored under a visit's local id moves to the real id the server just gave it:
+// queued ops (including ids nested in their payloads), stored files waiting to upload, and the draft.
+export async function remapVisit(localId, realId) {
+  rememberVisitMapping(localId, realId);
+  const db = await getDB();
+  for (const op of await db.getAll(STORE)) {
+    if (op.visit_id !== localId) continue;
+    await db.put(STORE, withVisitId(op, localId, realId));
+  }
+  for (const rec of await db.getAll('upload_queue')) {
+    if (rec.visit_id === localId) await db.put('upload_queue', { ...rec, visit_id: realId });
+  }
+  const drafts = db.transaction('draft_visit', 'readwrite');
+  for (const key of await drafts.store.getAllKeys()) {
+    const d = await drafts.store.get(key);
+    if (d?.visitId === localId) await drafts.store.put({ ...d, visitId: realId, pendingCreate: false }, key);
+  }
+  await drafts.done;
+}
+
+// Drop a visit that never reached the server: its queued ops and any files stored for upload
+export async function discardLocalVisit(localId) {
+  const db = await getDB();
+  for (const op of await db.getAll(STORE)) if (op.visit_id === localId) await db.delete(STORE, op.id);
+  for (const rec of await db.getAll('upload_queue')) if (rec.visit_id === localId) await db.delete('upload_queue', rec.localId);
+  emit();
+}
+
 export async function clearVisitOps(visitId) {
   const db = await getDB();
+  visitId = resolveVisitId(visitId);
   for (const op of (await mine()).filter(o => o.visit_id === visitId)) await db.delete(STORE, op.id);
   emit();
 }
@@ -167,6 +233,13 @@ export async function clearVisitOps(visitId) {
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 const HANDLERS = {
+  // A visit started with no signal. client_ref makes a repeat (lost reply) return the same visit.
+  async visit_create(op) {
+    const { station_id, visited_at, client_ref } = op.payload;
+    const visit = await api.createVisit({ station_id, visited_at, client_ref, status: 'draft' });
+    await remapVisit(op.visit_id, visit.id);
+    return visit;
+  },
   reading:        op => api.createReading(op.visit_id, op.payload),
   reading_delete: op => api.deleteReading(op.visit_id, op.payload.reading_type),
   visit_update:   op => api.updateVisit(op.visit_id, op.payload),
@@ -218,7 +291,7 @@ export function flushOutbox({ force = false } = {}) {
 }
 
 async function doFlush(force) {
-  if (!currentUser) return { synced: 0 };
+  if (!currentUser || authPaused) return { synced: 0 };
   if (!force && Date.now() < backoffUntil) return { synced: 0 };
 
   let ops;
@@ -238,8 +311,15 @@ async function doFlush(force) {
   const visitsWithFailures = new Set(ops.filter(o => o.status === 'failed').map(o => o.visit_id));
   let synced = 0;
 
-  for (const op of queued) {
+  for (let op of queued) {
+    // A change saved under the temporary id after its visit was registered: re-point it before sending
+    const realId = resolveVisitId(op.visit_id);
+    if (realId !== op.visit_id) {
+      op = withVisitId(op, op.visit_id, realId);
+      await db.put(STORE, op);
+    }
     if ((op.type === 'submit' || op.type === 'abandon') && visitsWithFailures.has(op.visit_id)) continue;
+    if (isLocalVisit(op.visit_id) && op.type !== 'visit_create') continue;   // waits for its visit to exist
     const handler = HANDLERS[op.type];
     if (!handler) continue;
 
@@ -256,12 +336,23 @@ async function doFlush(force) {
       try { localStorage.setItem(syncedKey(), lastSyncedAt.toISOString()); } catch { /* storage unavailable */ }
       syncedListeners.forEach(fn => fn({ op, result }));
       fire({ phase: 'synced', op, result });
+      // The visit now has a server id and its other ops were re-addressed: carry on with them right away
+      if (op.type === 'visit_create') {
+        const more = await doFlush(true);
+        return { synced: synced + more.synced };
+      }
     } catch (err) {
       if (err?.status === 401) {                           // auth layer takes over
+        authPaused = true;
         fire({ phase: 'transient', op });
+        emit();
         return { synced };
       }
       if (api.isTransientError(err)) {
+        // A server error (not a lost connection) is remembered on the change so the Queue can say so
+        if (err?.status >= 500) {
+          await db.put(STORE, { ...op, error: `The server returned an error (${err.status}) — retrying` }).catch(() => {});
+        }
         fire({ phase: 'transient', op });
         scheduleBackoff();
         return { synced };

@@ -1,3 +1,5 @@
+import { ensureLink } from '../services/link.js';
+
 const BASE = import.meta.env.VITE_KRATOS_PUBLIC_URL;
 
 export async function initLoginFlow() {
@@ -29,6 +31,8 @@ export async function submitLogin(flowId, csrfToken, identifier, password) {
 //   { status: 'none' }         — the server says there is no session (401/403)
 //   { status: 'unreachable' }  — network error, timeout, 5xx, or a non-JSON reply (captive portal)
 export async function checkSession(timeoutMs = 8000) {
+  // No usable connection: don't make the app wait for a request that will hang
+  if (!(await ensureLink())) return { status: 'unreachable' };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

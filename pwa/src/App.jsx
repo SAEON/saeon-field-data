@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { loadDraft, saveDraft, clearDraft, removeLegacyDraft } from './hooks/useDraftVisit.js';
 import { createVisit, submitVisit, abandonVisit, getVisit, isTransientError, prefetchVisitData } from './services/api.js';
-import { enqueueOp, getOps, onOpSynced, onOpEvent, flushOutbox, clearVisitOps } from './services/outbox.js';
+import { enqueueOp, getOps, onOpSynced, onOpEvent, flushOutbox, clearVisitOps, discardLocalVisit } from './services/outbox.js';
+import { isLocalVisit, newLocalVisitId } from './utils/visitId.js';
 import { hasStoredFile } from './services/uploadQueue.js';  // also registers the upload handlers
 import { showNotice } from './services/notice.js';
 import { useSyncEngine, useOutboxStatus } from './hooks/useSyncEngine.js';
+import { useOfflinePrep } from './hooks/useOfflinePrep.js';
 import { useAuth } from './auth/AuthContext.jsx';
 import ProfileButton from './auth/ProfileSheet.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import ReauthPrompt from './components/ReauthPrompt.jsx';
 import ChangePasswordPage from './pages/ChangePasswordPage.jsx';
 import SelectStation  from './pages/SelectStation.jsx';
 import VisitDetails   from './pages/VisitDetails.jsx';
@@ -410,7 +413,16 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
         setLoggerUnavailable(!!draft.progress?.loggerUnavailable);
         if (draft.progress?.visitSection) setVisitSection(draft.progress.visitSection);
         setPendingSubmit(!!draft.pendingSubmit);
-        if (navigator.onLine) prefetchVisitData(draft.station);
+        if (isLocalVisit(draft.visitId)) {
+          // Started offline: make sure the create is queued (the app may have closed right after starting) and try it now
+          const ref = draft.visitId.slice('local-'.length);
+          if (!(await getOps(draft.visitId)).some(op => op.type === 'visit_create')) {
+            await enqueueOp('visit_create', draft.visitId, { station_id: draft.station.id, station_name: draft.station.display_name, visited_at: new Date().toISOString(), client_ref: ref });
+          }
+          flushOutbox({ force: true });
+        } else if (navigator.onLine) {
+          prefetchVisitData(draft.station);
+        }
         const restoredFiles = draft.files || [];
         // Re-sync any already-uploaded files so hasUnmappedColumns + parseState are current
         if (restoredFiles.some(f => f.dbId)) {
@@ -473,29 +485,49 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
   }
 
   async function doStartVisit(station) {
+    // client_ref makes a retried create return the same visit instead of a second one
+    const clientRef = newLocalVisitId().slice('local-'.length);
+    const startedAt = new Date().toISOString();
+    let visitId;
+    let startedOffline = false;
     try {
-      const visit = await createVisit({
-        station_id: station.id,
-        status:     'draft',
-      });
-      const draft = { visitId: visit.id, station };
-      setDraftVisit(draft);
+      const visit = await createVisit({ station_id: station.id, visited_at: startedAt, status: 'draft', client_ref: clientRef });
+      visitId = visit.id;
+    } catch (err) {
+      // No signal: start the visit on this device; it is registered with the server when coverage returns
+      if (!(isTransientError(err) || !navigator.onLine)) {
+        console.error('Failed to create draft visit:', err.message);
+        showNotice('Could not start the visit. Please try again.');
+        return;
+      }
+      visitId = `local-${clientRef}`;
+      startedOffline = true;
+    }
+    try {
+      setDraftVisit({ visitId, station });
       setFormState(null);
       setVisitFiles([]);
       setReadingsDone(false);
       setDetailsAllDone(false);
       setPendingSubmit(false);
-      await saveDraft({ visitId: visit.id, station, formState: null, files: [], user_id: auth?.id ?? null });
-      prefetchVisitData(station);   // keep what this visit needs on the device in case signal drops
+      await saveDraft({ visitId, station, formState: null, files: [], user_id: auth?.id ?? null, pendingCreate: startedOffline });
+      if (startedOffline) {
+        await enqueueOp('visit_create', visitId, { station_id: station.id, station_name: station.display_name, visited_at: startedAt, client_ref: clientRef });
+        showNotice('Visit started on this device — it registers with the server when signal returns.', { ms: 8000 });
+      } else {
+        prefetchVisitData(station);   // keep what this visit needs on the device in case signal drops
+      }
       setActiveTab('visit');
       setVisitSection('details');
     } catch (err) {
-      console.error('Failed to create draft visit:', err.message);
+      console.error('Failed to start visit:', err.message);
     }
   }
 
   async function handleDiscardAndStart() {
     setShowDiscard(false);
+    // A visit that never reached the server would otherwise be created, empty, when signal returns
+    if (draftVisit && isLocalVisit(draftVisit.visitId)) await discardLocalVisit(draftVisit.visitId);
     await clearDraft(auth?.id);
     setDraftVisit(null);
     setVisitFiles([]);
@@ -512,8 +544,12 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
     setAbandoning(true);
     const vid = draftVisit.visitId;
     try {
-      await abandonVisit(vid);
-      await clearVisitOps(vid);
+      if (isLocalVisit(vid)) {
+        await discardLocalVisit(vid);          // never reached the server — nothing there to abandon
+      } else {
+        await abandonVisit(vid);
+        await clearVisitOps(vid);
+      }
     } catch (err) {
       // No signal: remember to abandon the server draft later instead of leaving it orphaned
       if (isTransientError(err) || !navigator.onLine) {
@@ -552,7 +588,7 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
     const vid = draftVisit.visitId;
     try {
       const waiting = (await getOps(vid)).filter(o => o.type !== 'submit');
-      if (waiting.length === 0 && navigator.onLine) {
+      if (waiting.length === 0 && navigator.onLine && !isLocalVisit(vid)) {
         try {
           await submitVisit(vid);
           await finishSubmit(vid);
@@ -584,7 +620,7 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
 
   // Uploads are done by the sync engine; reflect each step on the file cards
   useEffect(() => onOpEvent(({ phase, op, result, error }) => {
-    if (op.type !== 'upload' || !draftVisit || op.visit_id !== draftVisit.visitId) return;
+    if (op.type !== 'upload' || !draftVisit) return;
     const { localId } = op.payload;
     const patch =
       phase === 'start'     ? { parseState: 'uploading' }
@@ -595,9 +631,13 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
     if (patch) setVisitFiles(prev => prev.map(f => f.localId === localId ? { ...f, ...patch } : f));
   }), [draftVisit]);
 
-  // The queued submit was accepted by the server → close the visit out
-  useEffect(() => onOpSynced(({ op }) => {
+  // The queued submit was accepted by the server → close the visit out.
+  // A visit started offline has just been created on the server → switch the open visit to its real id.
+  useEffect(() => onOpSynced(({ op, result }) => {
     if (op.type === 'submit' && draftVisit && op.visit_id === draftVisit.visitId) finishSubmit(op.visit_id);
+    if (op.type === 'visit_create' && result?.id) {
+      setDraftVisit(prev => (prev && prev.visitId === op.visit_id ? { ...prev, visitId: result.id } : prev));
+    }
   }), [draftVisit]);
 
   // If the app was closed while a submit was waiting, check whether it actually went through
@@ -890,6 +930,7 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
 export default function App() {
   const auth  = useAuth();
   useSyncEngine(auth?.id);
+  useOfflinePrep(auth?.id);
 
   if (!auth?.isReady) {
     return (
@@ -902,9 +943,17 @@ export default function App() {
   if (!auth?.id) return <LoginPage sessionExpired={auth?.sessionExpired ?? false} />;
   if (auth?.password_change_required) return <ChangePasswordPage />;
 
+  // Keyed by user so someone else signing in over an old session starts clean
   const roles = auth?.roles ?? [];
-  if (roles.includes('technician_lead')) return <LeadDashboard />;
-  if (roles.includes('data_manager'))    return <ManagerDashboard />;
+  const shell =
+    roles.includes('technician_lead') ? <LeadDashboard key={auth.id} />
+    : roles.includes('data_manager')  ? <ManagerDashboard key={auth.id} />
+    : <FieldApp key={auth.id} />;
 
-  return <FieldApp />;
+  return (
+    <>
+      <ReauthPrompt />
+      {shell}
+    </>
+  );
 }

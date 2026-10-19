@@ -26,10 +26,13 @@ router.get('/:id/instruments', async (req, res, next) => {
 router.post('/:id/instruments', async (req, res, next) => {
   try {
     const stationId = parseInt(req.params.id, 10);
-    const { instrument_type, serial_no, mm_per_tip, visit_id, notes } = req.body;
+    const { instrument_type, mm_per_tip, visit_id, notes } = req.body;
+    const clean = v => (typeof v === 'string' && v.trim()) ? v.trim() : null;
+    const serial_no = clean(req.body.serial_no);
+    const asset_no  = clean(req.body.asset_no);
 
-    if (!instrument_type || !serial_no) {
-      return res.status(400).json({ error: 'instrument_type and serial_no are required' });
+    if (!instrument_type || (!serial_no && !asset_no)) {
+      return res.status(400).json({ error: 'instrument_type and a serial number or an asset number are required' });
     }
     if (!['raingauge', 'datalogger'].includes(instrument_type)) {
       return res.status(400).json({ error: 'instrument_type must be raingauge or datalogger' });
@@ -53,6 +56,7 @@ router.post('/:id/instruments', async (req, res, next) => {
       stationId,
       instrumentType: instrument_type,
       serialNo:       serial_no,
+      assetNo:        asset_no,
       mmPerTip:       mm_per_tip ?? null,
       visitId:        parseInt(visit_id, 10),
       effectiveFrom,
@@ -60,8 +64,8 @@ router.post('/:id/instruments', async (req, res, next) => {
       notes,
     });
 
-    // Keep stations.serial_no in sync with the latest registered serial
-    await db.updateStation(stationId, { serialNo: serial_no });
+    // Keep the station's quick-read identifier in sync with the latest registered instrument
+    await db.updateStation(stationId, { serialNo: serial_no, assetNo: asset_no });
 
     // Rainfall reprocess — calibration may have changed
     if (station.data_family === 'rainfall' && instrument_type === 'raingauge') {

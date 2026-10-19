@@ -28,6 +28,7 @@ export function useSyncEngine(userId) {
     const onVisible = () => { if (document.visibilityState === 'visible') kick(); };
 
     window.addEventListener('online', onOnline);
+    window.addEventListener('fds-link-restored', onOnline);   // the connection held up again after a weak spell
     document.addEventListener('visibilitychange', onVisible);
     const interval = setInterval(kick, 30000);
 
@@ -36,6 +37,7 @@ export function useSyncEngine(userId) {
       clearTimeout(onlineTimer);
       clearInterval(interval);
       window.removeEventListener('online', onOnline);
+      window.removeEventListener('fds-link-restored', onOnline);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [userId]);

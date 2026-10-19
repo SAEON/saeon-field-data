@@ -27,7 +27,7 @@ export default function UpdatePrompt() {
       }}
     >
       <div style={{ flex: 1, lineHeight: 1.4 }}>
-        A new version is ready. Update when you reach a good stopping point — what you have entered stays saved.
+        A new version is ready.
       </div>
       <button
         onClick={() => updateServiceWorker(true)}

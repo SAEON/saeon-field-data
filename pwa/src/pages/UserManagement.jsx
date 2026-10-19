@@ -33,33 +33,19 @@ function Fab({ label, onPress }) {
 }
 
 
+const BADGE_STYLE = {
+  fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+  background: 'var(--color-surface-dark)', color: 'var(--color-text-med)',
+};
+
 function RoleBadge({ role }) {
-  const MAP = {
-    technician:      { label: 'Technician', bg: '#F5F5F5', color: '#616161' },
-    technician_lead: { label: 'Lead',       bg: '#FFF3E0', color: '#E65100' },
-    data_manager:    { label: 'Data Mgr',   bg: '#E3F2FD', color: '#1565C0' },
-  };
-  const s = MAP[role] || { label: role, bg: '#F5F5F5', color: '#757575' };
-  return (
-    <span style={{
-      fontSize: 10, fontWeight: 700, padding: '2px 7px',
-      borderRadius: 4, background: s.bg, color: s.color,
-    }}>
-      {s.label}
-    </span>
-  );
+  const LABELS = { technician: 'Technician', technician_lead: 'Lead', data_manager: 'Data Mgr' };
+  return <span style={BADGE_STYLE}>{LABELS[role] || role}</span>;
 }
 
 function DeptBadge({ department }) {
   if (!department) return null;
-  return (
-    <span style={{
-      fontSize: 10, fontWeight: 700, padding: '2px 7px',
-      borderRadius: 4, background: '#F3E5F5', color: '#6A1B9A',
-    }}>
-      {department}
-    </span>
-  );
+  return <span style={BADGE_STYLE}>{department}</span>;
 }
 
 function InitialsAvatar({ initials, active }) {

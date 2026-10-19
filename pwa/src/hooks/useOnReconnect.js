@@ -13,6 +13,11 @@ export function useOnReconnect(reload) {
       timer = setTimeout(() => latest.current?.(), 1000);   // let the connection settle first
     };
     window.addEventListener('online', onOnline);
-    return () => { clearTimeout(timer); window.removeEventListener('online', onOnline); };
+    window.addEventListener('fds-link-restored', onOnline);   // the app's own check found the connection usable again
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('fds-link-restored', onOnline);
+    };
   }, []);
 }

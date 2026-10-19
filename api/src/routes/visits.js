@@ -1,4 +1,6 @@
 const express = require('express');
+const SUBMITTED = ['submitted', 'approved', 'flagged'];   // notes written before submission are locked in these states
+
 const router  = express.Router();
 const fs      = require('fs');
 const db      = require('../db/queries');
@@ -12,6 +14,7 @@ router.use(requireAuth);
 router.post('/', async (req, res, next) => {
   try {
     const { station_id, visited_at, notes, status } = req.body;
+    const client_ref = typeof req.body.client_ref === 'string' && req.body.client_ref.trim() ? req.body.client_ref.trim().slice(0, 100) : null;
 
     if (!station_id) {
       return res.status(400).json({ error: 'station_id is required' });
@@ -23,6 +26,7 @@ router.post('/', async (req, res, next) => {
       visitedAt:    visited_at || null,
       notes,
       status:       status || 'draft',
+      clientRef:    client_ref,
     });
 
     // Auto-assign visiting user to station — gives accountability visibility to other users
@@ -72,11 +76,61 @@ router.post('/:id', async (req, res, next) => {
     if (!isPriv && existing.technician_id !== req.user.id) {
       return res.status(403).json({ error: 'You can only edit your own visits' });
     }
+    if (SUBMITTED.includes(existing.status)) {
+      return res.status(409).json({ error: 'Visit notes are locked once the visit is submitted. Add a follow-up note instead.' });
+    }
 
     const visit = await db.updateVisitDetails(id, { visitedAt: visited_at, notes });
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
 
     res.json(visit);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/visits/:id/followup-notes — add a follow-up note to a submitted visit.
+// Append-only: the original visit notes are never changed.
+router.post('/:id/followup-notes', async (req, res, next) => {
+  try {
+    const id   = parseInt(req.params.id, 10);
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+    if (!note) return res.status(400).json({ error: 'note is required' });
+    if (note.length > 5000) return res.status(400).json({ error: 'note is too long' });
+
+    const visit = await db.getVisitById(id);
+    if (!visit) return res.status(404).json({ error: 'Visit not found' });
+    if (!SUBMITTED.includes(visit.status)) return res.status(409).json({ error: 'Follow-up notes can only be added after the visit is submitted' });
+
+    const isPriv = (ROLE_HIERARCHY[req.user.roles[0]] ?? 0) >= ROLE_HIERARCHY['technician_lead'];
+    if (!isPriv && visit.technician_id !== req.user.id) {
+      return res.status(403).json({ error: 'You can only add notes to your own visits' });
+    }
+
+    res.status(201).json(await db.addVisitFollowupNote(id, req.user.id, note));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/visits/:id/followup-notes/:noteId — edit a follow-up note (its author only)
+router.patch('/:id/followup-notes/:noteId', async (req, res, next) => {
+  try {
+    const id     = parseInt(req.params.id, 10);
+    const noteId = parseInt(req.params.noteId, 10);
+    const note   = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+    if (!note) return res.status(400).json({ error: 'note is required' });
+    if (note.length > 5000) return res.status(400).json({ error: 'note is too long' });
+
+    const existing = await db.getVisitFollowupNote(noteId);
+    if (!existing || existing.visit_id !== id) return res.status(404).json({ error: 'Note not found' });
+
+    // A follow-up note can only be changed by the person who wrote it
+    if (existing.author_id !== req.user.id) {
+      return res.status(403).json({ error: 'You can only edit your own follow-up notes' });
+    }
+
+    res.json(await db.updateVisitFollowupNote(noteId, note, req.user.id));
   } catch (err) {
     next(err);
   }
@@ -151,12 +205,13 @@ router.get('/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Visit not found' });
     }
 
-    const [files, readings] = await Promise.all([
+    const [files, readings, followup_notes] = await Promise.all([
       db.getVisitFiles(id),
       db.getVisitReadings(id),
+      db.getVisitFollowupNotes(id),
     ]);
 
-    res.json({ ...visit, files, readings });
+    res.json({ ...visit, files, readings, followup_notes });
   } catch (err) {
     next(err);
   }

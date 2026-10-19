@@ -4,6 +4,7 @@ import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
 import { enqueueOp, getOps, overlayPending, onOpSynced, retryAllFailed } from '../services/outbox.js';
 import { isTransientError } from '../services/api.js';
 import { MAINT_FIELDS, maintType, parseMaintType } from '../utils/sensorMaintenance.js';
+import { sensorIdentity, hasIdentifier } from '../utils/sensorIdentity.js';
 
 const REQUIRED_TYPES = {
   rainfall:           ['logger_activities', 'raingauge_activities', 'gauge_condition', 'overall_site_condition'],
@@ -455,13 +456,16 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
   const [loggerActs, setLoggerActs] = useState(() => parseActs(ex('logger_activities')));
   const [rgActs,     setRgActs]     = useState(() => parseActs(ex('raingauge_activities')));
   const [loggerSerial,      setLoggerSerial]      = useState('');
+  const [loggerAsset,       setLoggerAsset]       = useState('');
   const [loggerNotes,       setLoggerNotes]        = useState(ex('logger_problem_notes')?.value_text ?? '');
   const [loggerMaintChecks, setLoggerMaintChecks]  = useState(() => parseActs(ex('logger_maintenance_checks')));
   const [battery, setBattery] = useState(ex('battery_voltage')?.value_numeric != null ? String(ex('battery_voltage').value_numeric) : '');
   const [memory,  setMemory]  = useState(ex('memory_used_pct')?.value_numeric != null ? String(ex('memory_used_pct').value_numeric) : '');
   const [rgSerial,      setRgSerial]      = useState('');
+  const [rgAsset,       setRgAsset]       = useState('');
   const [rgMmPerTip,    setRgMmPerTip]    = useState('');
   const [rgCalSerial,       setRgCalSerial]       = useState('');
+  const [rgCalAsset,        setRgCalAsset]        = useState('');
   const [rgCalMm,           setRgCalMm]           = useState('');
   const [rgCalExpectedTips, setRgCalExpectedTips] = useState('');
   const [rgCalActualTips,   setRgCalActualTips]   = useState('');
@@ -512,9 +516,9 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
     if (rgActs.size > 0)
       saves.push(() => onSave({ reading_type: 'raingauge_activities', value_text: JSON.stringify([...rgActs]), recorded_at: now }));
 
-    if (hasLoggerDeploy && loggerSerial.trim())
+    if (hasLoggerDeploy && (loggerSerial.trim() || loggerAsset.trim()))
       saves.push(() => saveInstrument(visitId, stationId, {
-        instrument_type: 'datalogger', serial_no: loggerSerial.trim(),
+        instrument_type: 'datalogger', serial_no: loggerSerial.trim() || null, asset_no: loggerAsset.trim() || null,
         mm_per_tip: null, visit_id: visitId,
         notes: 'Recorded on-site by technician during visit',
       }));
@@ -528,17 +532,17 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
     if (memory)
       saves.push(() => onSave({ reading_type: 'memory_used_pct', value_numeric: parseFloat(memory), unit: '%', recorded_at: now }));
 
-    if (hasRgDeploy && rgSerial.trim())
+    if (hasRgDeploy && (rgSerial.trim() || rgAsset.trim()))
       saves.push(() => saveInstrument(visitId, stationId, {
-        instrument_type: 'raingauge', serial_no: rgSerial.trim(),
+        instrument_type: 'raingauge', serial_no: rgSerial.trim() || null, asset_no: rgAsset.trim() || null,
         mm_per_tip: rgMmPerTip ? parseFloat(rgMmPerTip) : 0.254,
         visit_id: visitId,
         notes: 'Recorded on-site by technician during visit',
       }));
 
-    if (hasRgCal && rgCalSerial.trim() && rgCalMm)
+    if (hasRgCal && (rgCalSerial.trim() || rgCalAsset.trim()) && rgCalMm)
       saves.push(() => saveInstrument(visitId, stationId, {
-        instrument_type: 'raingauge', serial_no: rgCalSerial.trim(),
+        instrument_type: 'raingauge', serial_no: rgCalSerial.trim() || null, asset_no: rgCalAsset.trim() || null,
         mm_per_tip: parseFloat(rgCalMm), visit_id: visitId,
         notes: rgActs.has('raingauge_calibrate') ? 'Calibration recorded on-site' : 'Calibration check — factor confirmed',
       }));
@@ -602,6 +606,10 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
               placeholder="New serial no. (from instrument label)"
               className={`field-input w-full ${rgSerial ? 'field-input--active' : ''}`}
               style={{ height: 36 }} />
+            <input type="text" value={rgAsset} onChange={e => setRgAsset(e.target.value)}
+              placeholder="Asset no. (if no serial)"
+              className={`field-input w-full ${rgAsset ? 'field-input--active' : ''}`}
+              style={{ height: 36 }} />
             <div className="relative">
               <input type="number" step="0.001" value={rgMmPerTip} onChange={e => setRgMmPerTip(e.target.value)}
                 placeholder="mm per tip — leave blank for 0.254 default"
@@ -622,6 +630,10 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
             <input type="text" value={rgCalSerial} onChange={e => setRgCalSerial(e.target.value)}
               placeholder="Gauge serial no."
               className={`field-input w-full ${rgCalSerial ? 'field-input--active' : ''}`}
+              style={{ height: 36 }} />
+            <input type="text" value={rgCalAsset} onChange={e => setRgCalAsset(e.target.value)}
+              placeholder="Gauge asset no. (if no serial)"
+              className={`field-input w-full ${rgCalAsset ? 'field-input--active' : ''}`}
               style={{ height: 36 }} />
             <div className="relative">
               <input type="number" step="0.001" value={rgCalMm} onChange={e => setRgCalMm(e.target.value)}
@@ -801,11 +813,17 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
 
       {hasLoggerDeploy && (
         <div className="form-card" style={{ borderColor: '#BBF7D0' }}>
-          <div className="text-[12px] font-semibold text-text-dark mb-2">New logger serial no.</div>
-          <input type="text" value={loggerSerial} onChange={e => setLoggerSerial(e.target.value)}
-            placeholder="From instrument label"
-            className={`field-input w-full ${loggerSerial ? 'field-input--active' : ''}`}
-            style={{ height: 36 }} />
+          <div className="text-[12px] font-semibold text-text-dark mb-2">New logger serial or asset no.</div>
+          <div className="flex flex-col gap-2">
+            <input type="text" value={loggerSerial} onChange={e => setLoggerSerial(e.target.value)}
+              placeholder="Serial no. (from instrument label)"
+              className={`field-input w-full ${loggerSerial ? 'field-input--active' : ''}`}
+              style={{ height: 36 }} />
+            <input type="text" value={loggerAsset} onChange={e => setLoggerAsset(e.target.value)}
+              placeholder="Asset no. (if no serial)"
+              className={`field-input w-full ${loggerAsset ? 'field-input--active' : ''}`}
+              style={{ height: 36 }} />
+          </div>
         </div>
       )}
 
@@ -1573,7 +1591,7 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
     const state = cardState[sensorId];
     if (state === 'changing' || state === 'error') { setState(sensorId, 'idle'); return; }
     setState(sensorId, 'changing');
-    setChangeData(prev => ({ ...prev, [sensorId]: { mode: 'swap', newTypeId: '', newSerial: '' } }));
+    setChangeData(prev => ({ ...prev, [sensorId]: { mode: 'swap', newTypeId: '', newSerial: '', newAsset: '' } }));
   }
 
   async function saveChange(sensor) {
@@ -1588,7 +1606,11 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
         const typeId = data.mode === 'swap' ? sensor.instrument_type_id : parseInt(data.newTypeId, 10);
         created = await assignSensor(stationId, {
           instrument_type_id: typeId,
-          serial_no:          data.newSerial || null,
+          serial_no:          data.newSerial?.trim() || null,
+          asset_no:           data.newAsset?.trim()  || null,
+          // a replacement stays where the old sensor was unless the technician says otherwise
+          position_label:     (data.newPosition !== undefined ? data.newPosition : sensor.position_label)?.trim() || null,
+          replaces_sensor_id: sensor.id,
           sensitivity_value:  data.newSensitivity ? parseFloat(data.newSensitivity) : null,
           effective_from:     new Date().toISOString(),
           visit_id:           visitId,
@@ -1635,8 +1657,6 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
     );
   }
 
-  const SOIL_CATS = new Set(['soil', 'leaf_wetness']);
-
   return (
     <>
       <div className="flex items-center gap-1.5 pb-2 pt-1 text-[12px] font-semibold text-text-dark">
@@ -1651,7 +1671,7 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
             <div key={sensor.id} className="form-card flex items-center justify-between">
               <div>
                 <div className="font-bold text-text-dark" style={{ fontSize: 13 }}>{sensor.label}</div>
-                {sensor.serial_no && <div className="text-text-light" style={{ fontSize: 11 }}>S/N {sensor.serial_no}</div>}
+                {sensorIdentity(sensor) && <div className="text-text-light" style={{ fontSize: 11 }}>{sensorIdentity(sensor)}</div>}
               </div>
               <span className="font-semibold text-success" style={{ fontSize: 11 }}>✓ Changed</span>
             </div>
@@ -1662,11 +1682,13 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
         const selectedType = mode === 'upgrade' ? types.find(t => t.id === parseInt(data.newTypeId)) : null;
         const swapNeedsSensitivity  = mode === 'swap'    && sensor.requires_sensitivity;
         const upgNeedsSensitivity   = mode === 'upgrade' && selectedType?.requires_sensitivity;
+        const serialExpected = mode === 'upgrade' ? selectedType?.serial_expected !== false : sensor.serial_expected !== false;
+        const positionValue  = data.newPosition !== undefined ? data.newPosition : (sensor.position_label || '');
+        const hasId = hasIdentifier({ serial: data.newSerial, asset: data.newAsset, position: positionValue }, serialExpected);
         const canSave = state !== 'saving' && (
           mode === 'decommission' ||
-          (mode === 'swap'    && data.newSerial?.trim() && (!swapNeedsSensitivity || data.newSensitivity?.trim())) ||
-          (mode === 'upgrade' && data.newTypeId &&
-            (SOIL_CATS.has(selectedType?.category) || data.newSerial?.trim()) &&
+          (mode === 'swap'    && hasId && (!swapNeedsSensitivity || data.newSensitivity?.trim())) ||
+          (mode === 'upgrade' && data.newTypeId && hasId &&
             (!upgNeedsSensitivity || data.newSensitivity?.trim()))
         );
 
@@ -1675,7 +1697,7 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
             <div className="flex items-center justify-between mb-2">
               <div>
                 <div className="font-bold text-text-dark" style={{ fontSize: 13 }}>{sensor.label}</div>
-                {sensor.serial_no && <div className="text-text-light" style={{ fontSize: 11 }}>S/N {sensor.serial_no}</div>}
+                {sensorIdentity(sensor) && <div className="text-text-light" style={{ fontSize: 11 }}>{sensorIdentity(sensor)}</div>}
               </div>
               <div className="flex gap-2">
                 <button
@@ -1721,13 +1743,31 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
                 )}
 
                 {mode !== 'decommission' && (
-                  <input
-                    type="text"
-                    placeholder="New serial number"
-                    value={data.newSerial || ''}
-                    onChange={e => setField(sensor.id, 'newSerial', e.target.value)}
-                    className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none mb-3"
-                  />
+                  <>
+                    <input
+                      type="text"
+                      placeholder="New serial number"
+                      value={data.newSerial || ''}
+                      onChange={e => setField(sensor.id, 'newSerial', e.target.value)}
+                      className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none mb-3"
+                    />
+                    <input
+                      type="text"
+                      placeholder="New asset number (if no serial)"
+                      value={data.newAsset || ''}
+                      onChange={e => setField(sensor.id, 'newAsset', e.target.value)}
+                      className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none mb-3"
+                    />
+                    {!serialExpected && (
+                      <input
+                        type="text"
+                        placeholder='Position (e.g. "10 cm depth")'
+                        value={positionValue}
+                        onChange={e => setField(sensor.id, 'newPosition', e.target.value)}
+                        className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none mb-3"
+                      />
+                    )}
+                  </>
                 )}
 
                 {(swapNeedsSensitivity || upgNeedsSensitivity) && (
@@ -1809,7 +1849,7 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
   const [saveState,      setSaveState]      = useState('idle');
   const [savedCheck,     setSavedCheck]     = useState(existingCheck ?? null);
 
-  const { station_sensor_id, parameter, label, serial_no, tolerance } = card;
+  const { station_sensor_id, parameter, label, identity, tolerance } = card;
   const unit = PARAM_UNIT[parameter] ?? '';
 
   const relevant = transferStandards.filter(ts => Array.isArray(ts.parameters) && ts.parameters.includes(parameter));
@@ -1943,9 +1983,9 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
       <div className="flex items-start justify-between mb-3">
         <div>
           <span className="text-[12px] font-semibold text-text-dark">{label}</span>
-          {serial_no && (
+          {identity && (
             <div className="text-[11px] text-text-light mt-0.5">
-              Confirm instrument S/N matches: <span className="font-semibold text-text-dark">{serial_no}</span>
+              Confirm this is the right instrument: <span className="font-semibold text-text-dark">{identity}</span>
             </div>
           )}
         </div>
@@ -2090,7 +2130,7 @@ function MetCalibrationSection({ visitId, stationId, onComplete }) {
           station_sensor_id: s.id,
           parameter: param,
           label: s.label,
-          serial_no: s.serial_no ?? null,
+          identity: sensorIdentity(s) || null,
           tolerance: s.parameters?.[param]?.tolerance ?? null,
         });
       }
@@ -2257,7 +2297,7 @@ function SensorMaintenanceCard({ sensor, saved, onSave, onDelete }) {
       >
         <div>
           <div className="text-[13px] font-bold text-text-dark">{sensor.label}</div>
-          {sensor.serial_no && <div className="text-[11px] text-text-light">S/N {sensor.serial_no}</div>}
+          {sensorIdentity(sensor) && <div className="text-[11px] text-text-light">{sensorIdentity(sensor)}</div>}
         </div>
         <div className="text-[11px] font-semibold text-text-light">
           {status === 'saving' ? 'Saving…' : status === 'queued' ? '≡ Queued' : status === 'error' ? 'Not saved'

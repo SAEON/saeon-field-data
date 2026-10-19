@@ -1,6 +1,7 @@
 // SyncQueue — everything this user has saved on the device that has not yet reached the server,
 // across all visits: queued readings, notes, calibration checks, files and submits.
 // Syncing itself is automatic (services/outbox.js); this page just shows it and lets a person intervene.
+import { isLocalVisit } from '../utils/visitId.js';
 import { useEffect, useState } from 'react';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getOps, subscribeOutbox, flushOutbox, retryOp, retryAllFailed, discardOp } from '../services/outbox.js';
@@ -24,6 +25,7 @@ export default function SyncQueue() {
   const status = useOutboxStatus();
   const [ops,    setOps]    = useState([]);
   const [visits, setVisits] = useState({});   // visit id → station name
+  const [open,   setOpen]   = useState({});   // visit id → expanded? (unset: open only while something failed)
 
   useEffect(() => {
     let alive = true;
@@ -36,6 +38,11 @@ export default function SyncQueue() {
   useEffect(() => {
     const missing = [...new Set(ops.map(o => o.visit_id))].filter(id => id != null && !(id in visits));
     missing.forEach(id => {
+      if (isLocalVisit(id)) {   // not on the server yet: take the name from the queued create
+        const create = ops.find(o => o.visit_id === id && o.type === 'visit_create');
+        setVisits(prev => ({ ...prev, [id]: create?.payload?.station_name ? `${create.payload.station_name} (new visit)` : 'New visit' }));
+        return;
+      }
       getVisit(id)
         .then(v => setVisits(prev => ({ ...prev, [id]: v.station_display_name })))
         .catch(() => setVisits(prev => ({ ...prev, [id]: null })));
@@ -74,12 +81,28 @@ export default function SyncQueue() {
             </div>
 
             <div className="flex flex-col gap-3">
-              {Object.entries(byVisit).map(([visitId, list]) => (
+              {Object.entries(byVisit).map(([visitId, list]) => {
+                const failedHere = list.filter(o => o.status === 'failed').length;
+                const isOpen     = open[visitId] ?? failedHere > 0;
+                const summary    = failedHere > 0
+                  ? `${failedHere} failed`
+                  : `${list.length} change${list.length !== 1 ? 's' : ''} waiting`;
+                return (
                 <div key={visitId} className="bg-white rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-                  <div className="px-3.5 py-2 text-[12px] font-bold text-text-dark bg-surface" style={{ borderBottom: '1px solid var(--color-surface-dark)' }}>
-                    {visits[visitId] || `Visit #${visitId}`}
-                  </div>
-                  {list.map((op, i) => {
+                  <button
+                    onClick={() => setOpen(prev => ({ ...prev, [visitId]: !isOpen }))}
+                    aria-expanded={isOpen}
+                    className="w-full flex items-center justify-between gap-3 px-3.5 py-2.5 text-left bg-surface border-none"
+                    style={{ borderBottom: isOpen ? '1px solid var(--color-surface-dark)' : 'none' }}
+                  >
+                    <span className="text-[12px] font-bold text-text-dark truncate">{visits[visitId] || `Visit #${visitId}`}</span>
+                    <span className="flex items-center gap-2 shrink-0 text-[11px] font-semibold"
+                      style={{ color: failedHere > 0 ? '#B71C1C' : 'var(--color-text-light)' }}>
+                      {summary}
+                      <span aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
+                    </span>
+                  </button>
+                  {isOpen && list.map((op, i) => {
                     const isFailed = op.status === 'failed';
                     return (
                       <div key={op.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5"
@@ -88,6 +111,7 @@ export default function SyncQueue() {
                           <div className="text-[12px] font-semibold text-text-dark truncate">{opLabel(op)}</div>
                           {opDetail(op) && <div className="text-[11px] text-text-light truncate">{opDetail(op)}</div>}
                           {isFailed && <div className="text-[10px] text-error mt-0.5">{op.error || 'The server rejected this change'}</div>}
+                          {!isFailed && op.error && <div className="text-[10px] text-warning mt-0.5">{op.error}</div>}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="text-[11px] font-semibold" style={{ color: isFailed ? '#B71C1C' : '#E65100' }}>
@@ -107,7 +131,8 @@ export default function SyncQueue() {
                     );
                   })}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </>
         )}

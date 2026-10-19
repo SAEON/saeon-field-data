@@ -123,19 +123,8 @@ export default function LoginPage({ sessionExpired = false }) {
 
         {/* Signed-out confirmation */}
         {justSignedOut && (
-          <div style={{
-            width: '100%', maxWidth: 400,
-            marginBottom: 16,
-            padding: '12px 16px',
-            background: '#F0FAF4',
-            border: '1px solid rgba(39,174,96,0.3)',
-            borderRadius: 10,
-            display: 'flex', alignItems: 'center', gap: 10,
-          }}>
-            <span style={{ fontSize: 15, color: '#27AE60' }}>✓</span>
-            <span style={{ fontSize: 13, color: '#1E7A44', fontWeight: 500 }}>
-              You've been signed out successfully.
-            </span>
+          <div style={{ width: '100%', maxWidth: 400, marginBottom: 16, fontSize: 13, color: '#4A5568', textAlign: 'center' }}>
+            You have been signed out.
           </div>
         )}
 

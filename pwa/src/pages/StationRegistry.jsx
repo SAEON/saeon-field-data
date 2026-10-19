@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { sensorIdentity, hasIdentifier, identifierHint } from '../utils/sensorIdentity.js';
 import { useOnReconnect } from '../hooks/useOnReconnect.js';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getStationsRegistry, createStation, updateStation, deactivateStation, getStationCoverage, getUsers, getInstrumentHistory, createInstrumentRecord, getVisits, getMetInstrumentTypes, getStationSensors, getStationSensorHistory, assignSensor, getBarologgerStations, getDepartments } from '../services/api.js';
@@ -81,6 +82,7 @@ function StationSheet({ station, onClose, onSaved }) {
     visit_frequency_days:    station?.visit_frequency_days    ?? '',
     notes:                   station?.notes                   ?? '',
     serial_no:               station?.serial_no               ?? '',
+    asset_no:                station?.asset_no                ?? '',
     active:                  station?.active                  ?? true,
     assigned_technician_id:  station?.assigned_technician_id  ?? '',
     is_barologger:           station?.is_barologger           ?? false,
@@ -96,6 +98,27 @@ function StationSheet({ station, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState(null);
   const [nestedBarologger,   setNestedBarologger]   = useState(false);
+  const [confirmDiscard,     setConfirmDiscard]     = useState(false);
+
+  // Closing by the X, Esc or the grey area asks first when something has been typed
+  const initialForm = useRef(null);
+  if (initialForm.current === null) initialForm.current = JSON.stringify(form);
+  const dirty = JSON.stringify(form) !== initialForm.current;
+
+  function requestClose() {
+    if (saving) return;
+    if (dirty) setConfirmDiscard(true);
+    else onClose();
+  }
+
+  const closeRef = useRef(requestClose);
+  closeRef.current = requestClose;
+  useEffect(() => {
+    if (nestedBarologger) return;          // the nested sheet handles Esc itself
+    const onKey = e => { if (e.key === 'Escape') closeRef.current(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [nestedBarologger]);
 
   useEffect(() => {
     getUsers()
@@ -156,6 +179,7 @@ function StationSheet({ station, onClose, onSaved }) {
         notes:                  form.notes.trim() || null,
         assigned_technician_id: form.assigned_technician_id ? parseInt(form.assigned_technician_id, 10) : null,
         serial_no:              form.serial_no.trim() || null,
+        asset_no:               form.asset_no.trim() || null,
         is_barologger:          form.is_barologger,
         casing_ht_m:            form.casing_ht_m !== '' ? parseFloat(form.casing_ht_m) : null,
         baro_station_id:        form.baro_station_id ? parseInt(form.baro_station_id, 10) : null,
@@ -209,10 +233,26 @@ function StationSheet({ station, onClose, onSaved }) {
 
   return (
     <>
-    <div className="back-sheet-overlay">
+    <div className="back-sheet-overlay" onClick={e => e.target === e.currentTarget && requestClose()}>
       <div className="back-sheet" style={{ maxHeight: '90dvh', overflowY: 'auto', paddingBottom: 24 }}>
-        <div className="text-[13px] font-bold text-text-dark mb-3">
-          {isNew ? 'Add station' : 'Edit station'}
+        <div style={{ position: 'sticky', top: 0, zIndex: 2, background: 'white', margin: '-24px -20px 12px', padding: '20px 20px 10px' }}>
+          <div className="flex items-center justify-between">
+            <div className="text-[13px] font-bold text-text-dark">
+              {isNew ? 'Add station' : 'Edit station'}
+            </div>
+            <button onClick={requestClose} aria-label="Close"
+              className="flex items-center justify-center rounded-lg border-none bg-transparent text-text-light"
+              style={{ width: 32, height: 32, fontSize: 18, lineHeight: 1 }}>✕</button>
+          </div>
+          {confirmDiscard && (
+            <div className="flex items-center justify-between gap-2 mt-2 px-3 py-2 rounded-lg bg-surface text-[12px] text-text-dark">
+              <span>Discard your changes?</span>
+              <span className="flex gap-3 shrink-0">
+                <button onClick={() => setConfirmDiscard(false)} className="bg-transparent border-none p-0 font-semibold text-text-light" style={{ fontSize: 12 }}>Keep editing</button>
+                <button onClick={onClose} className="bg-transparent border-none p-0 font-semibold text-navy" style={{ fontSize: 12 }}>Discard</button>
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col gap-3.5">
@@ -400,7 +440,11 @@ function StationSheet({ station, onClose, onSaved }) {
               <input className={inputCls} value={form.serial_no}
                 onChange={e => set('serial_no', e.target.value)}
                 placeholder="e.g. 20102577  (optional)" style={{ fontSize: 12 }}/>
-              {form.data_family === 'rainfall' && form.serial_no.trim() && (
+              <div className={labelCls} style={{ marginTop: 8 }}>Asset number (if no serial)</div>
+              <input className={inputCls} value={form.asset_no}
+                onChange={e => set('asset_no', e.target.value)}
+                placeholder="optional" style={{ fontSize: 12 }}/>
+              {form.data_family === 'rainfall' && (form.serial_no.trim() || form.asset_no.trim()) && (
                 <div className="text-[10px] text-text-light mt-1">Calibration defaults to 0.254 mm/tip — update via instrument history after first visit.</div>
               )}
             </div>
@@ -438,7 +482,7 @@ function StationSheet({ station, onClose, onSaved }) {
         {error && <div className="text-[11px] text-error mt-2">{error}</div>}
 
         <div className="flex gap-2 mt-4">
-          <button onClick={onClose} disabled={saving}
+          <button onClick={requestClose} disabled={saving}
             className="flex-1 h-10 border-[1.5px] border-border rounded-xl bg-white text-text-med text-[12px] font-semibold" style={{ fontSize: 12 }}>
             Cancel
           </button>
@@ -470,6 +514,7 @@ function InstrumentsSection({ station }) {
   const [showForm,     setShowForm]     = useState(false);
   const [instrType,    setInstrType]    = useState('raingauge');
   const [serial,       setSerial]       = useState('');
+  const [asset,        setAsset]        = useState('');
   const [mmPerTip,     setMmPerTip]     = useState('');
   const [visitId,      setVisitId]      = useState('');
   const [notes,        setNotes]        = useState('');
@@ -488,12 +533,13 @@ function InstrumentsSection({ station }) {
   }, [showForm, station?.id]);
 
   async function handleSave() {
-    if (!serial || !visitId || (instrType === 'raingauge' && !mmPerTip)) return;
+    if ((!serial.trim() && !asset.trim()) || !visitId || (instrType === 'raingauge' && !mmPerTip)) return;
     setSaveState('saving');
     try {
       await createInstrumentRecord(station.id, {
         instrument_type: instrType,
-        serial_no:       serial.trim(),
+        serial_no:       serial.trim() || null,
+        asset_no:        asset.trim() || null,
         mm_per_tip:      instrType === 'raingauge' ? parseFloat(mmPerTip) : null,
         visit_id:        parseInt(visitId, 10),
         notes:           notes.trim() || null,
@@ -501,7 +547,7 @@ function InstrumentsSection({ station }) {
       const updated = await getInstrumentHistory(station.id);
       setHistory(updated);
       setShowForm(false);
-      setSerial(''); setMmPerTip(''); setVisitId(''); setNotes('');
+      setSerial(''); setAsset(''); setMmPerTip(''); setVisitId(''); setNotes('');
       setSaveState('idle');
     } catch {
       setSaveState('error');
@@ -531,6 +577,9 @@ function InstrumentsSection({ station }) {
             <input type="text" value={serial} onChange={e => setSerial(e.target.value)}
               placeholder="Serial number (from instrument label)"
               className={`field-input w-full ${serial ? 'field-input--active' : ''}`} style={{ height: 36 }} />
+            <input type="text" value={asset} onChange={e => setAsset(e.target.value)}
+              placeholder="Asset number (if no serial)"
+              className={`field-input w-full ${asset ? 'field-input--active' : ''}`} style={{ height: 36 }} />
             {instrType === 'raingauge' && (
               <div className="relative">
                 <input type="number" step="0.001" value={mmPerTip}
@@ -552,7 +601,7 @@ function InstrumentsSection({ station }) {
             <textarea value={notes} onChange={e => setNotes(e.target.value)}
               placeholder="Notes (optional)" rows={2} className="notes-textarea w-full" />
             <button onClick={handleSave}
-              disabled={!serial || !visitId || (instrType === 'raingauge' && !mmPerTip) || saveState === 'saving'}
+              disabled={(!serial.trim() && !asset.trim()) || !visitId || (instrType === 'raingauge' && !mmPerTip) || saveState === 'saving'}
               className="save-btn" style={{ alignSelf: 'flex-start' }}>
               {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Error — retry' : 'Save'}
             </button>
@@ -571,7 +620,7 @@ function InstrumentsSection({ station }) {
             {rows.map(r => (
               <div key={r.id} className="flex items-start justify-between py-1.5 border-b border-border last:border-0">
                 <div>
-                  <div className="text-[12px] font-semibold text-text-dark">{r.serial_no}
+                  <div className="text-[12px] font-semibold text-text-dark">{sensorIdentity(r)}
                     {r.mm_per_tip && <span className="ml-2 text-[11px] font-normal text-text-light">{r.mm_per_tip} mm/tip</span>}
                   </div>
                   <div className="text-[11px] text-text-light">
@@ -594,7 +643,6 @@ function InstrumentsSection({ station }) {
 }
 
 // ── Met sensor section ───────────────────────────────────────────────────────
-const SOIL_CATS = new Set(['soil', 'leaf_wetness']);
 const CAL_UNIT  = { temperature: '°C', humidity: '%', pressure: ' hPa' };
 
 const CATEGORY_LABEL = {
@@ -616,6 +664,8 @@ function MetSensorsSection({ station }) {
   const [showForm,      setShowForm]      = useState(false);
   const [typeId,        setTypeId]        = useState('');
   const [serial,        setSerial]        = useState('');
+  const [asset,         setAsset]         = useState('');
+  const [position,      setPosition]      = useState('');
   const [sensitivity,   setSensitivity]   = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState(() => new Date().toISOString().split('T')[0]);
   const [notes,         setNotes]         = useState('');
@@ -638,11 +688,11 @@ function MetSensorsSection({ station }) {
   }
 
   const selectedType = types.find(t => t.id === parseInt(typeId, 10));
-  const needsSerial      = selectedType && !SOIL_CATS.has(selectedType.category);
+  const serialExpected   = selectedType ? selectedType.serial_expected !== false : true;
   const needsSensitivity = selectedType?.requires_sensitivity;
 
   const canSave = typeId && effectiveFrom &&
-    (!needsSerial      || serial.trim()) &&
+    hasIdentifier({ serial, asset, position }, serialExpected) &&
     (!needsSensitivity || sensitivity !== '');
 
   async function handleSave() {
@@ -651,7 +701,9 @@ function MetSensorsSection({ station }) {
     try {
       await assignSensor(station.id, {
         instrument_type_id: parseInt(typeId, 10),
-        serial_no:          needsSerial ? serial.trim() : null,
+        serial_no:          serial.trim() || null,
+        asset_no:           asset.trim() || null,
+        position_label:     position.trim() || null,
         sensitivity_value:  needsSensitivity ? parseFloat(sensitivity) : null,
         effective_from:     effectiveFrom,
         notes:              notes.trim() || null,
@@ -660,7 +712,7 @@ function MetSensorsSection({ station }) {
       setSensors(updated);
       setHistory(null);   // invalidate cached history so next open refetches
       setShowForm(false);
-      setTypeId(''); setSerial(''); setSensitivity(''); setNotes('');
+      setTypeId(''); setSerial(''); setAsset(''); setPosition(''); setSensitivity(''); setNotes('');
       setSaveState('idle');
     } catch (err) {
       setError(err.message);
@@ -687,7 +739,7 @@ function MetSensorsSection({ station }) {
       {showForm && (
         <div className="form-card mb-3" style={{ borderColor: '#BBF7D0' }}>
           <div className="flex flex-col gap-2">
-            <select value={typeId} onChange={e => { setTypeId(e.target.value); setSerial(''); setSensitivity(''); }}
+            <select value={typeId} onChange={e => { setTypeId(e.target.value); setSerial(''); setAsset(''); setPosition(''); setSensitivity(''); }}
               className={`field-input w-full ${typeId ? 'field-input--active' : ''}`} style={{ height: 36 }}>
               <option value="">Select sensor type…</option>
               {Object.entries(byCategory).map(([cat, items]) => (
@@ -699,10 +751,21 @@ function MetSensorsSection({ station }) {
               ))}
             </select>
 
-            {needsSerial && (
-              <input type="text" value={serial} onChange={e => setSerial(e.target.value)}
-                placeholder="Serial number (from sensor label)"
-                className={`field-input w-full ${serial ? 'field-input--active' : ''}`} style={{ height: 36 }} />
+            {selectedType && (
+              <>
+                <input type="text" value={serial} onChange={e => setSerial(e.target.value)}
+                  placeholder="Serial number (from sensor label)"
+                  className={`field-input w-full ${serial ? 'field-input--active' : ''}`} style={{ height: 36 }} />
+                <input type="text" value={asset} onChange={e => setAsset(e.target.value)}
+                  placeholder="Asset number (if no serial)"
+                  className={`field-input w-full ${asset ? 'field-input--active' : ''}`} style={{ height: 36 }} />
+                {!serialExpected && (
+                  <input type="text" value={position} onChange={e => setPosition(e.target.value)}
+                    placeholder='Position (e.g. "10 cm depth")'
+                    className={`field-input w-full ${position ? 'field-input--active' : ''}`} style={{ height: 36 }} />
+                )}
+                <div className="text-[10px] text-text-light">{identifierHint(serialExpected)}</div>
+              </>
             )}
 
             {needsSensitivity && (
@@ -748,7 +811,7 @@ function MetSensorsSection({ station }) {
           <div>
             <div className="text-[12px] font-semibold text-text-dark">
               {s.label}
-              {s.serial_no && <span className="ml-2 text-[11px] font-normal text-text-light">S/N: {s.serial_no}</span>}
+              {sensorIdentity(s) && <span className="ml-2 text-[11px] font-normal text-text-light">{sensorIdentity(s)}</span>}
             </div>
             {s.sensitivity_value != null && (
               <div className="text-[11px] text-text-light">Sensitivity: {s.sensitivity_value} µV/(W·m⁻²)</div>
@@ -788,7 +851,7 @@ function MetSensorsSection({ station }) {
                       {h.effective_to ? 'Retired' : <span className="text-success font-semibold">Active</span>}
                     </span>
                   </div>
-                  {h.serial_no && <div className="text-[10px] text-text-light">S/N: {h.serial_no}</div>}
+                  {sensorIdentity(h) && <div className="text-[10px] text-text-light">{sensorIdentity(h)}</div>}
                   <div className="text-[10px] text-text-light">
                     {new Date(h.effective_from).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}
                     {h.effective_to && <> → {new Date(h.effective_to).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}</>}

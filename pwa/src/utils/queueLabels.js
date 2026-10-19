@@ -29,6 +29,7 @@ const READING_META = {
 // State → visual style (color bar on card left edge carries the state meaning — no emojis)
 
 const OP_LABEL = {
+  visit_create:  'Start visit',
   visit_update:  'Visit details',
   instrument:    'Instrument record',
   calibration:   'Calibration check',
@@ -55,6 +56,7 @@ export function opDetail(op) {
   if (op.type === 'upload')      return op.payload?.name || '';
   if (op.type === 'calibration') return [op.payload?.parameter, op.payload?.calibration_date].filter(Boolean).join(' · ');
   if (op.type === 'sensor_change') return op.payload?.mode === 'decommission' ? 'Decommission' : 'New sensor';
+  if (op.type === 'visit_create') return 'Registers the visit with the server first';
   if (op.type === 'submit')      return 'Sends when every change above has synced';
   return '';
 }

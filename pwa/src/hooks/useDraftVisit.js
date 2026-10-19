@@ -6,7 +6,11 @@
 // raw File objects and abortControllers are NOT serialisable — strip them
 // before saving. On restore, files that were 'uploading' become 'error'.
 
+import { useState, useEffect } from 'react';
 import { getDB } from './idb.js';
+
+const CHANGED = 'fds-draft-changed';
+const announce = () => { try { window.dispatchEvent(new Event(CHANGED)); } catch { /* non-fatal */ } };
 
 const STORE  = 'draft_visit';
 const LEGACY = 'current';                       // single shared slot used before drafts belonged to a user
@@ -54,6 +58,7 @@ export async function saveDraft(draft) {
     };
     if (draft.user_id == null) return;          // never store a draft nobody owns
     await db.put(STORE, serialisable, keyFor(draft.user_id));
+    announce();
   } catch {
     // IDB write failure is non-fatal — session still works via in-memory state
   }
@@ -67,6 +72,7 @@ export async function clearDraft(userId) {
     // A shared-slot draft stamped with this user's id goes too (never one that is unowned or someone else's)
     const legacy = await db.get(STORE, LEGACY);
     if (legacy && legacy.user_id === userId) await db.delete(STORE, LEGACY);
+    announce();
   } catch {
     // non-fatal
   }
@@ -75,4 +81,18 @@ export async function clearDraft(userId) {
 // Remove the old shared slot once its draft has been claimed by its real owner
 export async function removeLegacyDraft() {
   try { await (await getDB()).delete(STORE, LEGACY); } catch { /* non-fatal */ }
+}
+
+// True while this user has a visit in progress on this device (for the Field tab badge).
+// Tracks saves/clears made anywhere in the app; unowned legacy drafts are not counted.
+export function useHasDraft(userId) {
+  const [has, setHas] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const check = () => loadDraft(userId).then(d => { if (alive) setHas(!!d && !d.unowned); });
+    check();
+    window.addEventListener(CHANGED, check);
+    return () => { alive = false; window.removeEventListener(CHANGED, check); };
+  }, [userId]);
+  return has;
 }

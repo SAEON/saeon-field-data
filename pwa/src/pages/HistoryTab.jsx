@@ -4,9 +4,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useOnReconnect } from '../hooks/useOnReconnect.js';
 import {
   getVisits, getVisit, uploadFile, getStationRainfall,
-  getUsers, getStations, getOverdueStations, assignVisit, updateVisit, reparseFile, updateStation, getStationSensorHistory,
+  getUsers, getStations, getOverdueStations, assignVisit, addVisitFollowupNote, updateVisitFollowupNote, reparseFile, updateStation, getStationSensorHistory,
 } from '../services/api.js';
 import { parseMaintType, maintFieldLabel, maintValueLabel } from '../utils/sensorMaintenance.js';
+import { sensorName } from '../utils/sensorIdentity.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 
 const ADD_FILE_WINDOW_DAYS = 7;
@@ -126,6 +127,8 @@ const STATUS_COLORS = {
 };
 
 function StatusBadge({ status }) {
+  // A submitted visit is the normal state, and its site condition already shows it was visited
+  if (status === 'submitted') return null;
   const s = STATUS_COLORS[status] || { bg: '#F5F5F5', color: '#616161', label: status };
   return (
     <span style={{
@@ -378,17 +381,20 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
   const [showAdd,         setShowAdd]         = useState(false);
   const [rainfallSummary, setRainfallSummary] = useState(null);
   const [reparsing,       setReparsing]       = useState(new Set());
-  const [notesValue,      setNotesValue]      = useState('');
-  const [notesSaving,     setNotesSaving]     = useState(false);
   const [assignOpen,      setAssignOpen]      = useState(false);
+  const [followupNote,        setFollowupNote]        = useState('');
+  const [followupNoteSaving,  setFollowupNoteSaving]  = useState(false);
+  const [followupNoteErr,     setFollowupNoteErr]     = useState(null);
+  const [editingId,       setEditingId]       = useState(null);
+  const [editText,        setEditText]        = useState('');
+  const me = useAuth();
   const [sensorNames,     setSensorNames]     = useState({});
-  const noteTimer = useRef(null);
 
   const isOversight = technicians.length > 0;
 
   useEffect(() => {
     getVisit(visitId)
-      .then(v => { setVisit(v); setNotesValue(v.notes || ''); })
+      .then(v => setVisit(v))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [visitId]);
@@ -397,7 +403,7 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
     if (!visit || !(visit.readings || []).some(r => parseMaintType(r.reading_type))) return;
     getStationSensorHistory(visit.station_id)
       .then(list => setSensorNames(Object.fromEntries(
-        list.map(s => [String(s.id), s.serial_no ? `${s.label} (S/N ${s.serial_no})` : s.label])
+        list.map(s => [String(s.id), sensorName(s)])
       )))
       .catch(() => {});
   }, [visit]);
@@ -417,14 +423,36 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
     }).catch(() => {});
   }, [visit]);
 
-  function handleNotesChange(value) {
-    setNotesValue(value);
-    clearTimeout(noteTimer.current);
-    noteTimer.current = setTimeout(async () => {
-      setNotesSaving(true);
-      try { await updateVisit(visitId, { notes: value }); }
-      finally { setNotesSaving(false); }
-    }, 800);
+  async function handleAddFollowupNote() {
+    const text = followupNote.trim();
+    if (!text || followupNoteSaving) return;
+    setFollowupNoteSaving(true);
+    setFollowupNoteErr(null);
+    try {
+      const saved = await addVisitFollowupNote(visitId, text);
+      setVisit(v => ({ ...v, followup_notes: [...(v.followup_notes || []), saved] }));
+      setFollowupNote('');
+    } catch (err) {
+      setFollowupNoteErr(err.message || 'Could not save the note — please try again.');
+    } finally {
+      setFollowupNoteSaving(false);
+    }
+  }
+
+  async function handleSaveEdit(noteId) {
+    const text = editText.trim();
+    if (!text || followupNoteSaving) return;
+    setFollowupNoteSaving(true);
+    setFollowupNoteErr(null);
+    try {
+      const saved = await updateVisitFollowupNote(visitId, noteId, text);
+      setVisit(v => ({ ...v, followup_notes: v.followup_notes.map(n => n.id === noteId ? saved : n) }));
+      setEditingId(null);
+    } catch (err) {
+      setFollowupNoteErr(err.message || 'Could not save the note — please try again.');
+    } finally {
+      setFollowupNoteSaving(false);
+    }
   }
 
   async function handleReparse(fileId) {
@@ -453,10 +481,8 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
 
   if (!visit) return null;
 
-  const cfg            = FAMILY_CONFIG[visit.data_family] || FAMILY_CONFIG.groundwater;
   const canAddFile     = daysSince(visit.visited_at) <= ADD_FILE_WINDOW_DAYS;
   const siteReading    = (visit.readings || []).find(r => r.reading_type === 'overall_site_condition');
-  const condStyle      = siteReading ? (CONDITION_STYLE[siteReading.value_text?.toLowerCase()] || {}) : {};
   const requiredTypes  = REQUIRED_PER_FAMILY[visit.data_family] || [];
   const plainReadings  = (visit.readings || []).filter(r => !parseMaintType(r.reading_type));
   const requiredReadings = plainReadings.filter(r => requiredTypes.includes(r.reading_type));
@@ -485,7 +511,7 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
           <div>
             <div className="flex items-center gap-2">
               <div className="text-[14px] font-bold text-text-dark">
-                {cfg.icon} {visit.station_display_name}
+                {visit.station_display_name}
               </div>
               <StatusBadge status={visit.status} />
             </div>
@@ -531,38 +557,81 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
           {siteReading && (
             <div
               className="flex items-center justify-between rounded-xl px-3.5 py-2.5 mb-3.5"
-              style={{ background: condStyle.bg || 'var(--color-surface)', border: `1px solid ${condStyle.color || 'var(--color-border)'}33` }}
+              style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
             >
               <span className="text-[12px] font-semibold text-text-light">Overall site condition</span>
-              <span className="text-[13px] font-bold" style={{ color: condStyle.color || 'var(--color-text-dark)' }}>
+              <span className="text-[13px] font-bold text-text-dark">
                 {siteReading.value_text}
               </span>
             </div>
           )}
 
-          {/* Visit notes */}
-          {isOversight ? (
+          {/* Visit notes — as written during the visit; locked once submitted */}
+          {visit.notes && (
             <div className="bg-white rounded-xl px-3.5 py-3 mb-3.5" style={{ border: '1.5px solid var(--color-border)' }}>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] font-semibold text-text-light uppercase tracking-wide">Visit notes</span>
-                {notesSaving && <span className="text-[10px] text-text-light">Saving…</span>}
-              </div>
+              <div className="text-[11px] font-semibold text-text-light uppercase tracking-wide mb-1.5">Visit notes</div>
+              <div className="text-[13px] text-text-med leading-relaxed whitespace-pre-wrap">{visit.notes}</div>
+            </div>
+          )}
+
+          {/* Follow-up notes — the only notes that stay editable after submission */}
+          {['submitted', 'approved', 'flagged'].includes(visit.status) && (
+            <div className="bg-white rounded-xl px-3.5 py-3 mb-3.5" style={{ border: '1.5px solid var(--color-border)' }}>
+              <div className="text-[11px] font-semibold text-text-light uppercase tracking-wide mb-1.5">Follow-up notes</div>
+              {(visit.followup_notes || []).map(n => {
+                const canEdit = n.author_id === me?.id;   // only the person who wrote a follow-up note can change it
+                return (
+                  <div key={n.id} className="mb-2.5">
+                    {editingId === n.id ? (
+                      <>
+                        <textarea
+                          value={editText}
+                          onChange={e => setEditText(e.target.value)}
+                          rows={3}
+                          className="notes-textarea w-full"
+                          style={{ fontSize: 12 }}
+                        />
+                        <div className="flex gap-3 mt-1">
+                          <button onClick={() => handleSaveEdit(n.id)} disabled={!editText.trim() || followupNoteSaving}
+                            className="text-[12px] font-bold" style={{ color: 'var(--color-navy)' }}>Save</button>
+                          <button onClick={() => { setEditingId(null); setFollowupNoteErr(null); }}
+                            className="text-[12px] text-text-light">Cancel</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-[13px] text-text-med leading-relaxed whitespace-pre-wrap">{n.note}</div>
+                        <div className="text-[10px] text-text-light mt-0.5">
+                          Added by {n.author_name || 'Unknown'} · {new Date(n.created_at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          {n.edited_at && ` · edited by ${n.edited_by_name || 'Unknown'}, ${new Date(n.edited_at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`}
+                          {canEdit && (
+                            <button onClick={() => { setEditingId(n.id); setEditText(n.note); setFollowupNoteErr(null); }}
+                              className="ml-2 font-semibold" style={{ color: 'var(--color-navy)' }}>Edit</button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
               <textarea
-                value={notesValue}
-                onChange={e => handleNotesChange(e.target.value)}
-                placeholder="Add or edit visit notes…"
-                rows={3}
+                value={followupNote}
+                onChange={e => setFollowupNote(e.target.value)}
+                placeholder="Add a note to this visit…"
+                rows={2}
                 className="notes-textarea w-full"
                 style={{ fontSize: 12 }}
               />
+              {followupNoteErr && <div className="text-[11px] mt-1" style={{ color: '#C62828' }}>{followupNoteErr}</div>}
+              <button
+                onClick={handleAddFollowupNote}
+                disabled={!followupNote.trim() || followupNoteSaving}
+                className="mt-2 text-[11px] font-semibold text-white px-2.5 py-1 rounded-md border-none"
+                style={{ fontSize: 11, background: 'var(--color-navy)', opacity: !followupNote.trim() || followupNoteSaving ? 0.5 : 1 }}
+              >
+                {followupNoteSaving ? 'Saving…' : 'Add note'}
+              </button>
             </div>
-          ) : (
-            visit.notes && (
-              <div className="bg-white rounded-xl px-3.5 py-3 mb-3.5" style={{ border: '1.5px solid var(--color-border)' }}>
-                <div className="text-[11px] font-semibold text-text-light uppercase tracking-wide mb-1.5">Visit notes</div>
-                <div className="text-[13px] text-text-med leading-relaxed">{visit.notes}</div>
-              </div>
-            )
           )}
 
           {/* Logger files */}
@@ -591,13 +660,13 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
                   const isParsed   = f.parse_status === 'parsed';
                   const isError    = f.parse_status === 'error';
                   const isRep      = reparsing.has(f.id);
-                  const borderCol  = isError ? '#FECACA' : isParsed ? '#BBF7D0' : 'var(--color-border)';
+                  const borderCol  = isError ? '#FECACA' : 'var(--color-border)';
                   return (
                     <div key={f.id} className="bg-white rounded-xl px-3 py-2.5"
                       style={{ border: `1.5px solid ${borderCol}` }}>
                       <div className="flex items-center gap-2.5">
                         <div className="rounded-md text-[10px] font-bold shrink-0 px-1.5 py-0.5"
-                          style={{ background: cfg.bg, color: cfg.color }}>
+                          style={{ background: 'var(--color-surface-dark)', color: 'var(--color-text-light)' }}>
                           .{ext}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -606,7 +675,7 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
                             <div className="text-[10px] text-text-light mt-0.5">
                               {fmtDate(f.date_range_start)} — {fmtDate(f.date_range_end)}
                               {f.record_count != null && (
-                                <span className="text-success font-semibold ml-1.5">
+                                <span className="ml-1.5">
                                   {Number(f.record_count).toLocaleString()} records
                                 </span>
                               )}
@@ -634,8 +703,8 @@ function VisitDetailSheet({ visitId, onClose, technicians = [], onGoToColumns, o
                           )}
                         </div>
                         <div className="flex flex-col items-end gap-1.5 shrink-0">
-                          <span className={`text-[11px] font-semibold ${isParsed ? 'text-success' : isError ? 'text-error' : 'text-warning'}`}>
-                            {isParsed ? '✓ Parsed' : isError ? '⚠ Failed' : 'Processing'}
+                          <span className={`text-[11px] font-semibold ${isParsed ? 'text-text-light' : isError ? 'text-error' : 'text-warning'}`}>
+                            {isParsed ? 'Parsed' : isError ? '⚠ Failed' : 'Processing'}
                           </span>
                           {isOversight && (
                             <button
@@ -1029,7 +1098,6 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
           ) : (
             <div className="history-list flex flex-col gap-2">
               {displayedVisits.map(v => {
-                const cfg          = FAMILY_CONFIG[v.data_family] || FAMILY_CONFIG.groundwater;
                 const withinWindow = daysSince(v.visited_at) <= ADD_FILE_WINDOW_DAYS;
                 const hasError     = (v.file_error_count ?? 0) > 0;
                 const siteCondition = v.site_condition;
@@ -1046,10 +1114,6 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
                   >
                     {/* Top row */}
                     <div className="flex items-start gap-2.5">
-                      <div
-                        className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0"
-                        style={{ background: cfg.bg, border: `1px solid ${cfg.border}22` }}
-                      >{cfg.icon}</div>
                       <div className="flex-1 min-w-0">
                         <div className="text-[13px] font-semibold text-text-dark truncate">{v.station_display_name}</div>
                         <div className="text-[11px] text-text-light mt-0.5">
@@ -1087,11 +1151,9 @@ export default function HistoryTab({ defaultScope = 'mine', onGoToColumns }) {
                         <span className="text-[11px] text-text-light">
                           {v.reading_count} readings
                         </span>
-                        {(v.file_error_count > 0 || v.file_gap_count > 0) && (
+                        {v.file_gap_count > 0 && (
                           <span className="text-[11px]" style={{ color: '#E65100', fontWeight: 700 }}>
-                            {v.file_error_count > 0 && `${v.file_error_count} error${v.file_error_count !== 1 ? 's' : ''}`}
-                            {v.file_error_count > 0 && v.file_gap_count > 0 && ' · '}
-                            {v.file_gap_count > 0 && `${v.file_gap_count} gap${v.file_gap_count !== 1 ? 's' : ''}`}
+                            {`${v.file_gap_count} gap${v.file_gap_count !== 1 ? 's' : ''}`}
                           </span>
                         )}
                       </div>

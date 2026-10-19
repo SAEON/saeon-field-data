@@ -1,11 +1,23 @@
 import { cachedGet } from './refCache.js';
+import { isLocalVisit } from '../utils/visitId.js';
+import { ensureLink, noteSuccess, noteFailure, isLinkDown } from './link.js';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
 let _onUnauthorized = null;
 export function setUnauthorizedHandler(fn) { _onUnauthorized = fn; }
 
+// A visit started offline has no server id yet. Anything addressed to it behaves like "no signal",
+// so each caller's existing offline handling (queue it, keep it on the device) applies unchanged.
+function targetsUnregisteredVisit(path, options) {
+  return /\/visits\/local-/.test(path) || (typeof options.body === 'string' && options.body.includes('"visit_id":"local-'));
+}
+
 async function request(path, options = {}) {
+  if (targetsUnregisteredVisit(path, options) || !(await ensureLink())) {
+    // Offline, or a link too weak to use: fail at once so the caller's offline handling (queue it, use the saved copy) runs
+    throw Object.assign(new Error('Offline'), { offline: true, network: true });
+  }
   const method = (options.method || 'GET').toUpperCase();
   const timeoutMs = options.timeoutMs ?? (method === 'POST' ? 30000 : 12000);
   const controller = new AbortController();
@@ -31,6 +43,7 @@ async function request(path, options = {}) {
     const headers = { ...(options.headers || {}) };
 
     const res = await fetch(`${BASE}${path}`, { ...options, headers, credentials: 'include', signal: controller.signal });
+    noteSuccess();
     if (res.status === 401) {
       _onUnauthorized?.();
       const authErr = new Error('Session expired');
@@ -49,6 +62,7 @@ async function request(path, options = {}) {
     if (callerAborted) throw err;
 
     if (err?.name === 'AbortError' || err instanceof TypeError) {
+      noteFailure();   // no usable answer: stay offline until the link has recovered
       const wrapped = new Error(!navigator.onLine ? 'Offline' : 'Request timed out');
       wrapped.offline = !navigator.onLine;
       wrapped.timeout = navigator.onLine;
@@ -70,19 +84,9 @@ export function isTransientError(err) {
   return !!(err?.network || err?.offline || err?.timeout || err?.status === 401 || (err?.status >= 500));
 }
 
-// Real connectivity check — navigator.onLine can say "online" with no usable data (weak signal, captive portal).
-export async function isReachable(timeoutMs = 4000) {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${BASE}/api/health`, { cache: 'no-store', credentials: 'include', signal: controller.signal });
-    return res.status < 500;
-  } catch {
-    return false;
-  } finally {
-    window.clearTimeout(timer);
-  }
+// Is the server usable right now? Follows the same verdict as every other request (see link.js).
+export async function isReachable() {
+  return ensureLink();
 }
 
 // ── Stations ───────────────────────────────────────────────────────────────
@@ -101,16 +105,23 @@ export function getStationCoverage(id) {
 
 // ── Visits ─────────────────────────────────────────────────────────────────
 
-export function createVisit({ station_id, technician_id, visited_at, notes, status }) {
+export function createVisit({ station_id, technician_id, visited_at, notes, status, client_ref }) {
   return request('/api/visits', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ station_id, technician_id, visited_at, notes, status }),
+    body: JSON.stringify({ station_id, technician_id, visited_at, notes, status, client_ref }),
   });
 }
 
 export function getVisit(visitId) {
+  // Not on the server yet: nothing to fetch, nothing to cache
+  if (isLocalVisit(visitId)) return Promise.resolve({ id: visitId, status: 'draft', files: [], readings: [], local: true });
   return cachedGet(`visit:${visitId}`, () => request(`/api/visits/${visitId}`));
+}
+
+// The "My visits" number on the station list: kept on the device so it still shows with no signal
+export function getMyVisitCount() {
+  return cachedGet('visits:count', async () => (await request('/api/visits')).length);
 }
 
 export function getVisits({ status, technician_id, station_id } = {}) {
@@ -135,6 +146,22 @@ export function updateVisit(visitId, { visited_at, notes }) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ visited_at, notes }),
+  });
+}
+
+export function addVisitFollowupNote(visitId, note) {
+  return request(`/api/visits/${visitId}/followup-notes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note }),
+  });
+}
+
+export function updateVisitFollowupNote(visitId, noteId, note) {
+  return request(`/api/visits/${visitId}/followup-notes/${noteId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note }),
   });
 }
 
@@ -318,11 +345,11 @@ export function getInstrumentHistory(stationId) {
   return request(`/api/stations/${stationId}/instruments`);
 }
 
-export function createInstrumentRecord(stationId, { instrument_type, serial_no, mm_per_tip, visit_id, notes }) {
+export function createInstrumentRecord(stationId, { instrument_type, serial_no, asset_no, mm_per_tip, visit_id, notes }) {
   return request(`/api/stations/${stationId}/instruments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ instrument_type, serial_no, mm_per_tip, visit_id, notes }),
+    body: JSON.stringify({ instrument_type, serial_no, asset_no, mm_per_tip, visit_id, notes }),
   });
 }
 
@@ -331,7 +358,7 @@ export function getLoggerSnapshot(visitId) {
 }
 
 export function getStationLoggerSnapshots() {
-  return request(`/api/stations/logger-snapshots`);
+  return cachedGet('stations:logger-snapshots', () => request(`/api/stations/logger-snapshots`));
 }
 
 // ── Met instruments ────────────────────────────────────────────────────────
@@ -388,6 +415,7 @@ export function createCalibrationCheck(visitId, data) {
 }
 
 export function getCalibrationChecks(visitId) {
+  if (isLocalVisit(visitId)) return Promise.resolve([]);
   return cachedGet(`visit:${visitId}:calibration-checks`, () => request(`/api/visits/${visitId}/calibration-checks`));
 }
 
@@ -406,6 +434,36 @@ export function prefetchVisitData(station) {
     );
   }
   return Promise.allSettled(jobs);
+}
+
+// Keep reference data for every station the user can start a visit at, so a visit can be started with no
+// signal. Skips a station fetched in the last 12 hours; runs a few at a time.
+const PREFETCH_MS = 12 * 60 * 60 * 1000;
+let prefetching = false;
+export async function prefetchAllStations(stations) {
+  if (prefetching || !Array.isArray(stations) || stations.length === 0) return;
+  if (!(await ensureLink())) return;          // nothing can be saved without a usable connection
+  prefetching = true;
+  try {
+    const due = stations.filter(s => {
+      try { return Date.now() - Number(localStorage.getItem(`fds_prefetched_${s.id}`) || 0) > PREFETCH_MS; }
+      catch { return true; }
+    });
+    for (let i = 0; i < due.length; i += 3) {
+      const batch = due.slice(i, i + 3);
+      const results = await Promise.all(batch.map(async s => {
+        const res = await prefetchVisitData(s);
+        return { s, ok: res.every(r => r.status === 'fulfilled') };
+      }));
+      for (const { s, ok } of results) {
+        // a saved copy served from the cache because the link dropped does not count as refreshed
+        if (ok && !isLinkDown()) { try { localStorage.setItem(`fds_prefetched_${s.id}`, String(Date.now())); } catch { /* storage unavailable */ } }
+      }
+      if (results.some(r => !r.ok) && !(await isReachable())) break;   // signal dropped — try again later
+    }
+  } finally {
+    prefetching = false;
+  }
 }
 
 export function getAllPhenomena() {

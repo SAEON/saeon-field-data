@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useOnReconnect } from '../hooks/useOnReconnect.js';
 import { useOutboxStatus } from '../hooks/useSyncEngine.js';
+import { calibrationSensorIdentity } from '../utils/sensorIdentity.js';
+import { useHasDraft } from '../hooks/useDraftVisit.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import SyncQueue from './SyncQueue.jsx';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 import { getDashboardStations, getFilesWithErrors, deleteFile, getStationCalibrationHistory, getPendingColumnMappings, resolveColumnMapping, ignoreColumnMapping, getAllPhenomena, getActiveMappings, updateColumnMappingNodes, createPhenomenon, updatePhenomenon, reassignColumnMapping } from '../services/api.js';
@@ -93,7 +96,7 @@ function CalibrationHistoryPanel({ stationId }) {
               <div className="min-w-0">
                 <span className="text-[11px] font-semibold text-text-dark">{r.sensor_label}</span>
                 <span className="text-[10px] text-text-light ml-1.5 capitalize">{r.parameter}</span>
-                {r.sensor_serial_no && <span className="text-[10px] text-text-light ml-1.5">S/N: {r.sensor_serial_no}</span>}
+                {calibrationSensorIdentity(r) && <span className="text-[10px] text-text-light ml-1.5">{calibrationSensorIdentity(r)}</span>}
               </div>
               <span className="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-full"
                 style={{ background: outcomeColor + '18', color: outcomeColor }}>
@@ -1254,7 +1257,9 @@ function PhenomenaTable({ rows, onAdd, onEdit }) {
   );
 }
 
-function PhenoStandardPanel({ onCountChange }) {
+function PhenoStandardPanel({ onCountChange, onGoToField }) {
+  const user = useAuth();
+  const hasDraft = useHasDraft(user?.id);
   const [panelTab,   setPanelTab]   = useState('phenomena');
   const [pending,    setPending]    = useState([]);
   const [active,     setActive]     = useState([]);
@@ -1386,6 +1391,18 @@ function PhenoStandardPanel({ onCountChange }) {
         {/* ── Pending tab ─────────────────────────────────────────────────── */}
         {!loading && panelTab === 'pending' && (
           <>
+            {hasDraft && onGoToField && (Object.keys(resolved).length > 0 || pending.length === 0) && (
+              <button
+                onClick={onGoToField}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left', marginBottom: 12,
+                  padding: '10px 12px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                  background: 'white', color: 'var(--color-navy)', border: '1.5px solid var(--color-navy)',
+                }}
+              >
+                You have a visit in progress. Return to your visit in Field to submit
+              </button>
+            )}
             {pending.length === 0 && (
               <div style={{ textAlign: 'center', paddingTop: 40, fontSize: 13, color: 'var(--color-text-light)' }}>
                 All column names are recognised
@@ -1532,6 +1549,8 @@ const TABS = [
 export default function ManagerDashboard() {
   const [activeTab,        setActiveTab]        = useState('network');
   const outbox = useOutboxStatus();
+  const auth = useAuth();
+  const hasDraft = useHasDraft(auth?.id);
   const [pendingColCount,  setPendingColCount]  = useState(null);
 
   useEffect(() => {
@@ -1560,7 +1579,7 @@ export default function ManagerDashboard() {
       {activeTab === 'stations' && <StationRegistry />}
       {activeTab === 'queue'    && <SyncQueue />}
       {activeTab === 'errors'   && <ErrorsTab />}
-      {activeTab === 'columns'  && <PhenoStandardPanel onCountChange={setPendingColCount} />}
+      {activeTab === 'columns'  && <PhenoStandardPanel onCountChange={setPendingColCount} onGoToField={() => setActiveTab('field')} />}
       {activeTab === 'data'     && <DataTab />}
       {activeTab === 'users'    && <UserManagement />}
       {activeTab === 'field'    && <FieldApp embedded={true} onLanding={() => setActiveTab('network')} onGoToColumns={() => setActiveTab('columns')} onUnmappedDetected={() => getPendingColumnMappings().then(r => setPendingColCount(r.length)).catch(() => {})} />}
@@ -1593,6 +1612,15 @@ export default function ManagerDashboard() {
               }}>
                 {outbox.queued + outbox.failed}
               </span>
+            )}
+            {tab.id === 'field' && hasDraft && (
+              <span title="Visit in progress" style={{
+                position: 'absolute', top: 4, right: 4,
+                background: '#C62828', color: 'white',
+                fontSize: 9, fontWeight: 700, lineHeight: 1,
+                padding: '2px 4px', borderRadius: 8,
+                minWidth: 14, textAlign: 'center',
+              }}>1</span>
             )}
             {tab.id === 'columns' && pendingColCount > 0 && (
               <span style={{

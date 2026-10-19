@@ -5,7 +5,6 @@ const db      = require('../db/queries');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { parseInBackground } = require('./files');
 
-const SOIL_CATEGORIES = new Set(['soil', 'leaf_wetness']);
 const VALID_PARAMETERS = new Set(['temperature', 'humidity', 'pressure']);
 
 router.use(requireAuth);
@@ -110,7 +109,11 @@ router.get('/stations/:id/calibration-history', async (req, res, next) => {
 router.post('/stations/:id/sensors', async (req, res, next) => {
   try {
     const stationId = parseInt(req.params.id, 10);
-    const { instrument_type_id, serial_no, sensitivity_value, visit_id, effective_from, notes } = req.body;
+    const { instrument_type_id, sensitivity_value, visit_id, effective_from, notes, replaces_sensor_id } = req.body;
+    const clean = v => (typeof v === 'string' && v.trim()) ? v.trim() : null;
+    const serial_no      = clean(req.body.serial_no);
+    const asset_no       = clean(req.body.asset_no);
+    const position_label = clean(req.body.position_label);
 
     if (!instrument_type_id) {
       return res.status(400).json({ error: 'instrument_type_id is required' });
@@ -134,8 +137,12 @@ router.post('/stations/:id/sensors', async (req, res, next) => {
     const typeRow = await db.getMetInstrumentTypeById(parseInt(instrument_type_id, 10));
     if (!typeRow) return res.status(400).json({ error: 'instrument_type_id not found' });
 
-    if (!SOIL_CATEGORIES.has(typeRow.category) && !serial_no) {
-      return res.status(400).json({ error: 'serial_no is required for this sensor type' });
+    // Every sensor needs a serial or an asset number. Models that normally have no serial (soil probes,
+    // leaf wetness) may instead be identified by where they are installed.
+    if (!serial_no && !asset_no && !(position_label && !typeRow.serial_expected)) {
+      return res.status(400).json({ error: typeRow.serial_expected
+        ? 'A serial number or an asset number is required for this sensor type'
+        : 'A serial number, an asset number or a position label is required for this sensor type' });
     }
     if (typeRow.requires_sensitivity && sensitivity_value == null) {
       return res.status(400).json({ error: 'sensitivity_value is required for this sensor type' });
@@ -144,7 +151,10 @@ router.post('/stations/:id/sensors', async (req, res, next) => {
     const record = await db.assignSensorToStation({
       stationId,
       instrumentTypeId:  parseInt(instrument_type_id, 10),
-      serialNo:          serial_no ?? null,
+      serialNo:          serial_no,
+      assetNo:           asset_no,
+      positionLabel:     position_label,
+      replacesSensorId:  replaces_sensor_id ? parseInt(replaces_sensor_id, 10) : null,
       sensitivityValue:  sensitivity_value ?? null,
       effectiveFrom,
       deployedBy:        req.user.id,
@@ -154,6 +164,11 @@ router.post('/stations/:id/sensors', async (req, res, next) => {
 
     res.status(201).json(record);
   } catch (err) {
+    // The database refuses a second active sensor of the same model with the same serial or asset number
+    if (err.code === '23505' && /station_sensors_active_(serial|asset)_uq/.test(err.constraint || err.message || '')) {
+      const what = /asset/.test(err.constraint || err.message) ? 'asset number' : 'serial number';
+      return res.status(409).json({ error: `Another sensor of this model with that ${what} is already deployed. Check the number, or retire the other sensor first.` });
+    }
     next(err);
   }
 });

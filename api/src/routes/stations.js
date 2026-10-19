@@ -111,7 +111,7 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
     const {
       name, display_name, data_family, region, node,
       latitude, longitude, elevation_m, notes,
-      visit_frequency_days, assigned_technician_id, serial_no,
+      visit_frequency_days, assigned_technician_id, serial_no, asset_no,
       is_barologger, casing_ht_m, baro_station_id,
       well_depth_m, survey_method, surveyed_at,
     } = req.body;
@@ -124,19 +124,20 @@ router.post('/', requireRole('technician_lead'), async (req, res, next) => {
       name, displayName: display_name, dataFamily: data_family,
       region, node, latitude, longitude, elevationM: elevation_m,
       notes, visitFrequencyDays: visit_frequency_days,
-      assignedTechnicianId: assigned_technician_id, serialNo: serial_no ?? null,
+      assignedTechnicianId: assigned_technician_id, serialNo: serial_no ?? null, assetNo: asset_no ?? null,
       isBarologger: is_barologger ?? false,
       casingHtM: casing_ht_m ?? null, baroStationId: baro_station_id ?? null,
       wellDepthM: well_depth_m ?? null, surveyMethod: survey_method ?? null,
       surveyedAt: surveyed_at ?? null,
     });
 
-    // Seed instrument_history for rainfall stations created with a serial number
-    if (data_family === 'rainfall' && serial_no) {
+    // Seed instrument_history for rainfall stations created with a serial or asset number
+    if (data_family === 'rainfall' && (serial_no || asset_no)) {
       await db.createInstrumentRecord({
         stationId:      station.id,
         instrumentType: 'raingauge',
-        serialNo:       serial_no,
+        serialNo:       serial_no || null,
+        assetNo:        asset_no || null,
         mmPerTip:       0.254,
         visitId:        null,
         effectiveFrom:  new Date().toISOString(),
@@ -164,7 +165,7 @@ router.post('/:id', requireRole('technician_lead'), async (req, res, next) => {
     const {
       name, display_name, data_family, region, node,
       latitude, longitude, elevation_m, notes,
-      visit_frequency_days, assigned_technician_id, active, serial_no,
+      visit_frequency_days, assigned_technician_id, active, serial_no, asset_no,
       is_barologger, casing_ht_m, baro_station_id,
       well_depth_m, survey_method, surveyed_at,
     } = req.body;
@@ -174,7 +175,7 @@ router.post('/:id', requireRole('technician_lead'), async (req, res, next) => {
       region, node, latitude, longitude, elevationM: elevation_m,
       notes, visitFrequencyDays: visit_frequency_days,
       assignedTechnicianId: assigned_technician_id, active,
-      serialNo: serial_no,
+      serialNo: serial_no, assetNo: asset_no,
       isBarologger: is_barologger, casingHtM: casing_ht_m,
       baroStationId: baro_station_id,
       wellDepthM: well_depth_m, surveyMethod: survey_method, surveyedAt: surveyed_at,

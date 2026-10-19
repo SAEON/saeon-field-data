@@ -94,7 +94,7 @@ async function getAllStationsRegistry() {
     SELECT s.id, s.name, s.display_name, s.data_family, s.region, s.node,
            s.active, s.visit_frequency_days, s.assigned_technician_id,
            u.full_name AS assigned_technician_name,
-           s.elevation_m, s.notes, s.serial_no,
+           s.elevation_m, s.notes, s.serial_no, s.asset_no,
            s.is_barologger, s.casing_ht_m, s.baro_station_id,
            s.well_depth_m, s.survey_method, s.surveyed_at,
            ST_Y(s.location::geometry) AS latitude,
@@ -109,19 +109,19 @@ async function getAllStationsRegistry() {
   return result.rows;
 }
 
-async function createStation({ name, displayName, dataFamily, region, node, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId, serialNo, isBarologger, casingHtM, baroStationId, wellDepthM, surveyMethod, surveyedAt }) {
+async function createStation({ name, displayName, dataFamily, region, node, latitude, longitude, elevationM, notes, visitFrequencyDays, assignedTechnicianId, serialNo, assetNo, isBarologger, casingHtM, baroStationId, wellDepthM, surveyMethod, surveyedAt }) {
   const result = await pool.query(
     `WITH inserted AS (
        INSERT INTO stations
          (name, display_name, data_family, region, node, location, elevation_m, notes,
           visit_frequency_days, assigned_technician_id, serial_no,
           is_barologger, casing_ht_m, baro_station_id,
-          well_depth_m, survey_method, surveyed_at)
+          well_depth_m, survey_method, surveyed_at, asset_no)
        VALUES ($1, $2, $3, $4, $5,
          CASE WHEN $6::numeric IS NOT NULL AND $7::numeric IS NOT NULL
               THEN ST_MakePoint($7, $6)::geography ELSE NULL END,
          $8, $9, COALESCE($10, 30), $11, $12,
-         $13, $14, $15, $16, $17, $18)
+         $13, $14, $15, $16, $17, $18, $19)
        RETURNING *
      )
      SELECT s.*,
@@ -133,7 +133,7 @@ async function createStation({ name, displayName, dataFamily, region, node, lati
      elevationM ?? null, notes ?? null,
      visitFrequencyDays ?? null, assignedTechnicianId ?? null, serialNo ?? null,
      isBarologger ?? false, casingHtM ?? null, baroStationId ?? null,
-     wellDepthM ?? null, surveyMethod ?? null, surveyedAt ?? null]
+     wellDepthM ?? null, surveyMethod ?? null, surveyedAt ?? null, assetNo ?? null]
   );
   return result.rows[0];
 }
@@ -142,7 +142,7 @@ async function updateStation(id, fields) {
   const {
     name, displayName, dataFamily, region, node,
     latitude, longitude, elevationM, notes,
-    visitFrequencyDays, assignedTechnicianId, active, serialNo,
+    visitFrequencyDays, assignedTechnicianId, active, serialNo, assetNo,
     isBarologger, casingHtM, baroStationId,
     wellDepthM, surveyMethod, surveyedAt,
   } = fields;
@@ -162,6 +162,7 @@ async function updateStation(id, fields) {
   if (assignedTechnicianId !== undefined){ sets.push(`assigned_technician_id = $${i++}`); vals.push(assignedTechnicianId); }
   if (active            !== undefined) { sets.push(`active = $${i++}`);                    vals.push(active); }
   if (serialNo          !== undefined) { sets.push(`serial_no = $${i++}`);                 vals.push(serialNo); }
+  if (assetNo           !== undefined) { sets.push(`asset_no = $${i++}`);                  vals.push(assetNo); }
   if (isBarologger      !== undefined) { sets.push(`is_barologger = $${i++}`);             vals.push(isBarologger); }
   if (casingHtM         !== undefined) { sets.push(`casing_ht_m = $${i++}`);              vals.push(casingHtM); }
   if (baroStationId     !== undefined) { sets.push(`baro_station_id = $${i++}`);           vals.push(baroStationId); }
@@ -219,12 +220,16 @@ async function getStationsByBaroStationId(baroStationId) {
 // FIELD VISITS
 // =============================================================
 
-async function createFieldVisit({ stationId, technicianId, visitedAt, notes, status }) {
+// A repeated request with the same client_ref (a queued create whose reply was lost) returns the visit
+// that was already made instead of a second one.
+async function createFieldVisit({ stationId, technicianId, visitedAt, notes, status, clientRef }) {
   const result = await pool.query(
-    `INSERT INTO field_visits (station_id, technician_id, visited_at, notes, status)
-     VALUES ($1, $2, COALESCE($3, NOW()), $4, COALESCE($5, 'draft'))
+    `INSERT INTO field_visits (station_id, technician_id, visited_at, notes, status, client_ref)
+     VALUES ($1, $2, COALESCE($3, NOW()), $4, COALESCE($5, 'draft'), $6)
+     ON CONFLICT (technician_id, client_ref) WHERE client_ref IS NOT NULL
+     DO UPDATE SET client_ref = EXCLUDED.client_ref
      RETURNING *`,
-    [stationId, technicianId, visitedAt || null, notes || null, status || null]
+    [stationId, technicianId, visitedAt || null, notes || null, status || null, clientRef || null]
   );
   return result.rows[0];
 }
@@ -281,6 +286,53 @@ async function getVisitById(id) {
      JOIN   users    u ON u.id = fv.technician_id
      WHERE  fv.id = $1`,
     [id]
+  );
+  return result.rows[0] || null;
+}
+
+async function getVisitFollowupNotes(visitId) {
+  const result = await pool.query(
+    `SELECT n.id, n.note, n.created_at, n.edited_at, n.author_id, u.full_name AS author_name,
+           n.edited_by, e.full_name AS edited_by_name
+     FROM   followup_notes n
+     LEFT JOIN users u ON u.id = n.author_id
+     LEFT JOIN users e ON e.id = n.edited_by
+     WHERE  n.visit_id = $1
+     ORDER  BY n.created_at, n.id`,
+    [visitId]
+  );
+  return result.rows;
+}
+
+async function addVisitFollowupNote(visitId, authorId, note) {
+  const result = await pool.query(
+    `WITH ins AS (
+       INSERT INTO followup_notes (visit_id, author_id, note)
+       VALUES ($1, $2, $3) RETURNING *
+     )
+     SELECT ins.id, ins.note, ins.created_at, ins.edited_at, ins.author_id, u.full_name AS author_name,
+            ins.edited_by, NULL::text AS edited_by_name
+     FROM ins LEFT JOIN users u ON u.id = ins.author_id`,
+    [visitId, authorId, note]
+  );
+  return result.rows[0];
+}
+
+async function getVisitFollowupNote(noteId) {
+  const result = await pool.query(`SELECT * FROM followup_notes WHERE id = $1`, [noteId]);
+  return result.rows[0] || null;
+}
+
+async function updateVisitFollowupNote(noteId, note, editorId) {
+  const result = await pool.query(
+    `WITH upd AS (
+       UPDATE followup_notes SET note = $2, edited_at = NOW(), edited_by = $3 WHERE id = $1 RETURNING *
+     )
+     SELECT upd.id, upd.note, upd.created_at, upd.edited_at, upd.author_id, u.full_name AS author_name,
+            upd.edited_by, e.full_name AS edited_by_name
+     FROM upd LEFT JOIN users u ON u.id = upd.author_id
+              LEFT JOIN users e ON e.id = upd.edited_by`,
+    [noteId, note, editorId]
   );
   return result.rows[0] || null;
 }
@@ -1410,7 +1462,7 @@ async function getGroundwaterLevels(stationId, from, to) {
 
 async function getInstrumentHistory(stationId) {
   const result = await pool.query(
-    `SELECT ih.id, ih.instrument_type, ih.serial_no, ih.mm_per_tip,
+    `SELECT ih.id, ih.instrument_type, ih.serial_no, ih.asset_no, ih.mm_per_tip,
             ih.effective_from, ih.notes, ih.created_at,
             u.full_name AS recorded_by_name,
             fv.visited_at
@@ -1448,25 +1500,27 @@ async function setRainfallStatusForStation(stationId, status, error = null) {
   );
 }
 
-async function createInstrumentRecord({ stationId, instrumentType, serialNo, mmPerTip, visitId, effectiveFrom, recordedBy, notes }) {
+async function createInstrumentRecord({ stationId, instrumentType, serialNo, assetNo, mmPerTip, visitId, effectiveFrom, recordedBy, notes }) {
   // An identical record for the same visit is a repeated request (queued retry), not a new instrument
   const same = await pool.query(
     `SELECT * FROM instrument_history
-     WHERE station_id = $1 AND instrument_type = $2 AND serial_no = $3
+     WHERE station_id = $1 AND instrument_type = $2
+       AND serial_no   IS NOT DISTINCT FROM $3::text
+       AND asset_no    IS NOT DISTINCT FROM $7::text
        AND visit_id    IS NOT DISTINCT FROM $4::integer
        AND mm_per_tip  IS NOT DISTINCT FROM $5::numeric
        AND notes       IS NOT DISTINCT FROM $6::text
      ORDER BY id LIMIT 1`,
-    [stationId, instrumentType, serialNo, visitId ?? null, mmPerTip ?? null, notes ?? null]
+    [stationId, instrumentType, serialNo ?? null, visitId ?? null, mmPerTip ?? null, notes ?? null, assetNo ?? null]
   );
   if (same.rows[0]) return same.rows[0];
 
   const result = await pool.query(
     `INSERT INTO instrument_history
-       (station_id, instrument_type, serial_no, mm_per_tip, visit_id, effective_from, recorded_by, notes)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (station_id, instrument_type, serial_no, asset_no, mm_per_tip, visit_id, effective_from, recorded_by, notes)
+     VALUES ($1, $2, $3, $9, $4, $5, $6, $7, $8)
      RETURNING *`,
-    [stationId, instrumentType, serialNo, mmPerTip ?? null, visitId ?? null, effectiveFrom, recordedBy, notes ?? null]
+    [stationId, instrumentType, serialNo ?? null, mmPerTip ?? null, visitId ?? null, effectiveFrom, recordedBy, notes ?? null, assetNo ?? null]
   );
   return result.rows[0];
 }
@@ -1477,7 +1531,7 @@ async function createInstrumentRecord({ stationId, instrumentType, serialNo, mmP
 
 async function getMetInstrumentTypeById(id) {
   const result = await pool.query(
-    `SELECT id, category, requires_sensitivity FROM met_instrument_types WHERE id = $1`,
+    `SELECT id, category, requires_sensitivity, serial_expected FROM met_instrument_types WHERE id = $1`,
     [id]
   );
   return result.rows[0] || null;
@@ -1497,7 +1551,7 @@ async function getAllMetInstrumentTypes() {
   const result = await pool.query(`
     SELECT id, label, category, manufacturer, model,
            parameters, requires_sensitivity, requires_transfer_std,
-           transfer_std_parameters, maintenance_checks, active
+           transfer_std_parameters, maintenance_checks, active, serial_expected
     FROM   met_instrument_types
     WHERE  active = true
     ORDER  BY category, label
@@ -1509,7 +1563,7 @@ async function getMetInstrumentTypesByCategory(category) {
   const result = await pool.query(`
     SELECT id, label, category, manufacturer, model,
            parameters, requires_sensitivity, requires_transfer_std,
-           transfer_std_parameters, maintenance_checks, active
+           transfer_std_parameters, maintenance_checks, active, serial_expected
     FROM   met_instrument_types
     WHERE  active = true AND category = $1
     ORDER  BY label
@@ -1519,12 +1573,12 @@ async function getMetInstrumentTypesByCategory(category) {
 
 async function getActiveSensorsForStation(stationId) {
   const result = await pool.query(`
-    SELECT ss.id, ss.station_id, ss.serial_no, ss.sensitivity_value,
+    SELECT ss.id, ss.station_id, ss.serial_no, ss.asset_no, ss.position_label, ss.sensitivity_value,
            ss.effective_from, ss.effective_to, ss.notes,
            mit.id AS instrument_type_id, mit.label, mit.category,
            mit.manufacturer, mit.model, mit.parameters,
            mit.requires_sensitivity, mit.requires_transfer_std,
-           mit.transfer_std_parameters, mit.maintenance_checks,
+           mit.transfer_std_parameters, mit.maintenance_checks, mit.serial_expected,
            u.full_name AS deployed_by_name
     FROM   station_sensors ss
     JOIN   met_instrument_types mit ON mit.id = ss.instrument_type_id
@@ -1537,7 +1591,7 @@ async function getActiveSensorsForStation(stationId) {
 
 async function getSensorHistoryForStation(stationId) {
   const result = await pool.query(`
-    SELECT ss.id, ss.station_id, ss.serial_no, ss.sensitivity_value,
+    SELECT ss.id, ss.station_id, ss.serial_no, ss.asset_no, ss.position_label, ss.sensitivity_value,
            ss.effective_from, ss.effective_to, ss.notes,
            mit.id AS instrument_type_id, mit.label, mit.category,
            mit.manufacturer, mit.model,
@@ -1551,23 +1605,35 @@ async function getSensorHistoryForStation(stationId) {
   return result.rows;
 }
 
-async function assignSensorToStation({ stationId, instrumentTypeId, serialNo, sensitivityValue, effectiveFrom, deployedBy, visitId, notes }) {
+async function assignSensorToStation({ stationId, instrumentTypeId, serialNo, assetNo, positionLabel, replacesSensorId, sensitivityValue, effectiveFrom, deployedBy, visitId, notes }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(`
-      UPDATE station_sensors
-      SET    effective_to = $1
-      WHERE  station_id = $2 AND instrument_type_id = $3 AND effective_to IS NULL
-    `, [effectiveFrom, stationId, instrumentTypeId]);
+    if (replacesSensorId) {
+      // A swap names the sensor being replaced, so exactly that deployment ends
+      await client.query(`
+        UPDATE station_sensors
+        SET    effective_to = $1
+        WHERE  id = $2 AND station_id = $3 AND effective_to IS NULL
+      `, [effectiveFrom, replacesSensorId, stationId]);
+    } else {
+      // Otherwise the new sensor takes over from an open one of the same type in the same position
+      // (unlabelled sensors behave as before; differently-labelled probes can sit side by side)
+      await client.query(`
+        UPDATE station_sensors
+        SET    effective_to = $1
+        WHERE  station_id = $2 AND instrument_type_id = $3 AND effective_to IS NULL
+          AND  position_label IS NOT DISTINCT FROM $4::text
+      `, [effectiveFrom, stationId, instrumentTypeId, positionLabel ?? null]);
+    }
     const result = await client.query(`
       INSERT INTO station_sensors
-        (station_id, instrument_type_id, serial_no, sensitivity_value,
+        (station_id, instrument_type_id, serial_no, asset_no, position_label, sensitivity_value,
          effective_from, deployed_by, visit_id, notes)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *
-    `, [stationId, instrumentTypeId, serialNo ?? null, sensitivityValue ?? null,
-        effectiveFrom, deployedBy, visitId ?? null, notes ?? null]);
+    `, [stationId, instrumentTypeId, serialNo ?? null, assetNo ?? null, positionLabel ?? null,
+        sensitivityValue ?? null, effectiveFrom, deployedBy, visitId ?? null, notes ?? null]);
     await client.query('COMMIT');
     return result.rows[0];
   } catch (err) {
@@ -1671,6 +1737,8 @@ async function getCalibrationHistoryForStation(stationId) {
            fv.visited_at,
            mit.label          AS sensor_label,
            ss.serial_no       AS sensor_serial_no,
+           ss.asset_no        AS sensor_asset_no,
+           ss.position_label  AS sensor_position_label,
            ts.kit_label,
            ts.model           AS transfer_std_model,
            ts.serial_no       AS transfer_std_serial,
@@ -1693,6 +1761,8 @@ async function getCalibrationChecksForVisit(visitId) {
            mit.label          AS sensor_label,
            mit.category       AS sensor_category,
            ss.serial_no       AS sensor_serial_no,
+           ss.asset_no        AS sensor_asset_no,
+           ss.position_label  AS sensor_position_label,
            ts.kit_label,
            ts.model           AS transfer_std_model,
            ts.serial_no       AS transfer_std_serial,
@@ -1843,7 +1913,8 @@ async function getParsedFilesForDataFamily(dataFamily) {
     `SELECT uf.*
      FROM uploaded_files uf
      JOIN field_visits fv ON fv.id = uf.visit_id
-     WHERE fv.data_family = $1
+     JOIN stations s ON s.id = fv.station_id
+     WHERE s.data_family = $1
        AND uf.parse_status = 'parsed'
      ORDER BY uf.date_range_start ASC`,
     [dataFamily]
@@ -1856,7 +1927,8 @@ async function getFlaggedFilesForDataFamily(dataFamily) {
     `SELECT uf.*
      FROM uploaded_files uf
      JOIN field_visits fv ON fv.id = uf.visit_id
-     WHERE fv.data_family = $1
+     JOIN stations s ON s.id = fv.station_id
+     WHERE s.data_family = $1
        AND uf.parse_status = 'parsed'
        AND uf.has_unmapped_columns = true
      ORDER BY uf.date_range_start ASC`,
@@ -2012,5 +2084,9 @@ module.exports = {
   getAllActiveMappings,
   updateColumnMappingNodes,
   getParsedFilesForDataFamily,
+  getVisitFollowupNotes,
+  addVisitFollowupNote,
+  getVisitFollowupNote,
+  updateVisitFollowupNote,
   getFlaggedFilesForDataFamily,
 };

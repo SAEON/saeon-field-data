@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { getDB } from './idb.js';
-import { getStations } from '../services/api.js';
+import { getStations, prefetchAllStations } from '../services/api.js';
+import { saveStationList } from '../services/stationCache.js';
+import { useOnReconnect } from './useOnReconnect.js';
 
 const STORE = 'stations';
 
@@ -8,6 +10,10 @@ export function useStations() {
   const [stations, setStations] = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [offline,  setOffline]  = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // Refresh the list (and the saved station data) when signal returns
+  useOnReconnect(() => setReloadKey(k => k + 1));
 
   useEffect(() => {
     let cancelled = false;
@@ -34,9 +40,10 @@ export function useStations() {
           setLoading(false);
 
           // Persist to IDB for next offline load
-          const db = await getDB();
-          const tx = db.transaction(STORE, 'readwrite');
-          await Promise.all([...fresh.map(s => tx.store.put(s)), tx.done]);
+          await saveStationList(fresh);
+
+          // Save each station's sensors, standards and details so any of them can be started offline
+          prefetchAllStations(fresh);
         }
       } catch {
         if (!cancelled) {
@@ -48,7 +55,7 @@ export function useStations() {
 
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
 
   return { stations, loading, offline };
 }

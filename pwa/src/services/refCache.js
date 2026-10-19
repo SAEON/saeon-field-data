@@ -18,6 +18,10 @@ export async function cacheSet(key, data) {
 
 export async function clearRefCache() {
   try { await (await getDB()).clear(STORE); } catch { /* non-fatal */ }
+  // The background save must run again too, or stations would be treated as still saved with nothing behind them
+  try {
+    for (const key of Object.keys(localStorage)) if (key.startsWith('fds_prefetched_')) localStorage.removeItem(key);
+  } catch { /* storage unavailable */ }
 }
 
 // Fetch fresh data and remember it. If the network is down, slow (> patienceMs) or the server errors,

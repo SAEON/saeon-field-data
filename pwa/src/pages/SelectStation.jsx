@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useStations } from '../hooks/useStations.js';
-import { getVisits, getStationLoggerSnapshots } from '../services/api.js';
+import { getMyVisitCount, getStationLoggerSnapshots } from '../services/api.js';
+import { useOnReconnect } from '../hooks/useOnReconnect.js';
 import ProfileButton from '../auth/ProfileSheet.jsx';
 
 const OVERDUE_DAYS = 30; // stations not visited in 30+ days are overdue
@@ -42,7 +43,7 @@ const FAMILY_LABELS = {
 };
 
 export default function SelectStation({ onStartVisit, hasDraft, draftStation, onResumeDraft }) {
-  const { stations, loading, offline } = useStations();
+  const { stations, loading } = useStations();
 
   const [query,           setQuery]           = useState('');
   const [filter,          setFilter]          = useState('all');
@@ -50,17 +51,20 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
   const [myVisits,        setMyVisits]        = useState(null);
   const [loggerSnapshots, setLoggerSnapshots] = useState({});
 
-  useEffect(() => {
-    getVisits()
-      .then(v => setMyVisits(v.length))
-      .catch(() => {});
-  }, []);
+  const [visitsChecked, setVisitsChecked] = useState(false);
 
-  useEffect(() => {
+  const loadCounts = useCallback(() => {
+    getMyVisitCount()
+      .then(n => setMyVisits(n))
+      .catch(() => {})
+      .finally(() => setVisitsChecked(true));
     getStationLoggerSnapshots()
       .then(setLoggerSnapshots)
       .catch(() => {});
   }, []);
+
+  useEffect(() => { loadCounts(); }, [loadCounts]);
+  useOnReconnect(loadCounts);     // fill in again as soon as the connection is back
 
   const overdueCount = stations.filter(s => daysSince(s.last_visited_at) >= OVERDUE_DAYS).length;
 
@@ -112,17 +116,10 @@ export default function SelectStation({ onStartVisit, hasDraft, draftStation, on
           <div className="text-[10px] text-white/40 mt-0.5">Overdue</div>
         </div>
         <div className="stat-tile">
-          <div className="text-lg font-bold text-white/90">{myVisits ?? '…'}</div>
+          <div className="text-lg font-bold text-white/90">{myVisits ?? (visitsChecked ? '–' : '…')}</div>
           <div className="text-[10px] text-white/40 mt-0.5">My visits</div>
         </div>
       </div>
-
-      {/* Offline banner */}
-      {offline && (
-        <div className="bg-warning-light text-warning text-xs text-center py-2 px-4 shrink-0" style={{ borderBottom: '1px solid rgba(230,81,0,0.2)' }}>
-          Offline — showing cached stations
-        </div>
-      )}
 
       {/* ── Active draft banner ───────────────────────────────────── */}
       {hasDraft && draftStation && (
