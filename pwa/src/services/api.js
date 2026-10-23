@@ -342,7 +342,7 @@ export function deleteReading(visitId, readingType) {
 // ── Instruments ────────────────────────────────────────────────────────────
 
 export function getInstrumentHistory(stationId) {
-  return request(`/api/stations/${stationId}/instruments`);
+  return cachedGet(`station:${stationId}:instruments`, () => request(`/api/stations/${stationId}/instruments`));
 }
 
 export function createInstrumentRecord(stationId, { instrument_type, serial_no, asset_no, mm_per_tip, visit_id, notes }) {
@@ -373,6 +373,11 @@ export function getTransferStandards() {
 
 export function getStationSensors(stationId) {
   return cachedGet(`station:${stationId}:sensors`, () => request(`/api/stations/${stationId}/sensors`));
+}
+
+// What earlier visits recorded here, to offer as a starting point for the next one (cached for offline use)
+export function getStationLastVisit(stationId) {
+  return cachedGet(`station:${stationId}:last-visit`, () => request(`/api/stations/${stationId}/last-visit`));
 }
 
 export function getStationPowerSpecs(stationId) {
@@ -414,6 +419,16 @@ export function createCalibrationCheck(visitId, data) {
   });
 }
 
+// Offset now set in the datalogger for each of the station's calibrated sensor parameters
+export function getStationOffsets(stationId) {
+  return cachedGet(`station:${stationId}:offsets`, () => request(`/api/stations/${stationId}/offsets`));
+}
+
+// Sensors that repeated checks or a technician's choice say are worth a second look (managers)
+export function getCalibrationReview(stationId) {
+  return request(`/api/stations/${stationId}/calibration-review`);
+}
+
 export function getCalibrationChecks(visitId) {
   if (isLocalVisit(visitId)) return Promise.resolve([]);
   return cachedGet(`visit:${visitId}:calibration-checks`, () => request(`/api/visits/${visitId}/calibration-checks`));
@@ -423,7 +438,8 @@ export function getCalibrationChecks(visitId) {
 export function prefetchVisitData(station) {
   if (!station?.id) return Promise.resolve([]);
   const id = station.id;
-  const jobs = [getStationById(id)];
+  // Station detail, what the last visits recorded, and the gauge / logger records (to prefill the next visit)
+  const jobs = [getStationById(id), getStationLastVisit(id), getInstrumentHistory(id)];
   if (station.data_family === 'met') {
     jobs.push(
       getStationSensors(id),
@@ -431,6 +447,7 @@ export function prefetchVisitData(station) {
       getTransferStandards(),
       getStationPowerSpecs(id),
       getStationSensorHistory(id),
+      getStationOffsets(id),
     );
   }
   return Promise.allSettled(jobs);

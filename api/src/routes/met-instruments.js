@@ -6,6 +6,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { parseInBackground } = require('./files');
 
 const VALID_PARAMETERS = new Set(['temperature', 'humidity', 'pressure']);
+const CALIBRATION_ACTIONS = new Set(['passed', 'offset_applied', 'raw_kept', 'replace_sensor']);
 
 router.use(requireAuth);
 
@@ -183,6 +184,24 @@ router.patch('/stations/:id/sensors/:sensorId/decommission', async (req, res, ne
   }
 });
 
+// Offset now set in the datalogger, per current sensor and parameter (0 if none recorded)
+router.get('/stations/:id/offsets', async (req, res, next) => {
+  try {
+    res.json(await db.getCurrentOffsetsForStation(parseInt(req.params.id, 10)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Sensors worth a second look (repeated failures, or marked for replacement / factory calibration)
+router.get('/stations/:id/calibration-review', async (req, res, next) => {
+  try {
+    res.json(await db.getCalibrationReview(parseInt(req.params.id, 10)));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/visits/:id/calibration-checks', async (req, res, next) => {
   try {
     const visitId = parseInt(req.params.id, 10);
@@ -203,7 +222,6 @@ router.post('/visits/:id/calibration-checks', async (req, res, next) => {
       calibration_date,
       transfer_std_reading,
       sensor_reading,
-      correction_applied,
       offset_applied,
       station_reading_post_cal,
       transfer_std_verification_reading,
@@ -220,6 +238,25 @@ router.post('/visits/:id/calibration-checks', async (req, res, next) => {
       return res.status(400).json({ error: 'parameter must be temperature, humidity, or pressure' });
     }
 
+    // Readings and the offset must be real numbers when given
+    const toNum = v => (v == null || v === '' ? null : Number(v));
+    const nums = { transfer_std_reading, sensor_reading, offset_applied, station_reading_post_cal, transfer_std_verification_reading };
+    for (const [name, v] of Object.entries(nums)) {
+      const n = toNum(v);
+      if (n !== null && !Number.isFinite(n)) return res.status(400).json({ error: `${name} must be a number` });
+    }
+    if (req.body.action_taken != null && !CALIBRATION_ACTIONS.has(req.body.action_taken)) {
+      return res.status(400).json({ error: 'action_taken must be passed, offset_applied, raw_kept or replace_sensor' });
+    }
+
+    // When the check was done on the device (a check saved offline reaches the server later)
+    let performedAt = null;
+    if (req.body.performed_at != null) {
+      const when = new Date(req.body.performed_at);
+      if (Number.isNaN(when.getTime())) return res.status(400).json({ error: 'performed_at must be a date and time' });
+      performedAt = when.toISOString();
+    }
+
     // A queued request can arrive twice if the first reply was lost: keep one check per sensor × parameter per visit
     const already = await db.findCalibrationCheck(visitId, parseInt(station_sensor_id, 10), parameter);
     if (already) return res.status(200).json(already);
@@ -227,16 +264,34 @@ router.post('/visits/:id/calibration-checks', async (req, res, next) => {
     const sensorParams = await db.getSensorParametersForCalibration(parseInt(station_sensor_id, 10));
     const tolerance    = sensorParams?.[parameter]?.tolerance ?? null;
 
-    const tReading = transfer_std_reading != null ? Number(transfer_std_reading) : null;
-    const sReading = sensor_reading        != null ? Number(sensor_reading)        : null;
+    const tReading = toNum(transfer_std_reading);
+    const sReading = toNum(sensor_reading);
 
     const asFoundError     = (tReading != null && sReading != null) ? tReading - sReading : null;
     const withinTolerance  = (asFoundError != null && tolerance != null)
       ? Math.abs(asFoundError) <= tolerance
       : null;
 
-    const postCalReading   = station_reading_post_cal           != null ? Number(station_reading_post_cal)           : null;
-    const verifyReading    = transfer_std_verification_reading  != null ? Number(transfer_std_verification_reading)  : null;
+    // What was done after the as-found check. Applying an offset is optional: the raw values are kept either way.
+    //   passed         — within tolerance, nothing done        offset_applied — offset keyed into the datalogger
+    //   raw_kept       — out of tolerance, no offset applied   replace_sensor  — to be replaced / sent for factory calibration
+    // A request from an older client (or a queued one) has no action: work it out from what it sent.
+    let action = req.body.action_taken ?? null;
+    const offsetNum = toNum(offset_applied);
+    if (withinTolerance === false) {
+      if (!action || action === 'passed') action = offsetNum != null ? 'offset_applied' : 'raw_kept';
+    } else if (action !== 'offset_applied' && action !== 'replace_sensor') {
+      action = 'passed';
+    }
+    if (action === 'offset_applied' && offsetNum == null) {
+      return res.status(400).json({ error: 'offset_applied is required when an offset was applied' });
+    }
+    const applied = action === 'offset_applied';
+
+    const postCalReading   = applied ? toNum(station_reading_post_cal)          : null;
+    const verifyReading    = applied ? toNum(transfer_std_verification_reading) : null;
+
+    const offsetBefore = await db.getOffsetInEffect(parseInt(station_sensor_id, 10), parameter, performedAt);
 
     const asLeftError              = (verifyReading != null && postCalReading != null) ? verifyReading - postCalReading : null;
     const postCalWithinTolerance   = (asLeftError != null && tolerance != null)
@@ -254,8 +309,11 @@ router.post('/visits/:id/calibration-checks', async (req, res, next) => {
       sensorReading:                sReading,
       asFoundError,
       withinTolerance,
-      correctionApplied:            correction_applied ?? false,
-      offsetApplied:                offset_applied ?? null,
+      correctionApplied:            applied,
+      offsetApplied:                applied ? offsetNum : null,
+      actionTaken:                  action,
+      offsetBefore,
+      performedAt,
       stationReadingPostCal:        postCalReading,
       transferStdVerificationReading: verifyReading,
       asLeftError,

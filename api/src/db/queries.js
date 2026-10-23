@@ -10,7 +10,7 @@ async function getAllStations() {
            s.is_barologger, s.baro_station_id, s.visit_frequency_days,
            MAX(fv.visited_at) AS last_visited_at
     FROM   stations s
-    LEFT JOIN field_visits fv ON fv.station_id = s.id
+    LEFT JOIN field_visits fv ON fv.station_id = s.id AND fv.status <> 'draft'
     WHERE  s.active = true
     GROUP  BY s.id
     ORDER  BY s.name
@@ -42,7 +42,7 @@ async function getStationLastVisit(stationId) {
     `SELECT fv.id, fv.visited_at, fv.status, u.full_name AS technician_name
      FROM   field_visits fv
      JOIN   users u ON u.id = fv.technician_id
-     WHERE  fv.station_id = $1
+     WHERE  fv.station_id = $1 AND fv.status <> 'draft'
      ORDER  BY fv.visited_at DESC
      LIMIT  1`,
     [stationId]
@@ -56,11 +56,37 @@ async function getLatestPowerSpecs(stationId) {
      FROM   manual_readings mr
      JOIN   field_visits fv ON fv.id = mr.visit_id
      WHERE  fv.station_id = $1
+       AND  fv.status <> 'draft'
        AND  mr.reading_type IN ('solar_panel_capacity_w', 'charge_controller_model', 'battery_capacity_ah')
      ORDER  BY mr.reading_type, fv.visited_at DESC`,
     [stationId]
   );
   return result.rows;
+}
+
+// What the previous visits recorded at this station, to prefill the next one: the latest site notes, and the
+// latest answer for each condition question and per-sensor maintenance answer. Measurements are not included.
+async function getLastVisitSnapshot(stationId) {
+  const readings = await pool.query(
+    `SELECT DISTINCT ON (mr.reading_type) mr.reading_type, mr.value_text, mr.value_numeric
+     FROM   manual_readings mr
+     JOIN   field_visits fv ON fv.id = mr.visit_id
+     WHERE  fv.station_id = $1 AND fv.status <> 'draft'
+       AND  (mr.reading_type IN ('charge_controller_condition', 'cables_condition') OR mr.reading_type LIKE 'smaint:%')
+     ORDER  BY mr.reading_type, fv.visited_at DESC`,
+    [stationId]
+  );
+  const notes = await pool.query(
+    `SELECT visited_at, notes FROM field_visits
+     WHERE  station_id = $1 AND status <> 'draft' AND notes IS NOT NULL AND btrim(notes) <> ''
+     ORDER  BY visited_at DESC LIMIT 1`,
+    [stationId]
+  );
+  return {
+    visited_at: notes.rows[0]?.visited_at ?? null,
+    notes:      notes.rows[0]?.notes ?? null,
+    readings:   Object.fromEntries(readings.rows.map(r => [r.reading_type, { value_text: r.value_text, value_numeric: r.value_numeric }])),
+  };
 }
 
 async function getAllStationsWithLastVisit(assignedToUserId = null) {
@@ -80,7 +106,7 @@ async function getAllStationsWithLastVisit(assignedToUserId = null) {
            MAX(fv.visited_at) AS last_visited_at
     FROM   stations s
     LEFT JOIN users u        ON u.id  = s.assigned_technician_id
-    LEFT JOIN field_visits fv ON fv.station_id = s.id
+    LEFT JOIN field_visits fv ON fv.station_id = s.id AND fv.status <> 'draft'
     WHERE  s.active = true ${assignmentClause}
     GROUP  BY s.id, u.full_name
     ORDER  BY s.name
@@ -102,7 +128,7 @@ async function getAllStationsRegistry() {
            MAX(fv.visited_at) AS last_visited_at
     FROM   stations s
     LEFT JOIN users u         ON u.id  = s.assigned_technician_id
-    LEFT JOIN field_visits fv ON fv.station_id = s.id
+    LEFT JOIN field_visits fv ON fv.station_id = s.id AND fv.status <> 'draft'
     GROUP  BY s.id, u.full_name
     ORDER  BY s.active DESC, s.name
   `);
@@ -1175,7 +1201,7 @@ async function updateUser(id, { role, active, department }) {
 // DASHBOARD — Phase 2 prep (stubs)
 // =============================================================
 
-// Stations where time since last SUBMITTED visit exceeds their visit_frequency_days.
+// Stations where time since the last visit (drafts do not count) exceeds their visit_frequency_days.
 // Stations never visited are always overdue.
 async function getOverdueStations() {
   const result = await pool.query(`
@@ -1186,7 +1212,7 @@ async function getOverdueStations() {
            MAX(fv.visited_at) AS last_visited_at,
            EXTRACT(DAY FROM NOW() - MAX(fv.visited_at))::int AS days_since_visit
     FROM   stations s
-    LEFT JOIN field_visits fv ON fv.station_id = s.id AND fv.status = 'submitted'
+    LEFT JOIN field_visits fv ON fv.station_id = s.id AND fv.status <> 'draft'
     LEFT JOIN users u ON u.id = s.assigned_technician_id
     WHERE  s.active = true
     GROUP  BY s.id, u.full_name
@@ -1228,7 +1254,7 @@ async function getStationsNotVisitedSince(date) {
     `SELECT s.id, s.display_name, s.data_family, s.region,
             MAX(fv.visited_at) AS last_visited
      FROM   stations s
-     LEFT JOIN field_visits fv ON fv.station_id = s.id
+     LEFT JOIN field_visits fv ON fv.station_id = s.id AND fv.status <> 'draft'
      WHERE  s.active = true
      GROUP  BY s.id
      HAVING MAX(fv.visited_at) < $1 OR MAX(fv.visited_at) IS NULL
@@ -1245,10 +1271,16 @@ async function getGroundwaterStationsMissingDipper() {
      JOIN   field_visits fv ON fv.station_id = s.id
      WHERE  s.data_family = 'groundwater'
        AND  s.active = true
+       AND  fv.status <> 'draft'
+       -- the dipper reading belongs to a visit that downloaded the logger; other visits (maintenance only) are not checked
+       AND  EXISTS (SELECT 1 FROM manual_readings dl WHERE dl.visit_id = fv.id
+                      AND dl.reading_type = 'logger_activities' AND dl.value_text LIKE '%logger_download%')
        AND  fv.visited_at = (
               SELECT MAX(v2.visited_at)
               FROM   field_visits v2
-              WHERE  v2.station_id = s.id
+              WHERE  v2.station_id = s.id AND v2.status <> 'draft'
+                AND  EXISTS (SELECT 1 FROM manual_readings dl2 WHERE dl2.visit_id = v2.id
+                               AND dl2.reading_type = 'logger_activities' AND dl2.value_text LIKE '%logger_download%')
             )
        AND  NOT EXISTS (
               SELECT 1 FROM manual_readings mr
@@ -1682,6 +1714,7 @@ async function createCalibrationCheck({
   asLeftError, postCalWithinTolerance,
   certificateIssued, certificateNumber,
   technicianId, remarks,
+  actionTaken, offsetBefore, performedAt,
 }) {
   const result = await pool.query(`
     WITH inserted AS (
@@ -1694,9 +1727,10 @@ async function createCalibrationCheck({
         station_reading_post_cal, transfer_std_verification_reading,
         as_left_error, post_cal_within_tolerance,
         certificate_issued, certificate_number,
-        technician_id, remarks
+        technician_id, remarks,
+        action_taken, offset_before, performed_at
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,COALESCE($23, NOW())
       ) RETURNING *
     )
     SELECT i.*, u.full_name AS technician_name
@@ -1712,8 +1746,91 @@ async function createCalibrationCheck({
     asLeftError ?? null, postCalWithinTolerance ?? null,
     certificateIssued ?? null, certificateNumber ?? null,
     technicianId ?? null, remarks ?? null,
+    actionTaken ?? null, offsetBefore ?? null, performedAt ?? null,
   ]);
   return result.rows[0];
+}
+
+// The total offset set in the datalogger for this sensor and parameter at a moment (default: now), as last
+// recorded before then (0 if none). A check saved late (offline) still sees what was in effect when it was done.
+async function getOffsetInEffect(stationSensorId, parameter, at = null) {
+  const result = await pool.query(`
+    SELECT offset_applied
+    FROM   calibration_checks
+    WHERE  station_sensor_id = $1 AND parameter = $2
+      AND  action_taken = 'offset_applied' AND offset_applied IS NOT NULL
+      AND  COALESCE(performed_at, created_at) <= COALESCE($3::timestamptz, NOW())
+    ORDER  BY COALESCE(performed_at, created_at) DESC, id DESC
+    LIMIT  1
+  `, [stationSensorId, parameter, at]);
+  return result.rows[0] ? Number(result.rows[0].offset_applied) : 0;
+}
+
+// Offset in effect for every calibrated parameter of the station's current sensors
+async function getCurrentOffsetsForStation(stationId) {
+  const result = await pool.query(`
+    SELECT ss.id AS station_sensor_id, p.parameter,
+           COALESCE((
+             SELECT cc.offset_applied FROM calibration_checks cc
+             WHERE  cc.station_sensor_id = ss.id AND cc.parameter = p.parameter
+               AND  cc.action_taken = 'offset_applied' AND cc.offset_applied IS NOT NULL
+             ORDER  BY COALESCE(cc.performed_at, cc.created_at) DESC, cc.id DESC LIMIT 1
+           ), 0)::float AS "offset"
+    FROM   station_sensors ss
+    JOIN   met_instrument_types mit ON mit.id = ss.instrument_type_id
+    CROSS  JOIN LATERAL unnest(mit.transfer_std_parameters) AS p(parameter)
+    WHERE  ss.station_id = $1 AND ss.effective_to IS NULL AND mit.requires_transfer_std
+  `, [stationId]);
+  return result.rows;
+}
+
+// Sensors worth a second look: out of tolerance at the last N checks in a row (N from the sensor type's
+// review_rules, default 2), or marked for replacement / factory calibration at the latest check.
+async function getCalibrationReview(stationId) {
+  const result = await pool.query(`
+    WITH ranked AS (
+      SELECT cc.station_sensor_id, cc.parameter, cc.within_tolerance, cc.action_taken, cc.calibration_date,
+             row_number() OVER (PARTITION BY cc.station_sensor_id, cc.parameter
+                                ORDER BY COALESCE(cc.performed_at, cc.created_at) DESC, cc.id DESC) AS rn
+      FROM   calibration_checks cc
+      JOIN   station_sensors ss ON ss.id = cc.station_sensor_id
+      WHERE  ss.station_id = $1 AND ss.effective_to IS NULL
+    )
+    SELECT r.station_sensor_id, r.parameter, r.within_tolerance, r.action_taken, r.calibration_date, r.rn,
+           mit.label AS sensor_label, ss.serial_no, ss.asset_no, ss.position_label,
+           COALESCE((mit.review_rules->>'consecutive_fails')::int, 2) AS needed
+    FROM   ranked r
+    JOIN   station_sensors ss       ON ss.id  = r.station_sensor_id
+    JOIN   met_instrument_types mit ON mit.id = ss.instrument_type_id
+    WHERE  r.rn <= 10
+    ORDER  BY r.station_sensor_id, r.parameter, r.rn
+  `, [stationId]);
+
+  const groups = new Map();
+  for (const row of result.rows) {
+    const key = `${row.station_sensor_id}:${row.parameter}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const flags = [];
+  for (const rows of groups.values()) {
+    const latest = rows[0];
+    const needed = Math.max(1, latest.needed);
+    let reason = null;
+    if (latest.action_taken === 'replace_sensor') {
+      reason = 'Marked for replacement or factory calibration';
+    } else if (rows.length >= needed && rows.slice(0, needed).every(r => r.within_tolerance === false)) {
+      reason = `Out of tolerance at the last ${needed} check${needed !== 1 ? 's' : ''}`;
+    }
+    if (reason) {
+      flags.push({
+        station_sensor_id: latest.station_sensor_id, parameter: latest.parameter, reason,
+        sensor_label: latest.sensor_label, serial_no: latest.serial_no, asset_no: latest.asset_no,
+        position_label: latest.position_label, last_check: latest.calibration_date,
+      });
+    }
+  }
+  return flags;
 }
 
 async function decommissionSensor(stationSensorId) {
@@ -1732,6 +1849,9 @@ async function getCalibrationHistoryForStation(stationId) {
            cc.transfer_std_reading, cc.sensor_reading, cc.as_found_error,
            cc.within_tolerance, cc.correction_applied,
            cc.as_left_error, cc.post_cal_within_tolerance,
+           cc.offset_applied, cc.offset_before, cc.action_taken, cc.performed_at,
+           cc.station_reading_post_cal, cc.transfer_std_verification_reading,
+           (cc.as_found_error + COALESCE(cc.offset_before, 0)) AS raw_error,
            cc.remarks,
            fv.id   AS visit_id,
            fv.visited_at,
@@ -1758,6 +1878,7 @@ async function getCalibrationHistoryForStation(stationId) {
 async function getCalibrationChecksForVisit(visitId) {
   const result = await pool.query(`
     SELECT cc.*,
+           (cc.as_found_error + COALESCE(cc.offset_before, 0)) AS raw_error,
            mit.label          AS sensor_label,
            mit.category       AS sensor_category,
            ss.serial_no       AS sensor_serial_no,
@@ -1968,6 +2089,7 @@ module.exports = {
   getStationStreams,
   getStationLastVisit,
   getLatestPowerSpecs,
+  getLastVisitSnapshot,
   createStation,
   updateStation,
   deactivateStation,
@@ -2068,6 +2190,9 @@ module.exports = {
   decommissionSensor,
   getActiveTransferStandards,
   createCalibrationCheck,
+  getOffsetInEffect,
+  getCurrentOffsetsForStation,
+  getCalibrationReview,
   findCalibrationCheck,
   getCalibrationChecksForVisit,
   getCalibrationHistoryForStation,

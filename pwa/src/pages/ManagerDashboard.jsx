@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useOnReconnect } from '../hooks/useOnReconnect.js';
 import { useOutboxStatus } from '../hooks/useSyncEngine.js';
-import { calibrationSensorIdentity } from '../utils/sensorIdentity.js';
+import { calibrationSensorIdentity, sensorIdentity } from '../utils/sensorIdentity.js';
+import { offsetText } from '../utils/calibration.js';
 import { useHasDraft } from '../hooks/useDraftVisit.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import SyncQueue from './SyncQueue.jsx';
 import ProfileButton from '../auth/ProfileSheet.jsx';
-import { getDashboardStations, getFilesWithErrors, deleteFile, getStationCalibrationHistory, getPendingColumnMappings, resolveColumnMapping, ignoreColumnMapping, getAllPhenomena, getActiveMappings, updateColumnMappingNodes, createPhenomenon, updatePhenomenon, reassignColumnMapping } from '../services/api.js';
+import { getDashboardStations, getFilesWithErrors, deleteFile, getStationCalibrationHistory, getCalibrationReview, getPendingColumnMappings, resolveColumnMapping, ignoreColumnMapping, getAllPhenomena, getActiveMappings, updateColumnMappingNodes, createPhenomenon, updatePhenomenon, reassignColumnMapping } from '../services/api.js';
 import UserManagement    from './UserManagement.jsx';
 import DataTab from './DataTab.jsx';
 import StationRegistry   from './StationRegistry.jsx';
@@ -63,14 +64,18 @@ function formatDateTime(iso) {
 
 const CAL_PARAM_UNIT = { temperature: '°C', humidity: '%', pressure: ' hPa' };
 
+const CAL_ACTION_LABEL = { passed: 'Passed', offset_applied: 'Offset applied', raw_kept: 'Raw values kept', replace_sensor: 'Replace sensor' };
+
 function CalibrationHistoryPanel({ stationId }) {
   const [records, setRecords] = useState(null);
+  const [review,  setReview]  = useState([]);
   const [error,   setError]   = useState(null);
 
   useEffect(() => {
     getStationCalibrationHistory(stationId)
       .then(setRecords)
       .catch(() => setError('Failed to load calibration history'));
+    getCalibrationReview(stationId).then(setReview).catch(() => {});
   }, [stationId]);
 
   if (error)   return <div className="text-[11px] text-error px-3 py-2">{error}</div>;
@@ -78,14 +83,23 @@ function CalibrationHistoryPanel({ stationId }) {
   if (records.length === 0) return <div className="text-[11px] text-text-light px-3 py-2">No calibration checks recorded yet.</div>;
 
   return (
+    <>
+    {review.length > 0 && (
+      <div className="rounded-lg px-3 py-2 mt-2" style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+        <div className="text-[10px] font-semibold text-text-light uppercase tracking-wide mb-1">Review recommended</div>
+        {review.map(f => (
+          <div key={`${f.station_sensor_id}:${f.parameter}`} className="text-[11px] text-text-dark py-0.5">
+            <span className="font-semibold">{f.sensor_label}</span>
+            {sensorIdentity(f) && <span className="text-text-light"> ({sensorIdentity(f)})</span>}
+            <span className="capitalize text-text-light"> · {f.parameter}</span> — {f.reason}
+          </div>
+        ))}
+      </div>
+    )}
     <div className="rounded-lg overflow-hidden mt-2" style={{ border: '1px solid var(--color-border)' }}>
       {records.map((r, i) => {
         const unit      = CAL_PARAM_UNIT[r.parameter] ?? '';
-        const passed    = r.within_tolerance !== false;
-        const corrected = !passed && r.post_cal_within_tolerance;
-        const flagged   = !passed && !r.post_cal_within_tolerance;
-        const outcomeColor  = flagged ? '#E53935' : corrected ? '#FB8C00' : '#43A047';
-        const outcomeLabel  = flagged ? 'Flagged' : corrected ? 'Corrected' : 'Pass';
+        const outcomeLabel = CAL_ACTION_LABEL[r.action_taken] ?? (r.within_tolerance === false ? 'Out of tolerance' : 'Passed');
         const calDate = r.calibration_date
           ? new Date(r.calibration_date).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })
           : '—';
@@ -99,7 +113,7 @@ function CalibrationHistoryPanel({ stationId }) {
                 {calibrationSensorIdentity(r) && <span className="text-[10px] text-text-light ml-1.5">{calibrationSensorIdentity(r)}</span>}
               </div>
               <span className="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-full"
-                style={{ background: outcomeColor + '18', color: outcomeColor }}>
+                style={{ background: 'var(--color-surface-dark)', color: 'var(--color-text-med)' }}>
                 {outcomeLabel}
               </span>
             </div>
@@ -107,6 +121,10 @@ function CalibrationHistoryPanel({ stationId }) {
               {r.as_found_error != null && (
                 <span>Error: {r.as_found_error >= 0 ? '+' : ''}{Number(r.as_found_error).toFixed(3)}{unit}</span>
               )}
+              {r.raw_error != null && r.offset_before != null && Number(r.offset_before) !== 0 && (
+                <span>Without offset: {r.raw_error >= 0 ? '+' : ''}{Number(r.raw_error).toFixed(3)}{unit}</span>
+              )}
+              {offsetText(r, unit) && <span>{offsetText(r, unit)}</span>}
               <span>{r.kit_label} {r.transfer_std_model} (S/N: {r.transfer_std_serial})</span>
             </div>
             <div className="text-[10px] text-text-light mt-0.5">
@@ -120,6 +138,7 @@ function CalibrationHistoryPanel({ stationId }) {
         );
       })}
     </div>
+    </>
   );
 }
 

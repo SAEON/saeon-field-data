@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
-import { createReading, deleteReading, getVisit, createInstrumentRecord, getStationSensors, getTransferStandards, createCalibrationCheck, getCalibrationChecks, getMetInstrumentTypes, assignSensor, decommissionSensor, getStationById, getStationPowerSpecs } from '../services/api.js';
+import { createReading, deleteReading, getVisit, createInstrumentRecord, getStationSensors, getTransferStandards, createCalibrationCheck, getCalibrationChecks, getMetInstrumentTypes, assignSensor, decommissionSensor, getStationById, getStationPowerSpecs, getStationOffsets, getStationLastVisit, getInstrumentHistory } from '../services/api.js';
 import { useOfflineQueue } from '../hooks/useOfflineQueue.js';
 import { enqueueOp, getOps, overlayPending, onOpSynced, retryAllFailed } from '../services/outbox.js';
 import { isTransientError } from '../services/api.js';
 import { MAINT_FIELDS, maintType, parseMaintType } from '../utils/sensorMaintenance.js';
 import { sensorIdentity, hasIdentifier } from '../utils/sensorIdentity.js';
+import { cacheSet } from '../services/refCache.js';
+import CopyLastPill from '../components/CopyLastPill.jsx';
+import { lastSensorAnswers, latestInstrument, rememberTransferStandard, lastTransferStandard } from '../utils/prefill.js';
+import { isRoutine, purposesFromReadings, readingsComplete, scopedSensors, scopeIsEmpty, addToScope, addAllToScope, removeFromScope, replaceInScope } from '../utils/visitPurpose.js';
+import { CHOICES, evaluateCheck, buildCheckBody, outcomeText, offsetText } from '../utils/calibration.js';
 
 const REQUIRED_TYPES = {
   rainfall:           ['logger_activities', 'raingauge_activities', 'gauge_condition', 'overall_site_condition'],
@@ -467,6 +472,7 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
   const [rgCalSerial,       setRgCalSerial]       = useState('');
   const [rgCalAsset,        setRgCalAsset]        = useState('');
   const [rgCalMm,           setRgCalMm]           = useState('');
+  const [gaugePrefilled,    setGaugePrefilled]    = useState(false);
   const [rgCalExpectedTips, setRgCalExpectedTips] = useState('');
   const [rgCalActualTips,   setRgCalActualTips]   = useState('');
   const [rgNotes,       setRgNotes]       = useState(ex('raingauge_problem_notes')?.value_text ?? '');
@@ -497,6 +503,19 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
       return next;
     });
   }
+
+  // The gauge on site, from its latest instrument record, fills the calibration card (only empty fields)
+  useEffect(() => {
+    if (!stationId) return;
+    getInstrumentHistory(stationId).then(h => {
+      const g = latestInstrument(h, 'raingauge');
+      if (!g) return;
+      setRgCalSerial(v => v || g.serial_no);
+      setRgCalAsset(v => v || g.asset_no);
+      setRgCalMm(v => v || (g.mm_per_tip != null ? String(g.mm_per_tip) : ''));
+      setGaugePrefilled(true);
+    }).catch(() => {});
+  }, [stationId]);
 
   const hasLoggerDeploy       = loggerActs.has('logger_deploy');
   const hasLoggerMaintenance  = loggerActs.has('logger_maintenance') || loggerActs.has('logger_download');
@@ -574,8 +593,12 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
     }
   }
 
-  const canSave = loggerActs.size > 0 && rgActs.size > 0 && gaugeCondition.size > 0 && !!siteCondition
-    && (hasRgProblem || didTip !== null);
+  // Collecting data (a download) needs the full set; any other purpose needs the work done and the site condition
+  const routine = isRoutine([...loggerActs, ...rgActs]);
+  const canSave = !routine
+    ? (loggerActs.size > 0 || rgActs.size > 0) && !!siteCondition
+    : loggerActs.size > 0 && rgActs.size > 0 && gaugeCondition.size > 0 && !!siteCondition
+      && (hasRgProblem || didTip !== null);
 
   return (
     <>
@@ -626,6 +649,9 @@ function RainfallForm({ saved, onSave, visitId, stationId }) {
           <div className="text-[12px] font-semibold text-text-dark mb-2">
             {rgActs.has('raingauge_calibrate') ? 'Calibration details' : 'Calibration check'}
           </div>
+          {gaugePrefilled && (
+            <div className="text-[11px] text-text-light mb-2">Filled from the gauge on record. Change anything that differs.</div>
+          )}
           <div className="flex flex-col gap-2">
             <input type="text" value={rgCalSerial} onChange={e => setRgCalSerial(e.target.value)}
               placeholder="Gauge serial no."
@@ -1092,8 +1118,10 @@ function GroundwaterForm({ saved, onSave, stationId }) {
     saves.push(() => onSave({ reading_type: 'logger_activities', value_text: JSON.stringify([...loggerActs]), recorded_at: now }));
     if (hasMaintenance && maintChecks.size > 0)
       saves.push(() => onSave({ reading_type: 'logger_maintenance_checks', value_text: JSON.stringify([...maintChecks]), recorded_at: now }));
-    saves.push(() => onSave({ reading_type: 'dipper_depth', value_numeric: parseFloat(dipperDepth), unit: 'm', recorded_at: now }));
-    saves.push(() => onSave({ reading_type: 'dipper_time', value_text: dipperTime, recorded_at: now }));
+    if (dipperDepth !== '' && dipperTime) {   // optional in a maintenance visit
+      saves.push(() => onSave({ reading_type: 'dipper_depth', value_numeric: parseFloat(dipperDepth), unit: 'm', recorded_at: now }));
+      saves.push(() => onSave({ reading_type: 'dipper_time', value_text: dipperTime, recorded_at: now }));
+    }
     if (casingVerify)
       saves.push(() => onSave({ reading_type: 'casing_ht_verification', value_numeric: parseFloat(casingVerify), unit: 'm', recorded_at: now }));
     if (waterColour)
@@ -1110,7 +1138,9 @@ function GroundwaterForm({ saved, onSave, stationId }) {
     }
   }
 
-  const canSave = !locked && loggerActs.size > 0 && !!dipperDepth && !!dipperTime && !!siteCond;
+  // The dipper reading goes with a download; other purposes need only the work done and the site condition
+  const canSave = !locked && loggerActs.size > 0 && !!siteCond
+    && (!isRoutine([...loggerActs]) || (!!dipperDepth && !!dipperTime));
 
   const WATER_COLOURS = [
     { value: 'clear',  label: 'Clear' },
@@ -1332,6 +1362,7 @@ function MetForm({ saved, onSave, onDelete, stationId, onActsChange, stagedConfi
   const [battConn,    setBattConn]    = useState(num('battery_voltage_connected'));
   const [siteCond,  setSiteCond]  = useState(ex('overall_site_condition')?.value_text ?? null);
   const [prefilled, setPrefilled] = useState({});
+  const maint = !isRoutine([...metActs]);   // not collecting data: the power system and cables are not asked for
 
   const isAlreadySaved = REQUIRED_TYPES.met.every(t => !!ex(t));
   const [saveState, setSaveState] = useState(isAlreadySaved ? 'saved' : 'idle');
@@ -1357,6 +1388,22 @@ function MetForm({ saved, onSave, onDelete, stationId, onActsChange, stagedConfi
       .catch(() => {});
   }, [stationId]);
 
+  // The previous visit's answers to the condition questions, offered once as a starting point
+  const [lastVisit, setLastVisit] = useState(null);
+  useEffect(() => {
+    if (!isAlreadySaved && stationId) getStationLastVisit(stationId).then(setLastVisit).catch(() => {});
+  }, [stationId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lastCtrl   = lastVisit?.readings?.charge_controller_condition?.value_text;
+  const lastCables = lastVisit?.readings?.cables_condition?.value_text;
+  const lastCtrlOk = lastCtrl ? (LEGACY_COND[lastCtrl] ?? (POWER_COND.some(([k]) => k === lastCtrl) ? lastCtrl : null)) : null;
+  const lastCablesOk = lastCables ? normYesNo(lastCables) : null;
+  const canCopyLast = !locked && ((lastCtrlOk && !ctrlCond) || (lastCablesOk && !cablesCond));
+  function copyLast() {
+    if (lastCtrlOk && !ctrlCond) setCtrlCond(lastCtrlOk);
+    if (lastCablesOk && !cablesCond) setCablesCond(lastCablesOk);
+    setSaveState('idle');
+  }
+
   function toggleAct(value) {
     if (locked) return;
     const next = new Set(metActs);
@@ -1379,15 +1426,17 @@ function MetForm({ saved, onSave, onDelete, stationId, onActsChange, stagedConfi
     const numeric = (reading_type, v, unit) => put({ reading_type, value_numeric: parseFloat(v), unit, recorded_at: now });
     try {
       await put({ reading_type: 'met_activities', value_text: JSON.stringify([...metActs]), recorded_at: now });
-      await numeric('solar_panel_capacity_w', solarCap, 'W');
-      await numeric('solar_panel_voltage', solarOcv, 'V');
-      await put({ reading_type: 'charge_controller_model', value_text: ctrlModel.trim(), recorded_at: now });
-      await numeric('charge_controller_voltage', ctrlOut, 'V');
-      await put({ reading_type: 'charge_controller_condition', value_text: ctrlCond, recorded_at: now });
-      await numeric('battery_capacity_ah', battAh, 'Ah');
-      await numeric('battery_voltage_disconnected', battDisc, 'V');
-      await numeric('battery_voltage_connected', battConn, 'V');
-      await put({ reading_type: 'cables_condition', value_text: cablesCond, recorded_at: now });
+      if (!maint) {
+        await numeric('solar_panel_capacity_w', solarCap, 'W');
+        await numeric('solar_panel_voltage', solarOcv, 'V');
+        await put({ reading_type: 'charge_controller_model', value_text: ctrlModel.trim(), recorded_at: now });
+        await numeric('charge_controller_voltage', ctrlOut, 'V');
+        await put({ reading_type: 'charge_controller_condition', value_text: ctrlCond, recorded_at: now });
+        await numeric('battery_capacity_ah', battAh, 'Ah');
+        await numeric('battery_voltage_disconnected', battDisc, 'V');
+        await numeric('battery_voltage_connected', battConn, 'V');
+        await put({ reading_type: 'cables_condition', value_text: cablesCond, recorded_at: now });
+      }
       await put({ reading_type: 'overall_site_condition', value_text: siteCond, recorded_at: now });
 
       // Sensor "No change" confirmations are staged on the page and written here, with the rest of the form.
@@ -1408,9 +1457,11 @@ function MetForm({ saved, onSave, onDelete, stationId, onActsChange, stagedConfi
   }
 
   const isNum = v => v !== '' && !isNaN(parseFloat(v));
-  const canSave = !locked && metActs.size > 0
-    && isNum(solarCap) && isNum(solarOcv) && ctrlModel.trim() !== '' && isNum(ctrlOut) && !!ctrlCond
-    && isNum(battAh) && isNum(battDisc) && isNum(battConn) && !!cablesCond && !!siteCond && extraReady;
+  const canSave = !locked && metActs.size > 0 && !!siteCond && extraReady
+    && (maint || (
+      isNum(solarCap) && isNum(solarOcv) && ctrlModel.trim() !== '' && isNum(ctrlOut) && !!ctrlCond
+      && isNum(battAh) && isNum(battDisc) && isNum(battConn) && !!cablesCond
+    ));
 
   return (
     <>
@@ -1432,11 +1483,17 @@ function MetForm({ saved, onSave, onDelete, stationId, onActsChange, stagedConfi
 
       <div style={{ borderTop: '1px solid var(--color-border)', marginBottom: '0.75rem' }} />
 
+      {!maint && (<>
       <div className="mb-3">
         <div className="text-[11px] font-bold text-text-light uppercase tracking-wide mb-2" style={{ letterSpacing: '0.06em' }}>Power system</div>
+        {canCopyLast && (
+          <div className="mb-2">
+            <CopyLastPill onClick={copyLast} />
+          </div>
+        )}
         <div className="flex flex-col gap-2.5">
-          <PowerNumRow label="Solar panel capacity" val={solarCap} onChange={touch(setSolarCap)} unit="W" ph="30" locked={locked} fromLast={prefilled.solar_panel_capacity_w} />
-          <PowerNumRow label="Solar panel voltage (open circuit)" val={solarOcv} onChange={touch(setSolarOcv)} unit="V" ph="21.8" locked={locked} />
+          <PowerNumRow label="Solar panel capacity" val={solarCap} onChange={touch(setSolarCap)} unit="W" locked={locked} fromLast={prefilled.solar_panel_capacity_w} />
+          <PowerNumRow label="Solar panel voltage (open circuit)" val={solarOcv} onChange={touch(setSolarOcv)} unit="V" locked={locked} />
 
           <div className="flex items-center justify-between gap-3">
             <div className="text-[12px] font-semibold text-text-dark" style={{ minWidth: 150 }}>
@@ -1449,7 +1506,7 @@ function MetForm({ saved, onSave, onDelete, stationId, onActsChange, stagedConfi
               style={{ width: 150, height: 34, fontSize: 12, flexShrink: 0 }} />
           </div>
 
-          <PowerNumRow label="Charge controller output voltage" val={ctrlOut} onChange={touch(setCtrlOut)} unit="V" ph="13.2" locked={locked} />
+          <PowerNumRow label="Charge controller output voltage" val={ctrlOut} onChange={touch(setCtrlOut)} unit="V" locked={locked} />
 
           <div className="flex items-center justify-between gap-3">
             <div className="text-[12px] font-semibold text-text-dark" style={{ minWidth: 150 }}>
@@ -1463,9 +1520,9 @@ function MetForm({ saved, onSave, onDelete, stationId, onActsChange, stagedConfi
             </select>
           </div>
 
-          <PowerNumRow label="Battery capacity" val={battAh} onChange={touch(setBattAh)} unit="Ah" ph="9" locked={locked} fromLast={prefilled.battery_capacity_ah} />
-          <PowerNumRow label="Battery voltage, charge controller disconnected" val={battDisc} onChange={touch(setBattDisc)} unit="V" ph="13.16" locked={locked} />
-          <PowerNumRow label="Battery voltage, charge controller connected" val={battConn} onChange={touch(setBattConn)} unit="V" ph="13.18" locked={locked} />
+          <PowerNumRow label="Battery capacity" val={battAh} onChange={touch(setBattAh)} unit="Ah" locked={locked} fromLast={prefilled.battery_capacity_ah} />
+          <PowerNumRow label="Battery voltage, charge controller disconnected" val={battDisc} onChange={touch(setBattDisc)} unit="V" locked={locked} />
+          <PowerNumRow label="Battery voltage, charge controller connected" val={battConn} onChange={touch(setBattConn)} unit="V" locked={locked} />
         </div>
       </div>
 
@@ -1486,6 +1543,8 @@ function MetForm({ saved, onSave, onDelete, stationId, onActsChange, stagedConfi
       </div>
 
       <div style={{ borderTop: '1px solid var(--color-border)', marginBottom: '0.75rem' }} />
+
+      </>)}
 
       <div className="mb-4">
         <div className="text-[13px] font-bold text-text-dark mb-2">
@@ -1528,7 +1587,7 @@ function MetForm({ saved, onSave, onDelete, stationId, onActsChange, stagedConfi
 // ── Met sensor confirmation ───────────────────────────────────────────────────
 
 
-function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSave, onAllConfirmed, onSensorsChanged, onStaged }) {
+function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSave, onAllConfirmed, onSensorsChanged, onStaged, sensorScope = null, onScopeChange }) {
   const [sensors,    setSensors]    = useState(null);
   const [types,      setTypes]      = useState([]);
   const [cardState,  setCardState]  = useState({});
@@ -1556,10 +1615,12 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
 
   useEffect(() => {
     if (!sensors) return;
-    const allDone = sensors.every(s => ['confirmed', 'saved'].includes(cardState[s.id]));
-    onAllConfirmed(sensors.length === 0 || allDone);
-    onStaged(sensors.filter(s => cardState[s.id] === 'confirmed').map(s => s.id));
-  }, [cardState, sensors]);
+    // In a maintenance visit only the chosen sensors need confirming (none chosen = not done)
+    const list = scopedSensors(sensors, sensorScope);
+    const allDone = list.every(s => ['confirmed', 'saved'].includes(cardState[s.id]));
+    onAllConfirmed(scopeIsEmpty(sensorScope) ? false : (list.length === 0 || allDone));
+    onStaged(list.filter(s => cardState[s.id] === 'confirmed').map(s => s.id));
+  }, [cardState, sensors, sensorScope]);
 
   function setField(sensorId, field, value) {
     setChangeData(prev => ({ ...prev, [sensorId]: { ...prev[sensorId], [field]: value } }));
@@ -1602,6 +1663,7 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
     try {
       if (data.mode === 'decommission') {
         await decommissionSensor(stationId, sensor.id);
+        onScopeChange?.(prev => removeFromScope(prev, sensor.id));
       } else {
         const typeId = data.mode === 'swap' ? sensor.instrument_type_id : parseInt(data.newTypeId, 10);
         created = await assignSensor(stationId, {
@@ -1629,7 +1691,10 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
     }
 
     // The change is on the server from here on. The confirmation reading queues itself if needed.
-    if (created?.id) await persistConfirmation(created.id, 'changed');
+    if (created?.id) {
+      onScopeChange?.(prev => replaceInScope(prev, sensor.id, created.id));   // the new sensor takes the old one's place in the scope
+      await persistConfirmation(created.id, 'changed');
+    }
     try {
       const fresh = await getStationSensors(stationId);
       setSensors(fresh);
@@ -1648,6 +1713,8 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
 
   if (error) return <div className="form-card text-[12px] text-error">{error}</div>;
   if (!sensors) return <div className="form-card text-[12px] text-text-light">Loading deployed sensors…</div>;
+  if (scopeIsEmpty(sensorScope)) return null;   // the picker above asks which sensors first
+  const shown = scopedSensors(sensors, sensorScope);
 
   if (sensors.length === 0) {
     return (
@@ -1662,7 +1729,7 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
       <div className="flex items-center gap-1.5 pb-2 pt-1 text-[12px] font-semibold text-text-dark">
         Confirm deployed sensors
       </div>
-      {sensors.map(sensor => {
+      {shown.map(sensor => {
         const state = cardState[sensor.id];
         const data  = changeData[sensor.id] || {};
 
@@ -1838,14 +1905,19 @@ function MetSensorConfirmationSection({ stationId, visitId, saved, locked, onSav
 
 const PARAM_UNIT = { temperature: '°C', humidity: '%', pressure: ' hPa' };
 
-function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, existingCheck }) {
-  const [tsId,           setTsId]           = useState('');
+function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, existingCheck, previousOffset = 0 }) {
+  // the kit used last time for this parameter on this device, if it is still on offer
+  const [tsId,           setTsId]           = useState(() => {
+    const last = lastTransferStandard(card.parameter);
+    return transferStandards.some(ts => String(ts.id) === last && Array.isArray(ts.parameters) && ts.parameters.includes(card.parameter)) ? last : '';
+  });
   const [tsReading,      setTsReading]      = useState('');
   const [sensorReading,  setSensorReading]  = useState('');
   const [offsetApplied,  setOffsetApplied]  = useState('');
   const [postCalReading, setPostCalReading] = useState('');
   const [verifyReading,  setVerifyReading]  = useState('');
   const [remarks,        setRemarks]        = useState('');
+  const [choice,         setChoice]         = useState(null);   // what was done after the as-found check
   const [saveState,      setSaveState]      = useState('idle');
   const [savedCheck,     setSavedCheck]     = useState(existingCheck ?? null);
 
@@ -1868,56 +1940,41 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
   const postNum   = postCalReading !== '' ? Number(postCalReading) : null;
   const verifyNum = verifyReading  !== '' ? Number(verifyReading)  : null;
   const asLeftError = verifyNum != null && postNum != null ? verifyNum - postNum : null;
-  const phase2HasReadings = offsetApplied !== '' && postNum != null && verifyNum != null;
+  const phase2Complete = postNum != null && verifyNum != null;
   const phase2Pass =
     asLeftError == null ? null
     : tolerance  != null ? Math.abs(asLeftError) <= tolerance
     : true;
 
-  let canSave = false;
-  let saveLabel = 'Save';
-  if (savedCheck) {
-    saveLabel = '✓ Saved';
-  } else if (saveState === 'saving') {
-    saveLabel = 'Saving…';
-  } else if (phase1HasReadings) {
-    if (phase1Pass !== false) {
-      canSave = true;
-      saveLabel = tolerance != null ? 'Save — Passed' : 'Save';
-    } else if (!phase2HasReadings) {
-      saveLabel = 'Complete correction below';
-    } else if (phase2Pass !== false) {
-      canSave = true;
-      saveLabel = 'Save — Corrected & Passed';
-    } else if (!remarks.trim()) {
-      saveLabel = 'Add remarks to save';
-    } else {
-      canSave = true;
-      saveLabel = 'Save — Flagged (out of tolerance)';
-    }
-  }
+  const decision = evaluateCheck({
+    hasReadings: phase1HasReadings, phase1Pass, choice,
+    offsetEntered: offsetApplied !== '', phase2Complete, phase2Pass, remarks,
+  });
+  const canSave   = !savedCheck && saveState !== 'saving' && decision.canSave;
+  const saveLabel = savedCheck ? '✓ Saved' : saveState === 'saving' ? 'Saving…' : decision.label;
+  const showOffsetBlock = choice === 'offset';
 
   async function handleSave() {
     if (!canSave) return;
     setSaveState('saving');
-    const body = {
-      station_sensor_id,
-      transfer_standard_id: parseInt(tsId, 10),
-      parameter,
-      calibration_date:  new Date().toISOString().slice(0, 10),
-      transfer_std_reading:               tsNum,
-      sensor_reading:                     snNum,
-      correction_applied:                 phase1Pass === false,
-      offset_applied:                     offsetApplied !== '' ? Number(offsetApplied) : null,
-      station_reading_post_cal:           postNum,
-      transfer_std_verification_reading:  verifyNum,
-      remarks: remarks.trim() || null,
-    };
+    const body = buildCheckBody({
+      base: {
+        station_sensor_id,
+        transfer_standard_id: parseInt(tsId, 10),
+        parameter,
+        calibration_date:  new Date().toISOString().slice(0, 10),
+        performed_at:      new Date().toISOString(),     // device time: kept even if the check only syncs later
+        transfer_std_reading: tsNum,
+        sensor_reading:       snNum,
+      },
+      action: decision.action, offsetApplied, postNum, verifyNum, remarks,
+    });
     try {
       let check;
       try {
         if (!navigator.onLine) throw Object.assign(new Error('offline'), { network: true });
         check = await createCalibrationCheck(visitId, body);
+        rememberTransferStandard(parameter, tsId);
       } catch (err) {
         if (!isTransientError(err)) throw err;
         // No signal: keep the check on this device; the server works out tolerance when it syncs
@@ -1925,13 +1982,16 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
         check = {
           calibration_date: body.calibration_date,
           within_tolerance: phase1Pass !== false,
-          post_cal_within_tolerance: phase2Pass !== false,
+          post_cal_within_tolerance: body.action_taken === 'offset_applied' ? phase2Pass !== false : null,
+          action_taken: body.action_taken,
+          offset_applied: body.offset_applied ?? null,
+          offset_before: previousOffset,
           pending: true,
         };
       }
       setSavedCheck(check);
       setSaveState('saved');
-      onSaved();
+      onSaved(body);
     } catch {
       setSaveState('error');
     }
@@ -1952,9 +2012,8 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
   }
 
   if (savedCheck) {
-    const outcome = savedCheck.within_tolerance === false
-      ? (savedCheck.post_cal_within_tolerance ? 'Corrected — within tolerance' : 'Flagged: outside tolerance')
-      : 'Within tolerance';
+    const outcome = outcomeText(savedCheck);
+    const offsetLine = offsetText(savedCheck, unit);
     const calDate = savedCheck.calibration_date
       ? new Date(savedCheck.calibration_date).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })
       : null;
@@ -1968,6 +2027,7 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
           {savedCheck.pending ? '✓ Saved on this device — will sync when connected' : '✓ Calibration check saved'}
         </div>
         <div className="text-[11px] text-text-light mt-0.5">{outcome}</div>
+        {offsetLine && <div className="text-[11px] text-text-light mt-0.5">{offsetLine}</div>}
         {(savedCheck.technician_name || calDate) && (
           <div className="text-[10px] text-text-light mt-1">
             {calDate && <span>{calDate}</span>}
@@ -2042,53 +2102,92 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
         </div>
       )}
 
-      {phase1Pass === false && (
+      {phase1HasReadings && (
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
-          <div className="text-[11px] text-warning font-medium mb-2">
-            Out of tolerance — apply offset in datalogger, then record the post-correction readings below.
-          </div>
-          <div className="grid grid-cols-3 gap-2 mb-1">
-            <div>
-              <label className="text-[11px] text-text-light block mb-1">Offset applied</label>
-              <input
-                type="number" step="any" value={offsetApplied}
-                onChange={e => setOffsetApplied(e.target.value)}
-                placeholder="0.000"
-                className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] text-text-light block mb-1">Station (post-cal)</label>
-              <input
-                type="number" step="any" value={postCalReading}
-                onChange={e => setPostCalReading(e.target.value)}
-                placeholder="0.000"
-                className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] text-text-light block mb-1">Transfer std (verify)</label>
-              <input
-                type="number" step="any" value={verifyReading}
-                onChange={e => setVerifyReading(e.target.value)}
-                placeholder="0.000"
-                className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none"
-              />
-            </div>
-          </div>
-          {asLeftError != null && (
-            <div className="flex items-center mb-2 text-[11px] text-text-light">
-              Post-cal error: <ErrorBadge error={asLeftError} pass={phase2Pass} />
+          {phase1Pass === false ? (
+            <>
+              <div className="text-[11px] text-text-light mb-1.5">Choose option</div>
+              <div className="flex flex-col gap-1.5 mb-1">
+                {CHOICES.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => setChoice(choice === c.id ? null : c.id)}
+                    className={choice === c.id ? 'bg-navy text-white' : 'bg-white text-text-med'}
+                    style={{ fontSize: 12, minHeight: 32, padding: '6px 12px', textAlign: 'left', borderRadius: 8, fontWeight: 600,
+                             border: choice === c.id ? '1.5px solid var(--color-navy)' : '1.5px solid #D7DCE3' }}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+              {choice === 'replace' && (
+                <div className="text-[11px] text-text-light mt-1.5">
+                  Record the swap itself under Instrument change, so the new sensor's serial or asset number is kept.
+                </div>
+              )}
+            </>
+          ) : (
+            <button
+              onClick={() => setChoice(choice === 'offset' ? null : 'offset')}
+              className="bg-transparent border-none p-0 text-[11px] font-semibold"
+              style={{ color: 'var(--color-navy)' }}
+            >
+              {choice === 'offset' ? 'Cancel offset' : 'Apply an offset anyway (optional)'}
+            </button>
+          )}
+
+          {showOffsetBlock && (
+            <div className="mt-2">
+              <div className="grid grid-cols-3 gap-2 mb-1">
+                <div>
+                  <label className="text-[11px] text-text-light block mb-1">Offset now in the datalogger</label>
+                  <input
+                    type="number" step="any" value={offsetApplied}
+                    onChange={e => setOffsetApplied(e.target.value)}
+                    className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-text-light block mb-1">Station (post-cal)</label>
+                  <input
+                    type="number" step="any" value={postCalReading}
+                    onChange={e => setPostCalReading(e.target.value)}
+                    className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-text-light block mb-1">Transfer std (verify)</label>
+                  <input
+                    type="number" step="any" value={verifyReading}
+                    onChange={e => setVerifyReading(e.target.value)}
+                    className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none"
+                  />
+                </div>
+              </div>
+              <div className="text-[11px] text-text-light mb-2">
+                Enter the total offset set in the logger now (it replaces the previous one: {previousOffset >= 0 ? '+' : ''}{previousOffset}{unit}).
+                {offsetApplied !== '' && Number.isFinite(Number(offsetApplied)) && (
+                  <> Change: {Number(offsetApplied) - previousOffset >= 0 ? '+' : ''}{+(Number(offsetApplied) - previousOffset).toFixed(4)}{unit}.</>
+                )}
+              </div>
+              {asLeftError != null && (
+                <div className="flex items-center mb-2 text-[11px] text-text-light">
+                  Post-cal error: <ErrorBadge error={asLeftError} pass={phase2Pass} />
+                </div>
+              )}
             </div>
           )}
-          {phase2Pass === false && (
-            <div>
-              <label className="text-[11px] text-text-light block mb-1">Remarks <span className="text-warning">*</span></label>
+
+          {choice != null && (
+            <div className="mt-1">
+              <label className="text-[11px] text-text-light block mb-1">
+                Remarks{choice === 'offset' && phase2Pass === false ? <span className="text-warning"> *</span> : ' (optional)'}
+              </label>
               <textarea
                 value={remarks}
                 onChange={e => setRemarks(e.target.value)}
                 rows={2}
-                placeholder="Describe what was done and why it remained out of tolerance…"
+                placeholder={choice === 'offset' ? 'Describe what was done, and why it stayed out of tolerance if it did…' : 'Anything worth noting for this sensor…'}
                 className="w-full rounded-lg px-2 py-1.5 text-[12px] bg-surface-dark text-text-dark border-none resize-none"
               />
             </div>
@@ -2096,14 +2195,17 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
         </div>
       )}
 
-      <button
-        onClick={handleSave}
-        disabled={!canSave || saveState === 'saving'}
-        className="mt-3 w-full h-9 rounded-xl text-[12px] font-semibold border-none transition-colors"
-        style={{ background: canSave ? 'var(--color-navy)' : '#BDBDBD', color: '#fff' }}
-      >
-        {saveLabel}
-      </button>
+      {/* After a failed check there is nothing to save until an option is chosen, so no button is shown yet */}
+      {!(phase1HasReadings && phase1Pass === false && choice == null) && (
+        <button
+          onClick={handleSave}
+          disabled={!canSave || saveState === 'saving'}
+          className="mt-3 w-full h-9 rounded-xl text-[12px] font-semibold border-none transition-colors"
+          style={{ background: canSave ? 'var(--color-navy)' : '#BDBDBD', color: '#fff' }}
+        >
+          {saveLabel}
+        </button>
+      )}
       {saveState === 'error' && (
         <div className="text-[11px] text-error mt-1 text-center">Save failed — tap to retry</div>
       )}
@@ -2113,16 +2215,17 @@ function CalibrationCheckCard({ card, transferStandards, visitId, onSaved, exist
 
 // ── Met calibration section ────────────────────────────────────────────────────
 
-function MetCalibrationSection({ visitId, stationId, onComplete }) {
+function MetCalibrationSection({ visitId, stationId, onComplete, sensorScope = null }) {
   const [sensors,    setSensors]    = useState(null);
   const [standards,  setStandards]  = useState(null);
   const [existing,   setExisting]   = useState([]);
+  const [offsets,    setOffsets]    = useState([]);   // offset now set in the datalogger, per sensor and parameter
   const [savedCards, setSavedCards] = useState(new Set());
   const [error,      setError]      = useState(null);
 
   function buildRequired(sensorList) {
     const cards = [];
-    for (const s of (sensorList || [])) {
+    for (const s of scopedSensors(sensorList || [], sensorScope)) {
       if (!s.requires_transfer_std || !s.transfer_std_parameters?.length) continue;
       for (const param of s.transfer_std_parameters) {
         cards.push({
@@ -2143,8 +2246,10 @@ function MetCalibrationSection({ visitId, stationId, onComplete }) {
       getStationSensors(stationId),
       getTransferStandards(),
       getCalibrationChecks(visitId),
+      getStationOffsets(stationId).catch(() => []),    // only a hint on the card: never blocks the checks
     ])
-      .then(([s, ts, checks]) => {
+      .then(([s, ts, checks, offs]) => {
+        setOffsets(offs || []);
         setSensors(s);
         setStandards(ts);
         setExisting(checks);
@@ -2157,10 +2262,22 @@ function MetCalibrationSection({ visitId, stationId, onComplete }) {
   useEffect(() => {
     if (!sensors) return;
     const required = buildRequired(sensors);
-    onComplete(required.length === 0 || required.every(c => savedCards.has(c.key)));
-  }, [savedCards, sensors]);
+    onComplete(!scopeIsEmpty(sensorScope) && (required.length === 0 || required.every(c => savedCards.has(c.key))));
+  }, [savedCards, sensors, sensorScope]);
 
-  function handleCardSaved(key) {
+  function handleCardSaved(card, body) {
+    const key = card.key;
+    // Keep the saved offsets current, so the next check on this sensor (even offline) shows the right "previous" value
+    if (body?.action_taken === 'offset_applied') {
+      setOffsets(prev => {
+        const next = [
+          ...prev.filter(o => !(o.station_sensor_id === card.station_sensor_id && o.parameter === card.parameter)),
+          { station_sensor_id: card.station_sensor_id, parameter: card.parameter, offset: body.offset_applied },
+        ];
+        cacheSet(`station:${stationId}:offsets`, next);
+        return next;
+      });
+    }
     setSavedCards(prev => {
       const next = new Set(prev);
       next.add(key);
@@ -2195,13 +2312,65 @@ function MetCalibrationSection({ visitId, stationId, onComplete }) {
           card={card}
           transferStandards={standards}
           visitId={visitId}
-          onSaved={() => handleCardSaved(card.key)}
+          onSaved={body => handleCardSaved(card, body)}
+          previousOffset={offsets.find(o => o.station_sensor_id === card.station_sensor_id && o.parameter === card.parameter)?.offset ?? 0}
           existingCheck={existing.find(c =>
             c.station_sensor_id === card.station_sensor_id && c.parameter === card.parameter
           ) ?? null}
         />
       ))}
     </>
+  );
+}
+
+// ── Which sensors the work was done on (maintenance visits, met stations) ────
+
+function SensorScopePicker({ stationId, scope, onChange }) {
+  const [sensors, setSensors] = useState(null);
+
+  useEffect(() => {
+    getStationSensors(stationId).then(setSensors).catch(() => setSensors([]));
+  }, [stationId]);
+
+  if (!sensors) return null;
+  const chosen    = scopedSensors(sensors, scope);
+  const available = sensors.filter(s => !(scope || []).includes(s.id));
+  const nameOf    = s => (sensorIdentity(s) ? `${s.label} (${sensorIdentity(s)})` : s.label);
+
+  return (
+    <div className="form-card">
+      <div className="text-[12px] font-semibold text-text-dark mb-2">
+        Choose sensor <span className="text-warning text-[11px]">*</span>
+      </div>
+      {chosen.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {chosen.map(s => (
+            <span key={s.id} className="inline-flex items-center gap-1.5 rounded-lg bg-surface-dark text-text-dark"
+              style={{ fontSize: 12, padding: '4px 8px', fontWeight: 600 }}>
+              {nameOf(s)}
+              <button onClick={() => onChange(prev => removeFromScope(prev, s.id))} aria-label={`Remove ${s.label}`}
+                className="bg-transparent border-none p-0 text-text-light" style={{ fontSize: 13, lineHeight: 1 }}>✕</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <select
+        value=""
+        onChange={e => {
+          if (e.target.value === 'all') { onChange(prev => addAllToScope(prev, sensors)); return; }
+          const id = parseInt(e.target.value, 10);
+          if (id) onChange(prev => addToScope(prev, id));
+        }}
+        className="w-full h-9 rounded-lg px-2 text-[12px] bg-surface-dark text-text-dark border-none"
+      >
+        <option value="">Select…</option>
+        {available.length > 1 && <option value="all">All sensors</option>}
+        {available.map(s => <option key={s.id} value={s.id}>{nameOf(s)}</option>)}
+      </select>
+      {chosen.length === 0 && (
+        <div className="text-[11px] text-text-light mt-1.5">Choose at least one sensor to continue.</div>
+      )}
+    </div>
   );
 }
 
@@ -2219,7 +2388,7 @@ function sensorMaintComplete(sensor, saved) {
   });
 }
 
-function SensorMaintenanceCard({ sensor, saved, onSave, onDelete }) {
+function SensorMaintenanceCard({ sensor, saved, onSave, onDelete, lastVisit = null }) {
   const fields = sensorFields(sensor);
   const complete = sensorMaintComplete(sensor, saved);
 
@@ -2286,6 +2455,14 @@ function SensorMaintenanceCard({ sensor, saved, onSave, onDelete }) {
     return v ? saveValue('remarks', { value_text: v }) : clearValue('remarks');
   }
 
+  // Last visit's answers for this sensor's condition questions (never events or measurements), only into empty fields
+  const lastAnswers = lastSensorAnswers(lastVisit, sensor.id, fields.map(f => f.key));
+  const copyable = fields.filter(f => f.options && lastAnswers[f.key] && !values[f.key]
+    && f.options.some(([v]) => v === lastAnswers[f.key]) && visible(f));
+  async function copyLast() {
+    for (const f of copyable) await changeSelect(f, lastAnswers[f.key]);
+  }
+
   const ctlStyle = { width: 150, height: 34, fontSize: 12, flexShrink: 0 };
   const selectCls = 'rounded-lg px-2 bg-surface-dark text-text-dark border-none';
 
@@ -2307,6 +2484,11 @@ function SensorMaintenanceCard({ sensor, saved, onSave, onDelete }) {
 
       {open && (
         <div className="mt-3 flex flex-col gap-2.5">
+          {copyable.length > 0 && (
+            <div>
+              <CopyLastPill onClick={copyLast} />
+            </div>
+          )}
           {fields.filter(visible).map(f => (
             <div key={f.key} className="flex items-center justify-between gap-3">
               <label className="text-[12px] font-semibold text-text-dark">
@@ -2356,9 +2538,14 @@ function SensorMaintenanceCard({ sensor, saved, onSave, onDelete }) {
   );
 }
 
-function MetSensorMaintenanceSection({ stationId, saved, onSave, onDelete, onComplete }) {
+function MetSensorMaintenanceSection({ stationId, saved, onSave, onDelete, onComplete, sensorScope = null }) {
   const [sensors, setSensors] = useState(null);
   const [error,   setError]   = useState(null);
+  const [lastVisit, setLastVisit] = useState(null);
+
+  useEffect(() => {
+    getStationLastVisit(stationId).then(setLastVisit).catch(() => {});
+  }, [stationId]);
 
   useEffect(() => {
     getStationSensors(stationId)
@@ -2368,22 +2555,23 @@ function MetSensorMaintenanceSection({ stationId, saved, onSave, onDelete, onCom
 
   useEffect(() => {
     if (!sensors) return;
-    onComplete(sensors.every(s => sensorMaintComplete(s, saved)));
-  }, [sensors, saved]);
+    onComplete(!scopeIsEmpty(sensorScope) && scopedSensors(sensors, sensorScope).every(s => sensorMaintComplete(s, saved)));
+  }, [sensors, saved, sensorScope]);
 
   if (error) return <div className="form-card text-[12px] text-error">{error}</div>;
   if (!sensors) return <div className="form-card text-[12px] text-text-light">Loading sensors…</div>;
-  if (sensors.length === 0) return null;
+  if (sensors.length === 0 || scopeIsEmpty(sensorScope)) return null;
+  const shown = scopedSensors(sensors, sensorScope);
 
-  const done = sensors.filter(s => sensorMaintComplete(s, saved)).length;
+  const done = shown.filter(s => sensorMaintComplete(s, saved)).length;
 
   return (
     <>
       <div className="flex items-center gap-1.5 pb-2 pt-1 text-[12px] font-semibold text-text-dark">
-        Sensor maintenance ({done}/{sensors.length} complete)
+        Sensor maintenance ({done}/{shown.length} complete)
       </div>
-      {sensors.map(s => (
-        <SensorMaintenanceCard key={s.id} sensor={s} saved={saved} onSave={onSave} onDelete={onDelete} />
+      {shown.map(s => (
+        <SensorMaintenanceCard key={s.id} sensor={s} saved={saved} onSave={onSave} onDelete={onDelete} lastVisit={lastVisit} />
       ))}
     </>
   );
@@ -2391,7 +2579,7 @@ function MetSensorMaintenanceSection({ stationId, saved, onSave, onDelete, onCom
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export default function ManualReadings({ visitId, stationId, dataFamily, isBarologger, onReadingsSaved, onLoggerUnavailable }) {
+export default function ManualReadings({ visitId, stationId, dataFamily, isBarologger, onReadingsSaved, onLoggerUnavailable, sensorScope = null, onScopeChange, onPurposesChange }) {
   const [saved,               setSaved]               = useState([]);
   const [loaded,              setLoaded]              = useState(false);
   const [metActs,                setMetActs]                = useState(() => new Set());
@@ -2456,8 +2644,7 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
       : dataFamily;
     const required = REQUIRED_TYPES[familyKey] || [];
     if (required.length === 0) return;
-    const savedTypes = new Set(saved.map(r => r.reading_type));
-    const readingsDone = required.every(t => savedTypes.has(t));
+    const readingsDone = readingsComplete({ saved, required, routine: isRoutine(purposesFromReadings(saved)) });
     const calibDone   = dataFamily !== 'met' || !metActs.has('calibration_check') || calibrationAllSaved;
     const confirmDone = dataFamily !== 'met' || !metActs.has('instrument_change') || sensorConfirmationDone;
     const maintDone   = dataFamily !== 'met' || !metActs.has('maintenance')       || sensorMaintDone;
@@ -2472,6 +2659,10 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
     if (op.visit_id !== visitId || op.type !== 'reading' || !result?.reading_type) return;
     setSaved(prev => [...prev.filter(r => r.reading_type !== result.reading_type), result]);
   }), [visitId]);
+
+  // Tell the visit what it is for, so the other steps ask only for what that purpose needs
+  const purposesKey = JSON.stringify(purposesFromReadings(saved));
+  useEffect(() => { onPurposesChange?.(JSON.parse(purposesKey)); }, [purposesKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function queueReading(reading) {
     await enqueue(reading);
@@ -2553,6 +2744,9 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
               extraReady={!metActs.has('instrument_change') || sensorConfirmationDone}
             >
               {({ locked }) => (<>
+          {(metActs.has('maintenance') || metActs.has('calibration_check') || metActs.has('instrument_change')) && (
+            <SensorScopePicker key={instrumentChangeKey} stationId={stationId} scope={sensorScope} onChange={onScopeChange} />
+          )}
           {metActs.has('instrument_change') && (
             <MetSensorConfirmationSection
               stationId={stationId}
@@ -2563,6 +2757,8 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
               onStaged={setStagedConfirmed}
               onAllConfirmed={setSensorConfirmationDone}
               onSensorsChanged={() => setInstrumentChangeKey(k => k + 1)}
+              sensorScope={sensorScope}
+              onScopeChange={onScopeChange}
             />
           )}
           {metActs.has('maintenance') && (!metActs.has('instrument_change') || sensorConfirmationDone) && (
@@ -2573,6 +2769,7 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
               onSave={handleSave}
               onDelete={handleDelete}
               onComplete={setSensorMaintDone}
+              sensorScope={sensorScope}
             />
           )}
           {metActs.has('calibration_check') && (!metActs.has('instrument_change') || sensorConfirmationDone) && (
@@ -2581,6 +2778,7 @@ export default function ManualReadings({ visitId, stationId, dataFamily, isBarol
               visitId={visitId}
               stationId={stationId}
               onComplete={setCalibrationAllSaved}
+              sensorScope={sensorScope}
             />
           )}
               </>)}

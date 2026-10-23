@@ -3,6 +3,7 @@ import { loadDraft, saveDraft, clearDraft, removeLegacyDraft } from './hooks/use
 import { createVisit, submitVisit, abandonVisit, getVisit, isTransientError, prefetchVisitData } from './services/api.js';
 import { enqueueOp, getOps, onOpSynced, onOpEvent, flushOutbox, clearVisitOps, discardLocalVisit } from './services/outbox.js';
 import { isLocalVisit, newLocalVisitId } from './utils/visitId.js';
+import { isRoutine, initialScope, detailsRequired, filesRequired } from './utils/visitPurpose.js';
 import { hasStoredFile } from './services/uploadQueue.js';  // also registers the upload handlers
 import { showNotice } from './services/notice.js';
 import { useSyncEngine, useOutboxStatus } from './hooks/useSyncEngine.js';
@@ -198,13 +199,14 @@ function AbandonSheet({ stationName, onKeep, onConfirm, abandoning }) {
 }
 
 // ── Submit confirmation sheet ──────────────────────────────────────────────
-function SubmitSheet({ draftVisit, visitFiles, hasReadings, onKeep, onConfirm, submitting }) {
+function SubmitSheet({ draftVisit, visitFiles, hasReadings, routine = true, onKeep, onConfirm, submitting }) {
   const fileCount   = visitFiles.filter(f => f.dbId).length;
   // Files picked while offline are stored on the device and upload by themselves; they are not "missing"
   const waitingCount = visitFiles.filter(f => !f.dbId && ['queued', 'uploading'].includes(f.parseState)).length;
   const parsedCount = visitFiles.filter(f => f.parseState === 'parsed').length;
-  const missingFiles    = fileCount === 0 && waitingCount === 0;
-  const missingReadings = !hasReadings;
+  // Only a visit that collects data has a logger file or a full set of readings to warn about
+  const missingFiles    = routine && fileCount === 0 && waitingCount === 0;
+  const missingReadings = routine && !hasReadings;
   return (
     <div className="back-sheet-overlay">
       <div className="back-sheet">
@@ -314,6 +316,7 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
   // UI state
   const [showDiscard,  setShowDiscard]  = useState(false);
   const [pendingStation, setPendingStation] = useState(null); // station user wants to start
+  const [purposes,       setPurposes]       = useState([]);   // purpose(s) chosen on the Readings step
   const [showAbandon,  setShowAbandon]  = useState(false);
   const [abandoning,   setAbandoning]   = useState(false);
   const [showSubmit,   setShowSubmit]   = useState(false);
@@ -406,7 +409,12 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
       }
 
       if (draft) {
-        setDraftVisit({ visitId: draft.visitId, station: draft.station });
+        setDraftVisit({
+          visitId: draft.visitId, station: draft.station,
+          // a visit saved before the sensor choice existed keeps every sensor (null)
+          sensorScope: draft.sensorScope === undefined ? null : draft.sensorScope,
+        });
+        setPurposes(draft.purposes || []);
         setFormState(draft.formState || null);
         setReadingsDone(!!draft.progress?.readingsDone);
         setDetailsAllDone(!!draft.progress?.detailsAllDone);
@@ -470,8 +478,10 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
     persistDraft(draftVisit.visitId, draftVisit.station, visitFiles, formState, {
       progress: { readingsDone, detailsAllDone, loggerUnavailable, visitSection },
       pendingSubmit,
+      purposes,
+      sensorScope: draftVisit.sensorScope ?? null,
     });
-  }, [draftVisit, visitFiles, formState, readingsDone, detailsAllDone, loggerUnavailable, visitSection, pendingSubmit, persistDraft]);
+  }, [draftVisit, visitFiles, formState, readingsDone, detailsAllDone, loggerUnavailable, visitSection, pendingSubmit, purposes, persistDraft]);
 
   // ── Start visit: create draft on server, save to IDB ──────────────────
   async function handleStartVisit(station) {
@@ -504,13 +514,14 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
       startedOffline = true;
     }
     try {
-      setDraftVisit({ visitId, station });
+      setDraftVisit({ visitId, station, sensorScope: initialScope() });
+      setPurposes([]);
       setFormState(null);
       setVisitFiles([]);
       setReadingsDone(false);
       setDetailsAllDone(false);
       setPendingSubmit(false);
-      await saveDraft({ visitId, station, formState: null, files: [], user_id: auth?.id ?? null, pendingCreate: startedOffline });
+      await saveDraft({ visitId, station, formState: null, files: [], user_id: auth?.id ?? null, pendingCreate: startedOffline, purposes: [], sensorScope: initialScope() });
       if (startedOffline) {
         await enqueueOp('visit_create', visitId, { station_id: station.id, station_name: station.display_name, visited_at: startedAt, client_ref: clientRef });
         showNotice('Visit started on this device — it registers with the server when signal returns.', { ms: 8000 });
@@ -664,9 +675,11 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
   const visitBadge    = draftVisit ? 1 : 0;  // dot indicator when draft exists
 
   // Section completion
-  const detailsDone      = detailsAllDone;
+  // What is needed follows from the purpose chosen on the Readings step (a download = routine visit)
+  const routine          = isRoutine(purposes);
+  const detailsDone      = detailsAllDone || !detailsRequired(routine);
   // A file stored on the device and waiting to upload counts: the queued submit goes out after it
-  const filesDone        = hasFiles || loggerUnavailable || visitFiles.some(f => ['queued', 'uploading'].includes(f.parseState));
+  const filesDone        = !filesRequired(routine) || hasFiles || loggerUnavailable || visitFiles.some(f => ['queued', 'uploading'].includes(f.parseState));
   const hasUnmappedFiles = visitFiles.some(f => f.hasUnmappedColumns);
   const completionMap    = { details: detailsDone, files: filesDone, readings: readingsDone };
 
@@ -787,6 +800,7 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
                     station={draftVisit.station}
                     formState={formState}
                     setFormState={setFormState}
+                    notesRequired={routine}
                     onDetailsDone={() => setDetailsAllDone(true)}
                   />
                 )}
@@ -796,6 +810,9 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
                     stationId={draftVisit.station.id}
                     dataFamily={draftVisit.station.data_family}
                     isBarologger={draftVisit.station.is_barologger ?? false}
+                    sensorScope={draftVisit.sensorScope ?? null}
+                    onPurposesChange={setPurposes}
+                    onScopeChange={scope => setDraftVisit(prev => (prev ? { ...prev, sensorScope: typeof scope === 'function' ? scope(prev.sensorScope ?? null) : scope } : prev))}
                     onReadingsSaved={() => setReadingsDone(true)}
                     onLoggerUnavailable={v => setLoggerUnavailable(v)}
                   />
@@ -917,6 +934,7 @@ export function FieldApp({ onExit, embedded = false, onGoToColumns, onUnmappedDe
           draftVisit={draftVisit}
           visitFiles={visitFiles}
           hasReadings={readingsDone}
+          routine={routine}
           onKeep={() => setShowSubmit(false)}
           onConfirm={handleSubmit}
           submitting={submitting}

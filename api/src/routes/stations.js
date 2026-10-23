@@ -55,6 +55,17 @@ router.get('/:id/raw-tips', async (req, res, next) => {
   }
 });
 
+// GET /api/stations/:id/last-visit
+// What earlier visits recorded here (site notes, condition answers, per-sensor maintenance answers) so the
+// next visit can offer them as a starting point.
+router.get('/:id/last-visit', async (req, res, next) => {
+  try {
+    res.json(await db.getLastVisitSnapshot(parseInt(req.params.id, 10)));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/stations/:id/power-specs
 // Latest solar capacity / charge controller model / battery capacity recorded at this station
 // (any technician) — used to prefill the met visit form.

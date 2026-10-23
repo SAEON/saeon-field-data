@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS followup_notes (
 );
 CREATE INDEX IF NOT EXISTS followup_notes_visit_idx ON followup_notes (visit_id, created_at);
 
--- Visits started offline carry a client-made reference, so a retried create returns the same visit
+-- Visits started offline carry a client-made reference
 ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS client_ref TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS field_visits_client_ref_uq
   ON field_visits (technician_id, client_ref) WHERE client_ref IS NOT NULL;
@@ -36,7 +36,7 @@ ALTER TABLE stations ADD COLUMN IF NOT EXISTS asset_no TEXT;
 ALTER TABLE met_instrument_types ADD COLUMN IF NOT EXISTS serial_expected BOOLEAN NOT NULL DEFAULT true;
 UPDATE met_instrument_types SET serial_expected = false WHERE category IN ('soil', 'leaf_wetness');
 
--- Unique active sensor identifiers (per model, ignoring case and surrounding spaces)
+-- Unique active sensor identifiers
 DO $$
 DECLARE
   dup text;
@@ -68,3 +68,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS station_sensors_active_serial_uq
 CREATE UNIQUE INDEX IF NOT EXISTS station_sensors_active_asset_uq
   ON station_sensors (instrument_type_id, lower(btrim(asset_no)))
   WHERE effective_to IS NULL AND btrim(asset_no) <> '';
+
+-- Calibration checks
+ALTER TABLE calibration_checks
+  ADD COLUMN IF NOT EXISTS action_taken  TEXT,
+  ADD COLUMN IF NOT EXISTS offset_before NUMERIC,
+  ADD COLUMN IF NOT EXISTS performed_at  TIMESTAMPTZ;   -- when the check and any offset were done (device time), not when it synced
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'calibration_checks_action_check') THEN
+    ALTER TABLE calibration_checks
+      ADD CONSTRAINT calibration_checks_action_check
+      CHECK (action_taken IS NULL OR action_taken IN ('passed', 'offset_applied', 'raw_kept', 'replace_sensor'));
+  END IF;
+END $$;
+UPDATE calibration_checks
+SET    action_taken = CASE
+         WHEN within_tolerance IS NOT FALSE THEN 'passed'
+         WHEN offset_applied   IS NOT NULL  THEN 'offset_applied'
+         ELSE 'raw_kept'
+       END
+WHERE  action_taken IS NULL;
+
+ALTER TABLE met_instrument_types ADD COLUMN IF NOT EXISTS review_rules JSONB NOT NULL DEFAULT '{"consecutive_fails": 2}';
+UPDATE calibration_checks SET performed_at = created_at WHERE performed_at IS NULL;

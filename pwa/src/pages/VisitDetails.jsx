@@ -2,18 +2,22 @@
 // The visit record already exists on the server (created by App.jsx on "Start visit").
 // This component PATCHes /api/visits/:id whenever fields change (debounced 800ms).
 import { useState, useEffect, useRef } from 'react';
-import { updateVisit, getVisit, createReading, isTransientError } from '../services/api.js';
+import { updateVisit, getVisit, createReading, getStationLastVisit, isTransientError } from '../services/api.js';
+import { parseSiteNotes } from '../utils/prefill.js';
+import CopyLastPill from '../components/CopyLastPill.jsx';
 import { enqueueOp, enqueueOpReplacing, getOps, overlayPending, onOpSynced } from '../services/outbox.js';
 
 const PROMPTS = [
   {
     id: 'access',
     label: 'Site access',
+    allClear: 'No issues',     // cannot be combined with any reported problem
     options: ['No issues', 'Gate locked — used key', 'Road flooded', 'Road damaged', '4x4 required', 'Other'],
   },
   {
     id: 'equipment',
     label: 'Equipment',
+    allClear: 'All good',      // cannot be combined with any reported problem
     options: ['All good', 'Minor corrosion', 'Vandalism noted', 'Animal damage', 'Flooding near sensor', 'Equipment missing'],
   },
 ];
@@ -34,18 +38,30 @@ function fmtCoverageDate(iso) {
   return new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-export default function VisitDetails({ visitId, station, formState, setFormState, onDetailsDone }) {
+export default function VisitDetails({ visitId, station, formState, setFormState, onDetailsDone, notesRequired = true }) {
   const { date: todayDate, time: nowTime } = nowDateTime();
 
   // Initialise from restored formState (draft resume) or defaults
   const [visitDate,  setVisitDate]  = useState(formState?.visitDate  || todayDate);
   const [visitTime,  setVisitTime]  = useState(formState?.visitTime  || nowTime);
-  const [selections, setSelections] = useState(formState?.selections || { access: [], equipment: [] });
+  // "No issues" / "All good" stand alone: a saved draft that has them next to a problem keeps the problems
+  const [selections, setSelections] = useState(() => {
+    const saved = formState?.selections || { access: [], equipment: [] };
+    return Object.fromEntries(PROMPTS.map(p => {
+      const arr = saved[p.id] || [];
+      return [p.id, p.allClear && arr.length > 1 ? arr.filter(v => v !== p.allClear) : arr];
+    }));
+  });
   const [extraNotes, setExtraNotes] = useState(formState?.extraNotes || '');
   const [otherNotes, setOtherNotes] = useState(formState?.otherNotes || {});
   const [saveState,    setSaveState]    = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
   const [raining,      setRaining]      = useState(null);   // null | 'true' | 'false'
   const [rainConfirmed, setRainConfirmed] = useState(false);
+  const [lastVisit,    setLastVisit]    = useState(null);   // what the previous visit recorded here
+
+  useEffect(() => {
+    if (station?.id) getStationLastVisit(station.id).then(setLastVisit).catch(() => {});
+  }, [station?.id]);
 
   // Load existing raining readings on mount (draft resume)
   useEffect(() => {
@@ -111,13 +127,17 @@ export default function VisitDetails({ visitId, station, formState, setFormState
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visitDate, visitTime, selections, extraNotes, otherNotes]);
 
+  // Choosing "No issues" / "All good" clears the other choices in that group, and choosing a problem clears it
   function toggle(id, opt) {
+    const clear = PROMPTS.find(p => p.id === id)?.allClear;
+    if (opt === clear) setOtherNotes(prev => ({ ...prev, [id]: '' }));
     setSelections(prev => {
       const arr = prev[id];
-      return {
-        ...prev,
-        [id]: arr.includes(opt) ? arr.filter(v => v !== opt) : [...arr, opt],
-      };
+      let next;
+      if (arr.includes(opt))      next = arr.filter(v => v !== opt);
+      else if (opt === clear)     next = [clear];
+      else                        next = [...arr.filter(v => v !== clear), opt];
+      return { ...prev, [id]: next };
     });
   }
 
@@ -162,7 +182,8 @@ export default function VisitDetails({ visitId, station, formState, setFormState
 
   const isRainfallReady = station?.data_family !== 'rainfall' ||
     (raining !== null && (raining === 'true' || rainConfirmed));
-  const allDetailsDone = allPromptsDone && isRainfallReady;
+  // Only a visit that collects data needs the site-notes prompts and the rainfall question
+  const allDetailsDone = !notesRequired || (allPromptsDone && isRainfallReady);
 
   useEffect(() => {
     if (allDetailsDone) onDetailsDone?.();
@@ -254,17 +275,30 @@ export default function VisitDetails({ visitId, station, formState, setFormState
         </div>
 
         {/* ── Site notes card ────────────────────────────────────── */}
-        <div className={`form-card ${!allPromptsDone ? 'form-card--alert' : ''}`} style={{ marginBottom: station?.data_family === 'rainfall' ? 12 : 24 }}>
+        <div className={`form-card ${notesRequired && !allPromptsDone ? 'form-card--alert' : ''}`} style={{ marginBottom: station?.data_family === 'rainfall' ? 12 : 24 }}>
           <div className="flex items-center justify-between mb-1">
             <span className="text-[13px] font-semibold text-text-dark">Site notes</span>
             {!allPromptsDone
-              ? <span className="text-[10px] font-semibold text-warning bg-warning-light px-2 py-0.5 rounded-full">Required</span>
+              ? (notesRequired
+                  ? <span className="text-[10px] font-semibold text-warning bg-warning-light px-2 py-0.5 rounded-full">Required</span>
+                  : <span className="text-[10px] font-semibold text-text-light bg-surface-dark px-2 py-0.5 rounded-full">Optional</span>)
               : <span className="text-[10px] font-semibold text-success bg-success-light px-2 py-0.5 rounded-full">✓ Done</span>
             }
           </div>
           <div className="text-[11px] text-text-light mb-3 leading-relaxed">
             Select all that apply in each category.
           </div>
+          {(() => {
+            // Offer last visit's answers as a starting point, only while nothing has been chosen yet
+            const last = parseSiteNotes(lastVisit?.notes, PROMPTS);
+            const nothingChosen = PROMPTS.every(p => selections[p.id].length === 0) && !extraNotes.trim();
+            if (!last || !nothingChosen) return null;
+            return (
+              <div className="mb-3">
+                <CopyLastPill onClick={() => { setSelections(last.selections); setOtherNotes(last.otherNotes); }} />
+              </div>
+            );
+          })()}
 
           {PROMPTS.map((section, si) => (
             <div key={section.id} className={si < PROMPTS.length - 1 ? 'mb-3.5' : ''}>
@@ -343,13 +377,15 @@ export default function VisitDetails({ visitId, station, formState, setFormState
         {/* ── Rainfall conditions card ────────────────────────────── */}
         {station?.data_family === 'rainfall' && (
           <div
-            className={`form-card ${!isRainfallReady ? 'form-card--alert' : ''}`}
+            className={`form-card ${notesRequired && !isRainfallReady ? 'form-card--alert' : ''}`}
             style={{ marginBottom: 24 }}
           >
             <div className="flex items-center justify-between mb-3">
               <span className="text-[13px] font-semibold text-text-dark">Rainfall conditions</span>
               {!isRainfallReady
-                ? <span className="text-[10px] font-semibold text-warning bg-warning-light px-2 py-0.5 rounded-full">Required</span>
+                ? (notesRequired
+                    ? <span className="text-[10px] font-semibold text-warning bg-warning-light px-2 py-0.5 rounded-full">Required</span>
+                    : <span className="text-[10px] font-semibold text-text-light bg-surface-dark px-2 py-0.5 rounded-full">Optional</span>)
                 : <span className="text-[10px] font-semibold text-success bg-success-light px-2 py-0.5 rounded-full">✓ Done</span>
               }
             </div>
